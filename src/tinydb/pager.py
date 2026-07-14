@@ -1,0 +1,1 @@
+"""4KB fixed-size pages; mmap/bytearray backends; magic header; schema version. <= 250 lines."""

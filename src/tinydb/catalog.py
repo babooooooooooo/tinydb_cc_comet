@@ -1,0 +1,1 @@
+"""Table metadata persisted as JSON on page 1 (INT-as-string). <= 100 lines."""

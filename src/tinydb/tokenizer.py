@@ -1,0 +1,1 @@
+"""SQL lexer: identifier/keyword/int/float/text/bool/punctuation. <= 200 lines."""
