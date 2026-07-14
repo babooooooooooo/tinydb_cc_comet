@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/tinydb-mvp/proposal.md",
+  "openspec_design": "openspec/changes/tinydb-mvp/design.md",
+  "openspec_tasks": "openspec/changes/tinydb-mvp/tasks.md",
+  "openspec_delta_spec": "openspec/changes/tinydb-mvp/specs/python-api/spec.md",
+  "handoff_context": "openspec/changes/tinydb-mvp/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/tinydb-mvp/.comet/handoff/design-context.md"
+}
