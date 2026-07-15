@@ -7,6 +7,8 @@ from tinydb.errors import ParseError
 from tinydb.tokenizer import Token
 
 SUPPORTED_TYPES = {"INT", "TEXT", "FLOAT", "BOOL"}
+SUPPORTED_OPS = {"="}
+_LITERAL_TYPES = ("INT", "FLOAT", "TEXT", "BOOL")
 
 
 # --- AST nodes ---------------------------------------------------------------
@@ -42,32 +44,32 @@ class DropTable:
 
 @dataclass
 class Insert:
-    """INSERT INTO <table> [(cols)] VALUES (...) statement (parsed in Task 16)."""
+    """INSERT INTO <table> [(cols)] VALUES (...), (...) statement."""
 
     table: str
     columns: list  # list[str]
-    values: list  # list[Any]
+    values: list  # list[list[Any]]
     line: int
     col: int
 
 
 @dataclass
 class Select:
-    """SELECT <cols> FROM <table> [WHERE <col> <op> <val>] statement (parsed in Task 16)."""
+    """SELECT <cols> FROM <table> [WHERE <col> <op> <val>] statement."""
 
     table: str
     columns: list  # list[str]  ("*" or column names)
-    where: Optional[tuple]  # (column, op, value) | None
+    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
     line: int
     col: int
 
 
 @dataclass
 class Delete:
-    """DELETE FROM <table> [WHERE <col> <op> <val>] statement (parsed in Task 16)."""
+    """DELETE FROM <table> [WHERE <col> <op> <val>] statement."""
 
     table: str
-    where: Optional[tuple]  # (column, op, value) | None
+    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
     line: int
     col: int
 
@@ -132,8 +134,19 @@ class _Parser:
             return self._parse_create_table()
         if kw == "DROP":
             return self._parse_drop_table()
-        # INSERT / SELECT / DELETE land in Task 16.
-        raise ParseError(t.line, t.col, f"{kw} not supported yet")
+        if kw == "INSERT":
+            return self._parse_insert()
+        if kw == "SELECT":
+            return self._parse_select()
+        if kw == "DELETE":
+            return self._parse_delete()
+        # All five supported statement keywords are dispatched above.
+        # Reaching here means a KEYWORD (e.g. TABLE / INTO / VALUES / FROM /
+        # WHERE / INT / TEXT / FLOAT / BOOL) appeared where a statement was
+        # expected — that is a genuine syntax error, not an "unsupported"
+        # statement. Surface the offending token instead of inventing a fake
+        # "X not supported" message.
+        raise ParseError(t.line, t.col, f"unexpected keyword {kw}")
 
     # --- CREATE TABLE -------------------------------------------------------
 
@@ -200,6 +213,149 @@ class _Parser:
             # Covers EOF, KEYWORD, PUNCT — never bare KeyError.
             raise ParseError(t.line, t.col, "expected table name")
         return DropTable(name=self.advance().value, line=kw.line, col=kw.col)
+
+    # --- INSERT INTO ... VALUES (...) --------------------------------------
+
+    def _parse_insert(self) -> Insert:
+        kw = self.expect_keyword("INSERT")
+        self.expect_keyword("INTO")
+
+        t = self.peek()
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected table name")
+        table = self.advance().value
+
+        # Column list is required by the MVP grammar; INSERT without an
+        # explicit column list is rejected for clarity.
+        self.expect("PUNCT", "(")
+        cols: list = []
+        while True:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column name")
+            cols.append(self.advance().value)
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+        self.expect("PUNCT", ")")
+
+        self.expect_keyword("VALUES")
+
+        values: list = []
+        while True:
+            self.expect("PUNCT", "(")
+            row: list = []
+            if self.peek().type == "PUNCT" and self.peek().value == ")":
+                tok = self.peek()
+                raise ParseError(tok.line, tok.col, "expected literal")
+            while True:
+                v = self.advance()
+                if v.type not in _LITERAL_TYPES:
+                    raise ParseError(v.line, v.col, "expected literal")
+                row.append(v.value)
+                if self.peek().type == "PUNCT" and self.peek().value == ",":
+                    self.advance()
+                    continue
+                break
+            if len(row) != len(cols):
+                raise ParseError(
+                    kw.line, kw.col,
+                    f"value count mismatch: got {len(row)}, expected {len(cols)}",
+                )
+            values.append(row)
+            self.expect("PUNCT", ")")
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+
+        return Insert(
+            table=table, columns=cols, values=values,
+            line=kw.line, col=kw.col,
+        )
+
+    # --- SELECT [cols] FROM <table> [WHERE ...] ----------------------------
+
+    def _parse_select(self) -> Select:
+        kw = self.expect_keyword("SELECT")
+
+        cols: list = []
+        if self.peek().type == "PUNCT" and self.peek().value == "*":
+            self.advance()
+            cols = ["*"]
+        else:
+            if self.peek().type == "EOF":
+                t = self.peek()
+                raise ParseError(t.line, t.col, "expected column or *")
+            while True:
+                ct = self.peek()
+                if ct.type != "IDENT":
+                    raise ParseError(ct.line, ct.col, "expected column or *")
+                cols.append(self.advance().value)
+                if self.peek().type == "PUNCT" and self.peek().value == ",":
+                    self.advance()
+                    continue
+                break
+
+        # `FROM` is mandatory; SELECT without FROM is invalid in the MVP.
+        ft = self.peek()
+        if not (ft.type == "KEYWORD" and ft.value == "FROM"):
+            raise ParseError(ft.line, ft.col, "expected FROM")
+        self.advance()
+
+        t = self.peek()
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected table name")
+        table = self.advance().value
+
+        where = self._parse_where()
+
+        return Select(
+            table=table, columns=cols, where=where,
+            line=kw.line, col=kw.col,
+        )
+
+    # --- DELETE FROM <table> [WHERE ...] -----------------------------------
+
+    def _parse_delete(self) -> Delete:
+        kw = self.expect_keyword("DELETE")
+        self.expect_keyword("FROM")
+
+        t = self.peek()
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected table name")
+        table = self.advance().value
+
+        where = self._parse_where()
+
+        return Delete(table=table, where=where, line=kw.line, col=kw.col)
+
+    # --- shared WHERE clause helper ----------------------------------------
+
+    def _parse_where(self) -> Optional[tuple]:
+        """Parse `WHERE <col> <op> <literal>` if present; otherwise return None."""
+        if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
+            return None
+        self.advance()
+
+        ct = self.peek()
+        if ct.type != "IDENT":
+            raise ParseError(ct.line, ct.col, "expected column in WHERE")
+        cname = self.advance().value
+
+        op_tok = self.advance()
+        if op_tok.type != "PUNCT" or op_tok.value not in SUPPORTED_OPS:
+            op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
+            raise ParseError(
+                op_tok.line, op_tok.col,
+                f"operator {op_repr} not supported; MVP supports only =",
+            )
+
+        lit = self.advance()
+        if lit.type not in _LITERAL_TYPES:
+            raise ParseError(lit.line, lit.col, "expected literal")
+        return (cname, op_tok.value, lit.value)
 
 
 # --- Public entry ------------------------------------------------------------
