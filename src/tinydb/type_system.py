@@ -16,3 +16,17 @@ def decode_int(buf: bytes, offset: int) -> tuple[int, int]:
     if offset + _INT_SIZE > len(buf):
         raise ValueError(f"INT decode truncated at offset {offset}")
     return struct.unpack_from(_INT_FMT, buf, offset)[0], offset + _INT_SIZE
+
+
+def encode_text(value: str) -> bytes:
+    data = value.encode("utf-8")
+    return struct.pack(">H", len(data)) + data
+
+
+def decode_text(buf: bytes, offset: int) -> tuple[str, int]:
+    if offset + 2 > len(buf):
+        raise ValueError("TEXT length prefix truncated")
+    (n,) = struct.unpack_from(">H", buf, offset)
+    if offset + 2 + n > len(buf):
+        raise ValueError(f"TEXT payload truncated (need {n} bytes)")
+    return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
