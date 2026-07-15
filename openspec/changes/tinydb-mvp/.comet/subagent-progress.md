@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 16: Parser — INSERT / SELECT / DELETE + StatementList（tasks.md §7.6-7.8）`
-- **openspec task**: `7.6/7.7/7.8 parse_insert + parse_select + parse_delete + 纯函数确定性测试 + SCN-06 multi-statement`
-- **阶段**: `ready_to_dispatch`（Task 15 出关后启动）
+- **plan task**: `### Task 17: Executor — DDL（CREATE/DROP）（tasks.md §8.1-8.3）`
+- **openspec task**: `8.1/8.2/8.3 Executor(pager, catalog).run() + _exec_create_table + _exec_drop_table`
+- **阶段**: `ready_to_dispatch`（Task 16 + C-1 + C-2 出关后启动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 15 完成（Parser AST 骨架 + CREATE/DROP）+ 协调者修 tokenizer.KEYWORDS 缺 DELETE (commit `d235ace`)
+- **依赖**: Task 16 完成 + C-1 governance (tokenizer PUNCT +`  `) + C-2 governance (spec line 127)
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +29,27 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 16: Parser — INSERT / SELECT / DELETE + StatementList（tasks.md §7.6-7.9）** — ✅ 已勾选（经历 1 轮 review + C-1/C-2 governance commits）
+  - implementer(DONE_WITH_CONCERNS, TDD RED→GREEN, 16 测试, 369 行) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **3 Important I-1/I-2/I-3 + 4 Minor M-1..M-4**)
+  - **I-1 (M-3 AST 泛型收紧)** — docstring 注释妥协，运行时仍是裸 `list` / `Optional[tuple]`；实际 type hints 推迟到 Task 21 hardening pass 或 v2 比较运算符扩展窗口
+  - **C-1 governance** (I-2): commit `305ebfd` — 扩展 `tokenizer.py:125` PUNCT 集从 `(),;=*` → `(),;=*<>` + 新增 `test_tokenize_punctuation_comparison_ops` 回归测试 + SCN-04 测试改回端到端 `tokenize()` 链路 + tasks.md §6.6 punctuation 列表同步。**真实影响**: spec §REQ-PARSE-005-SCN-04 要求解析 `WHERE id > 1` 并 raise ParseError，但 tokenize 阶段会因 `>` 不在 PUNCT 集而 raise TokenError；实施者用 pre-built Token 绕过 tokenizer 跑测试。**修复后端到端验证链路恢复**。
+  - **C-2 governance** (I-3): commit `496080f` — 修 `spec.md:127` 多语句示例从 `INSERT INTO t VALUES (1)` → `INSERT INTO t(id) VALUES (1)` + plan §Task 16 line 2110 + test_parser.py SCN-02 注释清理。**真实影响**: spec 自相矛盾（line 127 示例无列名 vs line 67 REQ-PARSE-004 grammar 要求有列名）。
+  - 提交链: `4ebef33`（实现 + 11 测试 + M-3/M-4/M-5 已处理）+ `305ebfd`（C-1 governance）+ `496080f`（C-2 governance）+ `a4ced35`（plan+tasks.md 勾选）
+  - **Implementer 关键设计**:
+    1. **WHERE helper 抽取干净**: `_parse_where(self) -> Optional[tuple]` (parser.py:336-358) 消除 SELECT/DELETE 重复逻辑
+    2. **5-keyword if-elif dispatch**: CREATE → DROP → INSERT → SELECT → DELETE 顺序排列；剩余 KEYWORD 走精确 `f"unexpected keyword {kw}"` 兜底（无残留 `"X not supported yet"`）
+    3. **AST 字段 docstring 注释**: `# list[list[Any]]` / `# Optional[tuple[str, str, Any]]` Python 运行时不强校验，但提供 contract 说明
+    4. **错误消息统一**: `"expected X"` / `"duplicate column X"` / `"value count mismatch: got N, expected M"` / `"operator X not supported; MVP supports only ="`
+  - **Reviewer 25 探针** 全过（含 SCN-04 pre-built token 验证 + multi-statement 位置 + 兜底 KEYWORD 起始 + purity 双调用一致性）
+  - 16/16 parser + 107/107 全量（106 + C-1 回归测试 1）
+  - Opportunistic 队列追加:
+    - M-1 (行数 369 vs plan 期望 ≤ 250 +47%, 硬上限 600 内)
+    - M-2 (SELECT no-FROM 错误位置指向 EOF 而非 `id` 后)
+    - M-3 (无列名 INSERT 错误消息措辞)
+    - M-4 (parse_statement_list 无 `;` 分隔也允许多语句, 但 spec 未禁)
+    - I-1/M-3 (AST 实际 type hints 推迟到 hardening pass)
+    - C-1/C-2 同类潜在问题: plan §Task 18/19/20/27 (executor + database API + e2e) 含 `INSERT INTO t VALUES (1)` 无列名示例，需后续 governance
 
 - **Task 15: Parser — AST 节点 + parse() 入口 + CREATE/DROP（tasks.md §7.1-7.5）** — ✅ 已勾选（经历 1 轮 review-fix + 协调者 DELETE keyword fix）
   - implementer(DONE, TDD RED→GREEN, 5 测试, 213 行, ≤ 600 预算 35% 使用率) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **1 Important I-1 tokenizer.KEYWORDS 缺 DELETE**, 5 Minor M-1..M-5)
