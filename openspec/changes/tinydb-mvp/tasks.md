@@ -75,7 +75,7 @@
 ## 8. Executor（spec 跨 storage-engine row CRUD + sql-minimal-parser parse-then-execute）
 
 - [x] 8.1 编写 `tests/integration/test_executor.py`，红：覆盖 DDL/DML 在真 storage 上的完整流程、PageFull 时新页分配、tombstone 过滤、严格类型守卫在 execute 层抛 TypeError
-- [x] 8.2 实现 `executor.py::Executor(pager, catalog)` 类，入口 `run(stmt) -> list[Row]`
+- [x] 8.2 实现 `executor.py::Executor(pager, catalog)` 类，入口 `execute(stmt) -> list[Row]`
 - [x] 8.3 实现 `Executor._exec_create_table` / `_exec_drop_table`，落 catalog + alloc/dealloc root page
 - [ ] 8.4 实现 `Executor._exec_insert`：定位表 root page，扫描到有空槽的页（满则 alloc 新页），调用 slotted_page.insert + row_codec.encode_row
 - [ ] 8.5 实现线性扫描 helper：迭代表所有 data pages，过滤 tombstone，返回解码后的 `(slot_id, decoded_row)` 列表
@@ -87,7 +87,7 @@
 - [ ] 9.1 编写 `tests/integration/test_database_api.py`，红：覆盖 file-backed 持久化、`:memory:` 不写盘、context manager、execute 行为（SELECT/DDL/DML/multi-statement）、ParseError / ExecutionError 传播、Row 属性访问 / 迭代 / repr / 等价
 - [ ] 9.2 实现 `database.py::Database` 类：`__init__(path)`、`__enter__`、`__exit__`、`close()`、`execute(sql)`
 - [ ] 9.3 实现 `Row` 数据类：`__init__(values, columns)`、`__getattr__`、`__iter__`、`__repr__`、`__eq__`、`__iter__` schema 顺序
-- [ ] 9.4 在 `Database.execute` 内串联：tokenize → parse → executor.run → 包装为 list[Row] 或 []
+- [ ] 9.4 在 `Database.execute` 内串联：tokenize → parse → executor.execute → 包装为 list[Row] 或 []
 - [ ] 9.5 错误映射：parser 抛 `ParseError` 时重新 raise 为 `tinydb.errors.ParseError`（保持兼容）；executor 抛 `KeyError(no such table)` 等转为 `tinydb.errors.ExecutionError`
 - [ ] 9.6 MVP 限定保证：`Database` 类**不实现** `begin` / `commit` / `rollback`（留给 tinydb-acid），并在 docstring 明确声明
 

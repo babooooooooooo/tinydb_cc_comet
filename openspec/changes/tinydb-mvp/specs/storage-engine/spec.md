@@ -115,7 +115,7 @@ The system SHALL persist the catalog (table name to schema + root_page_id) as JS
 
 ### Requirement: Row CRUD executor operations
 
-The executor SHALL provide the following operations against the storage engine, accessible via `Executor.run(stmt)`.
+The executor SHALL provide the following operations against the storage engine, accessible via `Executor.execute(stmt)`.
 
 #### Scenario: Full table scan returns all non-deleted rows
 - **WHEN** scanning a table with three rows where one is tombstoned

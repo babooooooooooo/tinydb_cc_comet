@@ -52,7 +52,7 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                          Executor                                │
-│   Executor(pager, catalog).run(stmt) → list[Row]                │
+│   Executor(pager, catalog).execute(stmt) → list[Row]             │
 │        ├─ DDL: catalog.{create,drop}_table                       │
 │        └─ DML: scan / filter / project / mutate                 │
 └─────────────────────────────┬───────────────────────────────────┘

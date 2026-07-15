@@ -143,7 +143,7 @@ OpenSpec remains the canonical capability spec. This handoff is a deterministic,
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                          Executor                                │
-│   Executor(pager, catalog).run(stmt) → list[Row]                │
+│   Executor(pager, catalog).execute(stmt) → list[Row]             │
 │        ├─ DDL: catalog.{create,drop}_table                       │
 │        └─ DML: scan / filter / project / mutate                 │
 └─────────────────────────────┬───────────────────────────────────┘
@@ -260,7 +260,7 @@ Full source: openspec/changes/tinydb-mvp/design.md
 ## 8. Executor（spec 跨 storage-engine row CRUD + sql-minimal-parser parse-then-execute）
 
 - [ ] 8.1 编写 `tests/integration/test_executor.py`，红：覆盖 DDL/DML 在真 storage 上的完整流程、PageFull 时新页分配、tombstone 过滤、严格类型守卫在 execute 层抛 TypeError
-- [ ] 8.2 实现 `executor.py::Executor(pager, catalog)` 类，入口 `run(stmt) -> list[Row]`
+- [ ] 8.2 实现 `executor.py::Executor(pager, catalog)` 类，入口 `execute(stmt) -> list[Row]`
 - [ ] 8.3 实现 `Executor._exec_create_table` / `_exec_drop_table`，落 catalog + alloc/dealloc root page
 - [ ] 8.4 实现 `Executor._exec_insert`：定位表 root page，扫描到有空槽的页（满则 alloc 新页），调用 slotted_page.insert + row_codec.encode_row
 
