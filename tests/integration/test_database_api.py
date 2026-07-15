@@ -10,7 +10,6 @@ import pytest
 
 import tinydb
 from tinydb import Database, Row, errors
-from tinydb.errors import ParseError, ExecutionError
 
 
 # --- REQ-API-001: package re-exports + version ------------------------------
@@ -30,7 +29,6 @@ def test_version_string():
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-API-001-SCN-03")
 def test_errors_module_re_exported():
     assert tinydb.errors is errors
 
@@ -67,7 +65,6 @@ def test_context_manager_closes(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-API-002-SCN-04")
 def test_reopen_preserves_schema(tmp_path):
     p = str(tmp_path / "db.db")
     with Database(p) as db:
@@ -75,7 +72,7 @@ def test_reopen_preserves_schema(tmp_path):
         db.execute("INSERT INTO t(id, name) VALUES (1, 'a')")
     with Database(p) as db2:
         rows = db2.execute("SELECT * FROM t")
-    assert rows == [Row(values=[1, "a"], columns=["id", "name"])]
+    assert rows == [Row(values=(1, "a"), columns=("id", "name"))]
 
 
 # --- REQ-API-003: execute pipeline ------------------------------------------
@@ -93,17 +90,15 @@ def test_select_returns_list_of_rows(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-API-003-SCN-02")
 def test_select_named_projection(tmp_path):
     with Database(str(tmp_path / "db.db")) as db:
         db.execute("CREATE TABLE t(id INT, name TEXT)")
         db.execute("INSERT INTO t(id, name) VALUES (1, 'a')")
         rows = db.execute("SELECT name FROM t")
-    assert rows == [Row(values=["a"], columns=["name"])]
+    assert rows == [Row(values=("a",), columns=("name",))]
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-API-003-SCN-03")
 def test_insert_returns_empty_list(tmp_path):
     with Database(str(tmp_path / "db.db")) as db:
         db.execute("CREATE TABLE t(id INT)")
@@ -189,13 +184,12 @@ def test_row_equality(tmp_path):
         db.execute("INSERT INTO t(id) VALUES (1)")
         rows = db.execute("SELECT * FROM t")
     assert rows[0] == rows[0]
-    assert rows[0] == Row(values=[1], columns=["id"])
-    assert rows[0] != Row(values=[2], columns=["id"])
-    assert rows[0] != Row(values=[1], columns=["other"])
+    assert rows[0] == Row(values=(1,), columns=("id",))
+    assert rows[0] != Row(values=(2,), columns=("id",))
+    assert rows[0] != Row(values=(1,), columns=("other",))
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-API-004-SCN-05")
 def test_row_unknown_attribute_raises(tmp_path):
     with Database(str(tmp_path / "db.db")) as db:
         db.execute("CREATE TABLE t(id INT)")
@@ -233,3 +227,44 @@ def test_database_docstring_mentions_non_acid():
 def test_database_has_no_transaction_methods():
     for m in ("begin", "commit", "rollback"):
         assert not hasattr(Database, m), f"Database must not have {m}"
+
+
+# --- Resource lifecycle / Row invariants (Task 20 code-quality follow-up) ---
+
+
+@pytest.mark.integration
+def test_database_close_is_idempotent(tmp_path):
+    """Calling ``close()`` twice must not raise; first call flushes+closes,
+    second is a no-op against the already-released Pager."""
+    p = tmp_path / "db.db"
+    db = Database(str(p))
+    db.execute("CREATE TABLE t(id INT)")
+    db.close()
+    db.close()  # idempotent: Pager.close() guards on ``_mmap is not None``
+    with Database(str(p)) as db2:
+        rows = db2.execute("SELECT * FROM t")
+    assert rows == []
+
+
+@pytest.mark.integration
+def test_context_manager_exception_path(tmp_path):
+    """``with``-body exception still triggers ``close()`` (and flush) via __exit__."""
+    p = tmp_path / "db.db"
+    with pytest.raises(RuntimeError, match="user"):
+        with Database(str(p)) as db:
+            db.execute("CREATE TABLE t(id INT)")
+            db.execute("INSERT INTO t(id) VALUES (1)")
+            raise RuntimeError("user error")
+    # After exception, reopen and verify schema/row was persisted before close
+    with Database(str(p)) as db2:
+        rows = db2.execute("SELECT * FROM t")
+    assert len(rows) == 1 and rows[0].id == 1
+
+
+@pytest.mark.integration
+def test_row_length_mismatch_raises():
+    """Row(values, columns) with unequal lengths must raise ValueError immediately."""
+    with pytest.raises(ValueError, match="equal lengths"):
+        Row(values=(1, 2), columns=("id",))
+    with pytest.raises(ValueError, match="equal lengths"):
+        Row(values=(1,), columns=("id", "name"))
