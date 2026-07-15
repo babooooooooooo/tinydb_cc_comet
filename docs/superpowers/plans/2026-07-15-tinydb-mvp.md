@@ -1334,7 +1334,7 @@ git commit -m "feat(slotted-page): add insert/delete/update/get with tombstone r
 - Test: `tests/unit/test_row_codec.py`
 - Create: `src/tinydb/row_codec.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/unit/test_row_codec.py
@@ -1367,12 +1367,12 @@ def test_decode_row_roundtrip_all_populated():
     assert decoded == original
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_row_codec.py -v`
 Expected: ImportError
 
-- [ ] **Step 3: 实现 row_codec**
+- [x] **Step 3: 实现 row_codec**
 
 ```python
 # src/tinydb/row_codec.py
@@ -1421,12 +1421,12 @@ def decode_row(buf: bytes, schema: list[tuple[str, str]]) -> list:
     return out
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_row_codec.py -v`
 Expected: PASS（4 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/row_codec.py tests/unit/test_row_codec.py

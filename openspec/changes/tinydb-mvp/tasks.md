@@ -40,7 +40,7 @@
 - [x] 4.5 实现 `SlottedPage.delete(slot_id)`：标记 tombstone（offset=0xFFFF），绿：跑通 tombstone 用例
 - [x] 4.6 实现 `SlottedPage.update(slot_id, row_bytes)`：同长或更短则在原位覆盖，否则 raise，绿：跑通 in-place update 用例
 - [x] 4.7 实现 `SlottedPage.get(slot_id)`：返回解码后的字节或 None（tombstone）
-- [ ] 4.8 在 `type_system.py` 或新文件 `row_codec.py` 中实现 `encode_row(values, schema)` 与 `decode_row(bytes, schema)`，含 null bitmap，绿：跑通 row encoding 用例
+- [x] 4.8 在 `type_system.py` 或新文件 `row_codec.py` 中实现 `encode_row(values, schema)` 与 `decode_row(bytes, schema)`，含 null bitmap，绿：跑通 row encoding 用例
 
 ## 5. 存储引擎 · Catalog（spec: storage-engine, catalog 部分）
 
