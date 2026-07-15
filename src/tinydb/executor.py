@@ -202,16 +202,14 @@ class Executor:
             return pid
 
     def _insert_with_overflow(self, ti: TableInfo, row_bytes: bytes) -> int:
-        """Split ``row_bytes``: inline first chunk (FLAG_SPILL_START) + overflow chain.
+        """Spill a row exceeding MAX_INLINE into an overflow chain.
 
-        The first chunk lands inline so the data page carries the bitmap
-        and first part of the row. Each remaining chunk is written to a
-        fresh ``page_type=2`` overflow page; pages are linked via
-        ``overflow_next`` and the chain ends with NULL_PAGE_ID. Returns
-        the data page id that owns the first chunk.
+        The first chunk lands inline so the data page carries the slot entry (with
+        FLAG_SPILL_START set) plus the first chunk of the row. Subsequent chunks go
+        into overflow pages (page_type=2) linked via overflow_next.
         """
-        first_chunk = bytes(row_bytes[:_CHUNK_SIZE])
-        rest = bytes(row_bytes[_CHUNK_SIZE:])
+        first_chunk = row_bytes[:_CHUNK_SIZE]
+        rest = row_bytes[_CHUNK_SIZE:]
         pid_first = self._insert_inline_only(ti, first_chunk)
         # Mark SPILL_START on the slot that now holds the first chunk.
         page = SlottedPage.from_bytes(pid_first, self.pager.read_page(pid_first))
@@ -221,8 +219,8 @@ class Executor:
         # (or stays NULL_PAGE_ID on the final page).
         prev_pid, prev_buf = pid_first, bytearray(self.pager.read_page(pid_first))
         while rest:
-            chunk = bytes(rest[:_CHUNK_SIZE])
-            rest = bytes(rest[_CHUNK_SIZE:])
+            chunk = rest[:_CHUNK_SIZE]
+            rest = rest[_CHUNK_SIZE:]
             ov_pid = self.pager.alloc_page()
             nxt = NULL_PAGE_ID if not rest else 0
             ov_buf = bytearray(PAGE_SIZE)
@@ -243,16 +241,18 @@ class Executor:
         pid = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
         while pid != NULL_PAGE_ID:
             raw = self.pager.read_page(pid)
-            chunks.append(bytes(raw[HEADER_SIZE:]))
+            chunks.append(raw[HEADER_SIZE:])
             pid = int.from_bytes(raw[4:8], "big")
         return b"".join(chunks)
 
     def _free_overflow_chain(self, start_pid: int) -> None:
-        """Mark every overflow page in the chain free (``page_type=0``)."""
+        """Mark every overflow page in the chain free (``page_type=0``); guard page_type==2."""
         nxt = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
         while nxt != NULL_PAGE_ID:
             pid = nxt
             ov = bytearray(self.pager.read_page(pid))
+            if ov[0] != 2:
+                raise RuntimeError(f"overflow chain corruption: page {pid} page_type={ov[0]}, expected 2")
             nxt = int.from_bytes(ov[4:8], "big")
             ov[0] = 0
             self.pager.write_page(pid, bytes(ov))

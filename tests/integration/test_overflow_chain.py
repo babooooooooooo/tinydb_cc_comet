@@ -44,7 +44,7 @@ def test_read_spill_start_reconstructs_full_row(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.spec_id("REQ-STORAGE-008-SCN-03")
-def test_delete_spill_start_frees_chain(tmp_path):
+def test_delete_sibling_preserves_spill_start_row(tmp_path):
     """Deleting a small row leaves a spill-start row intact (no cross-row corruption)."""
     path = tmp_path / "big3.db"
     big = "z" * 6000
@@ -57,3 +57,30 @@ def test_delete_spill_start_frees_chain(tmp_path):
     assert len(rows) == 1
     assert rows[0].payload == big
     assert len(rows[0].payload) == 6000
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-008-SCN-03")
+def test_delete_spill_start_row_releases_chain(tmp_path):
+    """SCN-03: DELETE on spill-start row actually frees the overflow chain.
+
+    The earlier test ``test_delete_sibling_preserves_spill_start_row`` deletes a
+    sibling row, which never enters ``_free_overflow_chain``. This test deletes
+    the spill-start row itself and verifies SELECT after DELETE returns [] and
+    that reopening the database does not crash (chain freeing is internal, but
+    a fresh open confirms no stale page_type leaks out).
+    """
+    path = tmp_path / "delete_spill.db"
+    big = "x" * 6000
+    with Database(str(path)) as db:
+        db.execute("CREATE TABLE t(payload TEXT)")
+        db.execute(f"INSERT INTO t(payload) VALUES ('{big}')")
+        # Sanity: select before delete
+        rows = db.execute("SELECT * FROM t")
+        assert len(rows) == 1 and rows[0].payload == big
+        # Delete the spill-start row itself
+        db.execute(f"DELETE FROM t WHERE payload = '{big}'")
+    # Reopen: SELECT should return [] (chain freed, no crash)
+    with Database(str(path)) as db:
+        rows = db.execute("SELECT * FROM t")
+    assert rows == []
