@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 14: Tokenizer — 字面量层 + NaN/Inf 拒绝（tasks.md §6.4-6.5）`
-- **openspec task**: `6.4/6.5 integer/float/text literal + bool literal 连接到 type_system 拒绝逻辑`
-- **阶段**: `ready_to_dispatch`（等 Task 13 checkpoint 落盘后启动）
+- **plan task**: `### Task 15: Parser — AST 节点 + parse() 入口 + CREATE/DROP（tasks.md §7.1-7.5）`
+- **openspec task**: `7.1/7.2/7.3/7.4/7.5 AST dataclass + parse() 入口 + CreateTable + DropTable`
+- **阶段**: `ready_to_dispatch`（Task 14 出关后启动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 13 完成（Tokenizer 主体 + doubled-quote bug 修复 + 14 测试）
+- **依赖**: Task 14 完成（Tokenizer 字面量层 + NaN/Inf 拒绝）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -30,7 +30,31 @@
 
 ## 已完成 Task
 
-- **Task 10: SlottedPage insert/delete/update/get（tasks.md §4.4-4.7）** — ✅ 已勾选
+- **Task 14: Tokenizer — 字面量层 + NaN/Inf 拒绝（tasks.md §6.4-6.5）** — ✅ 已勾选（经历 1 轮 review-fix + 协调者 SCN fix）
+  - implementer(DONE_WITH_CONCERNS, 124→131 行, +2 测试) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **1 Important: spec_id SCN-03 → SCN-02 误标**)
+  - 协调者 SCN fix: commit `72b36f7` — `tests/unit/test_tokenizer.py:147` SCN-03→SCN-02 + `plan §Task 14 line 1812` 一致性同步。诊断: type-system spec line 15 映射 SCN-02 为 negative integer（test_type_system.py:96 已绑定 `test_parse_int_literal_negative`），line 19 映射 SCN-03 为 decimal float
+  - 提交链: `47cc777`（实现 + 2 测试）+ `72b36f7`（协调者 SCN fix）+ `34fb560`（plan+tasks.md 勾选）
+  - **Implementer Concern**: `tokenize("-7 + 3.14")` 在 `+` 处 raise TokenError —— 经 reviewer 探针 10/11 验证属于 spec-correct 行为（punctuation 集仅 `( ) , ; = *`，`-` 独立字符在 MVP 中 raise）
+  - **Reviewer 关键发现（Important）**: `test_tokenize_int_negative` 误标 `REQ-TYPE-001-SCN-03`，按 type-system spec 应为 SCN-02。**协调者决策**：1 行 trivial 修复，独立 commit，不阻塞 Task 15 启动
+  - **Reviewer 18 探针验证**（含 C-1 doubled-quote 回归 + 词法边界 `nanometer`/`infinite`/`infinity_value` → IDENT + 大小写不敏感 NaN/Inf/Infinity 拒绝）全过；row_tokenizer 层契约稳定
+  - 接受的 MINOR: NaN/Inf 分支 `tokens.append(FLOAT)` 结构上 dead（accept，注释足够）+ 测试覆盖薄（2 happy 测试，建议补 negative float / Inf 拒绝 / lexical boundary / col tracking 后续 hardening pass）
+  - 16/16 tokenizer + 89/89 全量
+  - Opportunistic 队列追加: Task 14 hardening 测试套（negative float + Inf 拒绝 + lexical boundary + col tracking on negatives）
+
+- **Task 13: Tokenizer — identifier / keyword / punctuation（tasks.md §6.1-6.3 + §6.6 + §6.7）** — ✅ 已勾选（经历 1 轮 review-fix-re-review + 2 个协调者 commit）
+  - implementer #1(DONE, 4 passed, 122 行) → thorough reviewer(❌ NEEDS_FIXES, **C-1 doubled-quote 双重解码 bug** + I-1 测试覆盖不足 + I-2 死 import + M-1 末尾换行 + M-2 design.md 命名漂移)
+  - **fix implementer #1** (被 token 上限中断): 完成 10 个新测试 (test_tokenizer.py 142 行)，但未修改实现
+  - **fix implementer #2** (haiku 接续): commit `3a069d8` — 修复 doubled-quote 双重解码 + 移除 `parse_bool_literal` 死 import。**关键修复**: scanner 移除 `buf` 缓冲，`raw = sql[i:j+1]` 直接切片，`parse_text_literal` 作为唯一折叠入口
+  - **协调者补充**: commit `19827b3` — SCN-13 测试期望 bug 修复（line==3 → line==2，因为输入只有一个 `\n`）+ design.md:45 `tokenizer.scan` → `tokenizer.tokenize` 命名漂移修复（M-2）；commit `b1841b4` — M-1 末尾换行修复
+  - re-reviewer(⚠️ APPROVED_WITH_CONCERNS, C-1 + I-1 + I-2 + SCN-13 + M-2 全部 ADDRESSED, 仅 M-1 残留) → 协调者补 M-1 后 Task 13 完整出关
+  - 提交链: `5c5e300`（实现）+ `3a069d8`（Fix 1+3 haiku）+ `19827b3`（协调者 SCN-13 + design）+ `b1841b4`（协调者 M-1） + 本次（plan+tasks.md 勾选）
+  - **关键治理决策**: C-1 doubled-quote bug 走"标准 implementer 修复循环"（与 Task 11 C-1 spec patch 路径不同）。**Task 11 C-1 是 spec 治理问题 → 协调者 spec patch 路径**；**Task 13 C-1 是实现数据正确性问题 → implementer 修复循环路径**。两条路径并存，按问题性质选择
+  - **token 上限事件**: fix implementer #1 中断时未保留 commit，但测试文件已写盘 142 行。fix implementer #2 (haiku) 接续完成 Fix 1+3，体现了 subagent-driven-development 的 fresh-subagent-per-task 韧性（不依赖上下文继承）
+  - 接受的 MINOR: 全部 0 残留（reviewer 后续 M-1 已修复）
+  - Opportunistic 队列追加: 无（Task 13 完整出关）
+  - 14/14 row_codec-style tests + 87/87 全量
+
+- **Task 12: Catalog — JSON 持久化（tasks.md §5.1-5.5）** — ✅ 已勾选
   - implementer(DONE, TDD RED→GREEN 10 passed, 207 行) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, 0 Important, 4 Minor 全部可推迟)
   - 提交: `d9751f7`（实现）+ `ec88133`（plan+tasks.md 勾选）
   - **关键决策**: implementer 拒绝 plan 的"Slot.offset 改绝对 page 偏移"建议，保留 Task 9 相对语义 + 新增 `data_offset` 仅用于 free-space accounting。Reviewer 确认这是 **correct decision**（避免 dispatch prompt 中提示的 plan 自相矛盾陷阱）
@@ -61,32 +85,6 @@
   - **关键教训**: 上一轮 Task 6 我用"选项 A 接受 MINOR"决策（行数偏差）是对的（可推迟），但 Task 7 是**真实 spec 偏差**（异常类不在层级内）—— 阻塞性问题必须走 review-fix 循环，不能用"接受偏差"绕过。**subagent-driven-development 的 review-fix 循环是质量底线**
   - 接受的 MINOR: 行数 99 vs plan 80 / `self._path` 私有 vs plan `self.path` 公开 / plan `MAGIC = b"TINYDB\x00"` (7B) vs 实现 `b'TINYDB\x00\x01'` (8B) — 实现版本与 spec 一致，plan 应更新（archive 阶段）
   - Opportunistic 修缮（M-3 from Task 7 review）：同步 plan §Task 7 reference 的 `MAGIC` 字面值与 spec + 实现一致
-
-- **Task 13: Tokenizer — identifier / keyword / punctuation（tasks.md §6.1-6.3 + §6.6 + §6.7）** — ✅ 已勾选（经历 1 轮 review-fix-re-review + 2 个协调者 commit）
-  - implementer #1(DONE, 4 passed, 122 行) → thorough reviewer(❌ NEEDS_FIXES, **C-1 doubled-quote 双重解码 bug** + I-1 测试覆盖不足 + I-2 死 import + M-1 末尾换行 + M-2 design.md 命名漂移)
-  - **fix implementer #1** (被 token 上限中断): 完成 10 个新测试 (test_tokenizer.py 142 行)，但未修改实现
-  - **fix implementer #2** (haiku 接续): commit `3a069d8` — 修复 doubled-quote 双重解码 + 移除 `parse_bool_literal` 死 import。**关键修复**: scanner 移除 `buf` 缓冲，`raw = sql[i:j+1]` 直接切片，`parse_text_literal` 作为唯一折叠入口
-  - **协调者补充**: commit `19827b3` — SCN-13 测试期望 bug 修复（line==3 → line==2，因为输入只有一个 `\n`）+ design.md:45 `tokenizer.scan` → `tokenizer.tokenize` 命名漂移修复（M-2）；commit `b1841b4` — M-1 末尾换行修复
-  - re-reviewer(⚠️ APPROVED_WITH_CONCERNS, C-1 + I-1 + I-2 + SCN-13 + M-2 全部 ADDRESSED, 仅 M-1 残留) → 协调者补 M-1 后 Task 13 完整出关
-  - 提交链: `5c5e300`（实现）+ `3a069d8`（Fix 1+3 haiku）+ `19827b3`（协调者 SCN-13 + design）+ `b1841b4`（协调者 M-1） + 本次（plan+tasks.md 勾选）
-  - **关键治理决策**: C-1 doubled-quote bug 走"标准 implementer 修复循环"（与 Task 11 C-1 spec patch 路径不同）。**Task 11 C-1 是 spec 治理问题 → 协调者 spec patch 路径**；**Task 13 C-1 是实现数据正确性问题 → implementer 修复循环路径**。两条路径并存，按问题性质选择
-  - **token 上限事件**: fix implementer #1 中断时未保留 commit，但测试文件已写盘 142 行。fix implementer #2 (haiku) 接续完成 Fix 1+3，体现了 subagent-driven-development 的 fresh-subagent-per-task 韧性（不依赖上下文继承）
-  - 接受的 MINOR: 全部 0 残留（reviewer 后续 M-1 已修复）
-  - Opportunistic 队列追加: 无（Task 13 完整出关）
-  - 14/14 row_codec-style tests + 87/87 全量
-
-- **Task 12: Catalog — JSON 持久化（tasks.md §5.1-5.5）** — ✅ 已勾选
-  - implementer(DONE, TDD RED→GREEN 4 passed, 84 行, 60 行测试) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, 0 Important, 11 Minor 全部可推迟)
-  - 提交: `f83dd20`（实现）+ 本次（plan+tasks.md 勾选）
-  - **关键决策**:
-    - INT-as-string 缓解 (R8 风险): 仅 `root_page_id` + `next_page_id` 字符串化，schema 列名/类型不受影响。`_enc_int` / `_dec_int` helper 单点封装
-    - JSON `separators=(",", ":")` 紧致化（节省 ~10% 字节）
-    - `from_bytes` 全 NUL → 空 catalog（不 crash）
-    - `get_table` 不存在返回 None（**不** raise），与 spec §5.5 一致
-    - `create_table` 重复 → ValueError，`drop_table` 不存在 → KeyError（Python dict API 风格）
-  - 接受的 MINOR: M1 `field` 未用 import / M2 docstring 无行数提示 / M3 plan 测试文件结构偏差 / M4 4 测试缺显式 drop negative (探针覆盖) / M5-M11 其他可推迟
-  - Opportunistic 队列追加: M1 移除 `field` 未用导入 (ruff F401 友好)
-  - 与 Task 11 经验对比: 一次通过 review，无 review-fix 循环。**说明**: Task 12 范围更窄（仅 dataclass + 序列化 + 方法），无需跨模块状态机设计判断；plan 测试代码原样可用，INT-as-string 设计 plan 已明确锁定
 
 - **Task 11: row_codec — encode_row / decode_row + null bitmap（tasks.md §4.8）** — ✅ 已勾选（经历 1 轮 review-fix 循环 + 协调者 C-1 spec patch）
   - implementer(DONE, TDD RED→GREEN 4 passed, 60 行, LSB-first) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, **1 Critical C-1 + 3 Important I-1/I-2/I-3 + 7 Minor**)
