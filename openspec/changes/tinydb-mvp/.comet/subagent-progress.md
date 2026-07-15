@@ -13,20 +13,28 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 4: Type System — BOOL + FLOAT 编解码（tasks.md §2.4-2.5）`
-- **openspec task**: `2.4 encode_bool/decode_bool` + `2.5 encode_float/decode_float`
+- **plan task**: `### Task 5: Tokenizer 字面量层 + Type 字面量拒绝（tasks.md §2.6）`
+- **openspec task**: `2.6 tokenizer.py 4 个字面量识别 + NaN/Inf 拒绝`
 - **阶段**: `implementing`（待派发 implementer）
 - **审查-修复轮次**: 0
-- **依赖**: Task 3 已完成勾选
+- **依赖**: Task 4 已完成勾选
+
+## 累积待办（记录，Task 6 或回归时统一处理）
+
+- **测试截断覆盖缺口**（低优先，非阻塞）:
+  - Task 3 MINOR: `decode_text` 长度前缀截断分支（`offset+2>len(buf)`）缺针对性单测
+  - Task 4 M2: `decode_bool`/`decode_float` 缺 decode 截断 `ValueError` 单测
+  - 建议在 Task 6（涉及 offset 走查）一并补齐这 3 条截断断言
 
 ## 已完成 Task
 
-- **Task 3: Type System TEXT 编解码（tasks.md §2.3）** — ✅ 已勾选
-  - implementer(DONE, TDD RED→GREEN 10 passed) → thorough reviewer(APPROVED_WITH_CONCERNS)
-  - 提交: `1cefc44`
-  - 接受的 MINOR（记录）: `decode_text` 长度前缀截断分支（`offset+2>len(buf)`）缺针对性单测；覆盖缺口小，**待办：Task 6（offset 走查）或回归时补一条** `decode_text(b"\x00",0)` 边界断言
-- **Task 2: Type System INT 编解码（tasks.md §2.2）** — ✅ 已勾选（`7d9401c`，reviewer APPROVED；接受 M1 非-int 守卫留 Task 5、M2 标记复用）
-- **Task 1: 项目骨架与配置（tasks.md §1）** — ✅ 已勾选（`7842098`+`87ef1ef`+`31db9df`；遗留 Task 20 须替换 __init__ placeholder）
+- **Task 4: Type System BOOL+FLOAT 编解码（tasks.md §2.4-2.5）** — ✅ 已勾选
+  - implementer(DONE, TDD RED→GREEN 14 passed, 55 行) → thorough reviewer(APPROVED_WITH_CONCERNS)
+  - 提交: `1b78b67`
+  - 接受的 MINOR: M1 `buf[offset]!=0` 可读性; M2 缺截断测试(见累积待办); M3 import 合并
+- **Task 3: TEXT 编解码（§2.3）** — ✅ `1cefc44`（reviewer APPROVED_WITH_CONCERNS；MINOR 见累积待办）
+- **Task 2: INT 编解码（§2.2）** — ✅ `7d9401c`（reviewer APPROVED）
+- **Task 1: 项目骨架（§1）** — ✅ `7842098`+`87ef1ef`+`31db9df`（遗留 Task 20 须替换 __init__ placeholder）
 
 ## 待办 Task（plan 顺序）
 

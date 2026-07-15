@@ -452,7 +452,7 @@ git commit -m "feat(type-system): add TEXT length-prefixed UTF-8 encode/decode"
 - Modify: `tests/unit/test_type_system.py`
 - Modify: `src/tinydb/type_system.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 from tinydb.type_system import encode_bool, decode_bool, encode_float, decode_float
@@ -478,12 +478,12 @@ def test_float_roundtrip_negative_zero():
     assert val == -0.0 and math.copysign(1.0, val) == -1.0
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_type_system.py -v -k "bool or float"`
 Expected: ImportError `encode_bool`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 def encode_bool(value: bool) -> bytes:
@@ -505,17 +505,17 @@ def decode_float(buf: bytes, offset: int) -> tuple[float, int]:
     return struct.unpack_from(_FLOAT_FMT, buf, offset)[0], offset + 8
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_type_system.py -v`
 Expected: PASS（14 passed）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/type_system.py`
 Expected: ≤ 60 行（远低于 150 预算）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/type_system.py tests/unit/test_type_system.py
