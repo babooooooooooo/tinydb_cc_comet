@@ -79,8 +79,8 @@
 - [x] 8.3 实现 `Executor._exec_create_table` / `_exec_drop_table`，落 catalog + alloc/dealloc root page
 - [x] 8.4 实现 `Executor._exec_insert`：定位表 root page，扫描到有空槽的页（满则 alloc 新页），调用 slotted_page.insert + row_codec.encode_row
 - [x] 8.5 实现线性扫描 helper：迭代表所有 data pages，过滤 tombstone，返回解码后的 `(slot_id, decoded_row)` 列表
-- [ ] 8.6 实现 `Executor._exec_select`：扫描 + 类型校验 WHERE + 投影列；WHERE 类型不匹配 raise TypeError
-- [ ] 8.7 实现 `Executor._exec_delete`：扫描 → 匹配 WHERE → 标记 tombstone
+- [x] 8.6 实现 `Executor._exec_select`：扫描 + 类型校验 WHERE + 投影列；WHERE 类型不匹配 raise TypeError
+- [x] 8.7 实现 `Executor._exec_delete`：扫描 → 匹配 WHERE → 标记 tombstone
 
 ## 9. Python API（spec: python-api）
 

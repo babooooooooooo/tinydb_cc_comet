@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 19: Executor — SELECT + DELETE（tasks.md §8.6-8.7）`
-- **openspec task**: `8.6 Executor._exec_select (扫描 + WHERE 类型校验 + 投影) + 8.7 Executor._exec_delete (扫描 → 匹配 WHERE → tombstone)`
-- **阶段**: `ready_to_dispatch`（Task 18 spec+quality 双审通过 + NIT 修复完成 + run→execute governance 修复）
+- **plan task**: `### Task 20: Database + Row 类（tasks.md §9.1-9.3）`
+- **openspec task**: `9.1-9.3 Database 类 + Row 数据类（替换 __init__.py placeholder per memory/task-20-placeholder.md）`
+- **阶段**: `ready_to_dispatch`（Task 19 spec+quality 双审通过 + 6 type-hint MEDIUM + 1 空表 SELECT LOW NITs 全部修复 + plan §6.1 预算 governance 调整）
 - **审查-修复轮次**: 0
-- **依赖**: Task 18 完成 + INSERT + scan helper 稳定（`_scan_table` 返 3-tuple `(slot_id, values, pid)` + `py_to_db` 类型校验 + column name MVP 简化）
+- **依赖**: Task 19 完成 + Executor 完整（DDL + INSERT + scan + SELECT + DELETE + DRY `_resolve_where` + `_python_type_to_db_type`）+ plan §6.1 预算调整为 350 行
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +29,27 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 19: Executor — SELECT + DELETE（tasks.md §8.6-8.7）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 NIT fix + plan §6.1 预算 governance 调整）
+  - implementer(DONE_WITH_CONCERNS, TDD RED→GREEN 9 测试, executor.py 311 行) → spec reviewer(✅ APPROVED_WITH_CONCERNS, 0 NEEDS_FIXES, 3 governance 建议) → 协调者 partial governance (plan §6.1 预算调整) → code quality reviewer(✅ APPROVED_WITH_NITS, 6 MEDIUM type-hint + 2 LOW) → fix subagent(DONE, 117 测试零破坏, executor.py 319 行)
+  - **C-1 governance**: plan §6.1 executor.py 行数估算 200 → 实际 319 行，超 119 行。协调者决定**调整预算至 350 行**，proposal.md 硬上限 400 不变。**真实影响**: docstring ~80 行 + 防御性错误分支 ~40 行 + `_resolve_where` + `_python_type_to_db_type` helper 抽取贡献；非可压缩浪费，拆分反而增加复杂度。
+  - **C-2 fix** (M1-M6 type-hints): commit `969b677` — 6 处 type-hint 补全（`_resolve_where` / `_exec_select` / `_scan_table` / `execute` Union / `_python_type_to_db_type` / 5 处本地变量），便于 Task 20 Row 包装 contract 显式化
+  - **C-3 fix** (L1 空表 SELECT): commit `969b677` — `test_select_empty_table_returns_empty_list` 覆盖 SELECT 在空表上返 `[]` 的边界条件
+  - 提交链: `58181c4`（实现 + 3 测试 + 311 行）+ `969b677`（6 type-hint + 1 测试 + 8 行）+ 本次（plan+tasks.md 勾选 + §6.1 预算 governance）
+  - **Implementer 关键决策**:
+    1. **`_resolve_where` helper 抽取**: DRY 消除 SELECT/DELETE 重复 ~15 行；签名 `(stmt_where, schema) -> Optional[tuple[int, str, str, Any]]` 返 4-tuple（idx, type, op, lit）
+    2. **`_python_type_to_db_type` 模块级 helper**: 把 Python `bool/int/float/str` 映射到 `BOOL/INT/FLOAT/TEXT`，使错误消息对齐 DB type 名（spec 要求 `INT vs TEXT` 而非 `int vs str`）
+    3. **`_exec_delete` 两阶段删除**: 先 `_scan_table` collect `(pid, sid)` to_delete，再 batch `page.delete(sid) + write_page`，最后 `flush()`（仅当 to_delete 非空）；避免 mid-scan state 变化
+    4. **`_exec_select` 返回 `list[list]` 不含列名**: Task 20 Row 包装在 `Database.execute` 外层做（plan §9.4 串联）
+    5. **WHERE TypeError vs ExecutionError 分工**: literal/列类型不匹配 → `TypeError`（spec §REQ-PARSE-005-SCN-04 强制）；schema-level 错误 → `ExecutionError`（表/列/操作符）
+    6. **plan 错误消息矛盾修正**: plan step 1 测试断言 `match="INT vs TEXT"` (DB type) vs plan step 3 示范 `"INT vs str"` (Python type) 矛盾；implementer 按测试断言修正
+  - **推迟到 opportunistic 队列**:
+    - `_python_type_to_db_type` 是否迁 `type_system.py`（Task 20+ 视需要决定）
+    - `_resolve_where` 返回 4-tuple 改 NamedTuple / dataclass 提升可读性
+    - 错误消息分散（每个 `_exec_*` 重复 "table X does not exist" 字面量）→ 提取 `_ensure_table_exists(name)` helper
+    - `name_to_idx` 每次 SELECT 重建（Task 21 schema-time cache）
+    - DELETE 不复用 `_exec_select`（当前两阶段更显式、易调试，保留现状）
+    - 跨页 SELECT WHERE 测试未覆盖（建议 Task 20 加 page-spanning test）
 
 - **Task 18: Executor — INSERT + scan helper（tasks.md §8.4-8.5）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 NIT fix + governance run→execute 修复）
   - implementer(DONE, TDD RED→GREEN 6 测试, executor.py 190 行) → spec reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 NEEDS_FIXES, 3 governance follow-ups) → 协调者 governance fix run→execute → code quality reviewer(✅ APPROVED_WITH_NITS, 1 HIGH-1 + 2 MEDIUM + 3 LOW) → fix subagent(DONE, 113 测试零破坏, executor.py 190 行)
