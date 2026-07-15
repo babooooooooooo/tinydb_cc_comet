@@ -6,11 +6,11 @@
 
 ## 1. 项目骨架与配置
 
-- [ ] 1.1 创建 `src/tinydb/` 与 `tests/` 目录，编写 `pyproject.toml`（声明 `tinydb` 包名、零运行时依赖、dev 依赖 `pytest>=7`、`hypothesis>=6`）
-- [ ] 1.2 编写 `src/tinydb/__init__.py`，导出 `Database`、`Row`、`__version__ = "0.1.0"` 与异常类 `ParseError`、`ExecutionError`、`InvalidDatabaseFile`、`UnsupportedSchemaVersion`
-- [ ] 1.3 编写 `README.md`（说明 MVP 范围、非 ACID 警示、快速开始示例）
-- [ ] 1.4 编写 `pytest.ini`（或 `pyproject.toml` 中 `[tool.pytest.ini_options]`），启用 strict markers
-- [ ] 1.5 创建空模块占位文件：`type_system.py`、`pager.py`、`slotted_page.py`、`catalog.py`、`tokenizer.py`、`parser.py`、`executor.py`、`database.py`、`errors.py`，每个写好 docstring 声明模块职责
+- [x] 1.1 创建 `src/tinydb/` 与 `tests/` 目录，编写 `pyproject.toml`（声明 `tinydb` 包名、零运行时依赖、dev 依赖 `pytest>=7`、`hypothesis>=6`）
+- [x] 1.2 编写 `src/tinydb/__init__.py`，导出 `Database`、`Row`、`__version__ = "0.1.0"` 与异常类 `ParseError`、`ExecutionError`、`InvalidDatabaseFile`、`UnsupportedSchemaVersion`
+- [x] 1.3 编写 `README.md`（说明 MVP 范围、非 ACID 警示、快速开始示例）
+- [x] 1.4 编写 `pytest.ini`（或 `pyproject.toml` 中 `[tool.pytest.ini_options]`），启用 strict markers
+- [x] 1.5 创建空模块占位文件：`type_system.py`、`pager.py`、`slotted_page.py`、`catalog.py`、`tokenizer.py`、`parser.py`、`executor.py`、`database.py`、`errors.py`，每个写好 docstring 声明模块职责
 
 ## 2. 类型系统（spec: type-system-basic）
 

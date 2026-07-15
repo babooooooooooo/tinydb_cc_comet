@@ -132,7 +132,7 @@ base-ref: b2641736d11bf4afb98e28aecd4f7f1b82f4c94c
 - Create: `tests/property/__init__.py`
 - Create: `tests/e2e/__init__.py`
 
-- [ ] **Step 1: 写失败测试 — 包导入与版本**
+- [x] **Step 1: 写失败测试 — 包导入与版本**
 
 ```python
 # tests/unit/test_package.py
@@ -155,12 +155,12 @@ def test_tinydb_exposes_exception_classes():
         assert hasattr(errors, name), f"missing errors.{name}"
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_package.py -v`
 Expected: ModuleNotFoundError `tinydb`
 
-- [ ] **Step 3: 写 `pyproject.toml`**
+- [x] **Step 3: 写 `pyproject.toml`**
 
 ```toml
 [build-system]
@@ -189,7 +189,7 @@ markers = [
 ]
 ```
 
-- [ ] **Step 4: 写占位模块（含 docstring 声明职责 + 行数预算）**
+- [x] **Step 4: 写占位模块（含 docstring 声明职责 + 行数预算）**
 
 每个模块写一行模块级 docstring 描述职责，**不写任何实现**。
 
@@ -234,7 +234,7 @@ class CatalogFull(TinydbError): ...
 """4-type system: INT/TEXT/FLOAT/BOOL encode/decode + literal parse + py_to_db/db_to_py + validate_compare. ≤ 150 lines."""
 ```
 
-- [ ] **Step 5: 写 README.md 骨架**
+- [x] **Step 5: 写 README.md 骨架**
 
 ```markdown
 # tinydb (MVP)
@@ -266,17 +266,17 @@ with tinydb.Database(":memory:") as db:
 See `docs/MVP_LIMITATIONS.md` for what MVP does NOT do.
 ```
 
-- [ ] **Step 6: 安装包到 editable 模式**
+- [x] **Step 6: 安装包到 editable 模式**
 
 Run: `pip install -e ".[dev]"`
 Expected: Successfully installed tinydb-0.1.0
 
-- [ ] **Step 7: 跑测试验证 GREEN**
+- [x] **Step 7: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_package.py -v`
 Expected: PASS（3 passed）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add pyproject.toml pytest.ini src/tinydb/ tests/ README.md
