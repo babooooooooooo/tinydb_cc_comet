@@ -74,3 +74,51 @@ def test_pager_constants():
     assert MAGIC == b'TINYDB\x00\x01'
     assert SCHEMA_VERSION == 0x01
     assert PAGE_SIZE == 4096
+
+
+# --- Task 8: alloc_page / read_page / write_page ---
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-01")
+def test_alloc_page_returns_monotonic_ids(tmp_path):
+    p = Pager(str(tmp_path / "a.db"))
+    a = p.alloc_page()
+    b = p.alloc_page()
+    c = p.alloc_page()
+    assert a < b < c
+    p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-02")
+def test_read_page_returns_exact_4096_bytes(tmp_path):
+    p = Pager(str(tmp_path / "a.db"))
+    page = p.read_page(0)
+    assert len(page) == PAGE_SIZE
+    p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-03")
+def test_write_then_read_roundtrip(tmp_path):
+    p = Pager(str(tmp_path / "a.db"))
+    pid = p.alloc_page()
+    payload = b"\xab" * PAGE_SIZE
+    p.write_page(pid, payload)
+    p.flush()
+    p.close()
+    p2 = Pager(str(tmp_path / "a.db"))
+    assert p2.read_page(pid) == payload
+    p2.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-02")
+def test_memory_mode_read_write_roundtrip():
+    p = Pager(":memory:")
+    pid = p.alloc_page()
+    payload = b"\x42" * PAGE_SIZE
+    p.write_page(pid, payload)
+    assert p.read_page(pid) == payload
+    p.close()

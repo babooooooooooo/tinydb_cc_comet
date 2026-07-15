@@ -28,6 +28,7 @@ class Pager:
         self._file = None
         self._mmap = None
         self._mem_pages: dict[int, bytearray] = {}
+        self._next_page_id = 2  # page 0 = header, page 1 = catalog (Task 12)
 
         if self._is_memory:
             page = self._alloc_page(0)
@@ -97,3 +98,60 @@ class Pager:
         if self._file is not None:
             self._file.close()
             self._file = None
+
+    def flush(self) -> None:
+        """Flush mmap + file buffers to disk."""
+        if self._mmap is not None:
+            self._mmap.flush()
+        if self._file is not None and not self._file.closed:
+            self._file.flush()
+
+    def alloc_page(self) -> int:
+        """Allocate a new page; returns its id. Grows the file/:memory: buffer as needed."""
+        pid = self._next_page_id
+        self._next_page_id += 1
+        needed_size = (pid + 1) * PAGE_SIZE
+        if self._is_memory:
+            # :memory: pages are tracked per-page in _mem_pages (Task 7 structure).
+            if pid not in self._mem_pages:
+                self._mem_pages[pid] = bytearray(PAGE_SIZE)
+        else:
+            self._file.seek(0, os.SEEK_END)
+            current = self._file.tell()
+            if needed_size > current:
+                self._file.truncate(needed_size)
+                self._file.flush()
+                # mmap length is fixed at creation; close + remap at new size.
+                if self._mmap is not None:
+                    self._mmap.close()
+                self._file.seek(0)
+                self._mmap = mmap.mmap(
+                    self._file.fileno(), needed_size, access=mmap.ACCESS_WRITE
+                )
+        return pid
+
+    def read_page(self, page_id: int) -> bytes:
+        """Return a copy of the 4KB page contents at the given page id."""
+        if page_id < 0:
+            raise ValueError(f"page_id must be non-negative, got {page_id}")
+        off = page_id * PAGE_SIZE
+        if self._is_memory:
+            page = self._mem_pages.get(page_id)
+            if page is None:
+                return b"\x00" * PAGE_SIZE
+            return bytes(page)
+        return bytes(self._mmap[off:off + PAGE_SIZE])
+
+    def write_page(self, page_id: int, data: bytes) -> None:
+        """Write exactly PAGE_SIZE bytes to the given page id."""
+        if page_id < 0:
+            raise ValueError(f"page_id must be non-negative, got {page_id}")
+        if len(data) != PAGE_SIZE:
+            raise ValueError(f"page data must be {PAGE_SIZE} bytes, got {len(data)}")
+        off = page_id * PAGE_SIZE
+        if self._is_memory:
+            if page_id not in self._mem_pages:
+                self._mem_pages[page_id] = bytearray(PAGE_SIZE)
+            self._mem_pages[page_id][:] = data
+        else:
+            self._mmap[off:off + PAGE_SIZE] = data
