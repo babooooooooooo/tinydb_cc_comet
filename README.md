@@ -2,6 +2,8 @@
 
 > Minimal embedded relational database for teaching and embedding. **MVP: non-ACID, no crash safety.**
 
+> **Status:** package scaffold only. The `Database`/`Row` placeholders raise `NotImplementedError` until Task 20.
+
 ## Quick start
 ```python
 import tinydb

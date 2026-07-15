@@ -21,4 +21,8 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "spec_id(id): per-scenario spec traceability marker",
+    "unit: pure unit tests (no I/O)",
+    "integration: cross-module integration tests",
+    "property: hypothesis-driven property tests",
+    "e2e: end-to-end happy-path tests",
 ]
