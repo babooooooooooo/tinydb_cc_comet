@@ -2052,7 +2052,7 @@ git commit -m "feat(parser): CREATE TABLE/DROP TABLE with type validation and du
 - Modify: `tests/unit/test_parser.py`
 - Modify: `src/tinydb/parser.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 @pytest.mark.spec_id("REQ-PARSE-004-SCN-01")
@@ -2120,12 +2120,12 @@ def test_parser_is_pure_deterministic():
     assert a.statements[0].columns == b.statements[0].columns
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_parser.py -v`
 Expected: AttributeError `_parse_insert` 等
 
-- [ ] **Step 3: 实现 INSERT/SELECT/DELETE 分支**
+- [x] **Step 3: 实现 INSERT/SELECT/DELETE 分支**
 
 ```python
     def _parse_insert(self) -> Insert:
@@ -2234,17 +2234,17 @@ Expected: AttributeError `_parse_insert` 等
         return Delete(table=table, where=where, line=kw.line, col=kw.col)
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_parser.py -v`
 Expected: PASS（15 passed）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/parser.py`
 Expected: ≤ 250 行（远低于 600 预算）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/parser.py tests/unit/test_parser.py
