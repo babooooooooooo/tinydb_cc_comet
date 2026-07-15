@@ -160,3 +160,15 @@ def test_tokenize_float_NaN_raises_TokenError():
     msg = str(excinfo.value)
     assert "NaN not allowed" in msg or "NaN" in msg
     assert excinfo.value.line == 1 and excinfo.value.col == 1
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-PARSE-001-SCN-15")
+def test_tokenize_delete_keyword():
+    # Regression for Task 13 plan bug: KEYWORDS list omitted DELETE.
+    # Parser §Task 16 depends on DELETE being recognized as KEYWORD (not IDENT),
+    # otherwise DELETE parsing would fail at tokenize stage instead of parse stage.
+    toks = tokenize("DELETE")
+    assert len(toks) == 2  # KEYWORD + EOF
+    t = toks[0]
+    assert t.type == "KEYWORD" and t.value == "DELETE" and t.line == 1 and t.col == 1
