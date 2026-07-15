@@ -53,7 +53,7 @@ def tokenize(sql: str) -> list[Token]:
         if c in (" ", "\t", "\r", "\n"):
             i, line, col = _advance(i, line, col, c)
             continue
-        # identifier / keyword / bool literal (TRUE / FALSE)
+        # identifier / keyword / bool / special float literal
         if _is_ident_start(c):
             start_col = col
             j = i
@@ -61,7 +61,13 @@ def tokenize(sql: str) -> list[Token]:
                 j += 1
             text = sql[i:j]
             up = text.upper()
-            if up == "TRUE":
+            if up in {"NAN", "INF", "INFINITY"}:
+                try:
+                    val = parse_float_literal(text)
+                    tokens.append(Token("FLOAT", val, line, start_col))
+                except ValueError as e:
+                    raise TokenError(line, start_col, str(e)) from e
+            elif up == "TRUE":
                 tokens.append(Token("BOOL", True, line, start_col))
             elif up == "FALSE":
                 tokens.append(Token("BOOL", False, line, start_col))
@@ -72,8 +78,8 @@ def tokenize(sql: str) -> list[Token]:
             for k in range(i, j):
                 i, line, col = _advance(i, line, col, sql[k])
             continue
-        # integer or float literal
-        if c.isdigit():
+        # integer or float literal (including negative numbers)
+        if c.isdigit() or (c == "-" and i + 1 < n and sql[i + 1].isdigit()):
             start_col = col
             j = i + 1
             while j < n and (sql[j].isdigit() or sql[j] == "."):

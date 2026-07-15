@@ -141,3 +141,22 @@ def test_tokenize_multiline_position():
     assert [t.type for t in non_eof] == ["IDENT", "IDENT"]
     assert non_eof[0].value == "a" and non_eof[0].line == 1 and non_eof[0].col == 1
     assert non_eof[1].value == "b" and non_eof[1].line == 2 and non_eof[1].col == 3
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-03")
+def test_tokenize_int_negative():
+    toks = tokenize("-7")
+    assert len(toks) == 2  # INT + EOF
+    t = toks[0]
+    assert t.type == "INT" and t.value == -7 and t.line == 1 and t.col == 1
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-07")
+def test_tokenize_float_NaN_raises_TokenError():
+    with pytest.raises(TokenError) as excinfo:
+        tokenize("NaN")
+    msg = str(excinfo.value)
+    assert "NaN not allowed" in msg or "NaN" in msg
+    assert excinfo.value.line == 1 and excinfo.value.col == 1
