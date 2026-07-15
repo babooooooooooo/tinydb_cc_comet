@@ -23,6 +23,7 @@ HEADER_SIZE = 16
 SLOT_SIZE = 6
 NULL_PAGE_ID = 0xFFFFFFFF
 FLAG_TOMBSTONE = 0x0001
+FLAG_SPILL_START = 0x0002  # bit 1: slot's row data continues in overflow chain
 TOMBSTONE_OFFSET = 0xFFFF  # sentinel offset written into deleted slots
 MAX_SLOTS = 32
 MAX_INLINE_PAYLOAD = PAGE_SIZE - HEADER_SIZE - 2  # 4096 - 16 - 2 = 4078

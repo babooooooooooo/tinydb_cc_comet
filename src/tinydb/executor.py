@@ -14,8 +14,15 @@ from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
 from tinydb.row_codec import decode_row, encode_row
-from tinydb.slotted_page import SlottedPage
+from tinydb.slotted_page import (
+    FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
+    NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
+)
 from tinydb.type_system import py_to_db
+
+# MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
+# an empty page leaves room for the slot directory entry (no overlap).
+_CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
 
 
 def _python_type_to_db_type(value: object) -> str:
@@ -155,6 +162,17 @@ class Executor:
         return []
 
     def _insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> int:
+        """Dispatch to spill path or inline path.
+
+        Rows larger than ``MAX_INLINE_PAYLOAD`` cannot fit in a single data
+        page slot, so we split them across a chain of ``page_type=2``
+        overflow pages. Smaller rows take the original linear-probing path.
+        """
+        if len(row_bytes) > MAX_INLINE_PAYLOAD:
+            return self._insert_with_overflow(ti, row_bytes)
+        return self._insert_inline_only(ti, row_bytes)
+
+    def _insert_inline_only(self, ti: TableInfo, row_bytes: bytes) -> int:
         """Walk the data-page chain, allocating a new page when full.
 
         Starts at ``ti.root_page_id`` and tries ``SlottedPage.insert`` on
@@ -183,14 +201,70 @@ class Executor:
             self.pager.flush()
             return pid
 
+    def _insert_with_overflow(self, ti: TableInfo, row_bytes: bytes) -> int:
+        """Split ``row_bytes``: inline first chunk (FLAG_SPILL_START) + overflow chain.
+
+        The first chunk lands inline so the data page carries the bitmap
+        and first part of the row. Each remaining chunk is written to a
+        fresh ``page_type=2`` overflow page; pages are linked via
+        ``overflow_next`` and the chain ends with NULL_PAGE_ID. Returns
+        the data page id that owns the first chunk.
+        """
+        first_chunk = bytes(row_bytes[:_CHUNK_SIZE])
+        rest = bytes(row_bytes[_CHUNK_SIZE:])
+        pid_first = self._insert_inline_only(ti, first_chunk)
+        # Mark SPILL_START on the slot that now holds the first chunk.
+        page = SlottedPage.from_bytes(pid_first, self.pager.read_page(pid_first))
+        page.slots[page.num_slots - 1].flags |= FLAG_SPILL_START
+        self.pager.write_page(pid_first, page.to_bytes())
+        # Chain overflow pages; nxt placeholder is patched on the next iteration
+        # (or stays NULL_PAGE_ID on the final page).
+        prev_pid, prev_buf = pid_first, bytearray(self.pager.read_page(pid_first))
+        while rest:
+            chunk = bytes(rest[:_CHUNK_SIZE])
+            rest = bytes(rest[_CHUNK_SIZE:])
+            ov_pid = self.pager.alloc_page()
+            nxt = NULL_PAGE_ID if not rest else 0
+            ov_buf = bytearray(PAGE_SIZE)
+            ov_buf[0] = 2  # page_type = overflow
+            ov_buf[2:4] = (PAGE_SIZE - len(chunk)).to_bytes(2, "big")
+            ov_buf[4:8] = nxt.to_bytes(4, "big")
+            ov_buf[HEADER_SIZE:HEADER_SIZE + len(chunk)] = chunk
+            self.pager.write_page(ov_pid, bytes(ov_buf))
+            prev_buf[4:8] = ov_pid.to_bytes(4, "big")
+            self.pager.write_page(prev_pid, bytes(prev_buf))
+            prev_pid, prev_buf = ov_pid, ov_buf
+        self.pager.flush()
+        return pid_first
+
+    def _read_overflow_chain(self, start_pid: int) -> bytes:
+        """Follow ``overflow_next`` from ``start_pid``; concatenate raw[16:] per page."""
+        chunks: list[bytes] = []
+        pid = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
+        while pid != NULL_PAGE_ID:
+            raw = self.pager.read_page(pid)
+            chunks.append(bytes(raw[HEADER_SIZE:]))
+            pid = int.from_bytes(raw[4:8], "big")
+        return b"".join(chunks)
+
+    def _free_overflow_chain(self, start_pid: int) -> None:
+        """Mark every overflow page in the chain free (``page_type=0``)."""
+        nxt = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
+        while nxt != NULL_PAGE_ID:
+            pid = nxt
+            ov = bytearray(self.pager.read_page(pid))
+            nxt = int.from_bytes(ov[4:8], "big")
+            ov[0] = 0
+            self.pager.write_page(pid, bytes(ov))
+
     def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
 
         Iterates page ids from ``ti.root_page_id`` through
         ``ti.next_page_id`` inclusive. Each surviving slot is decoded via
         :func:`row_codec.decode_row` and returned as a 3-tuple of
-        ``(slot_id, decoded_values, page_id)`` so Task 19 can use the
-        page/slot coordinates to drive WHERE matching and DELETE.
+        ``(slot_id, decoded_values, page_id)``. Slots with FLAG_SPILL_START
+        have their inline first chunk concatenated with the overflow chain.
         """
         pid = ti.root_page_id
         results: list[tuple[int, list[Any], int]] = []
@@ -198,9 +272,14 @@ class Executor:
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             for sid in range(page.num_slots):
+                slot = page.slots[sid]
+                if slot.flags & FLAG_TOMBSTONE:
+                    continue
                 row_bytes = page.get(sid)
                 if row_bytes is None:  # tombstone or out-of-range slot
                     continue
+                if slot.flags & FLAG_SPILL_START:
+                    row_bytes = row_bytes + self._read_overflow_chain(pid)
                 results.append((sid, decode_row(row_bytes, ti.schema), pid))
             if pid == ti.next_page_id:
                 break
@@ -313,6 +392,8 @@ class Executor:
         for pid, sid in to_delete:
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
+            if page.slots[sid].flags & FLAG_SPILL_START:
+                self._free_overflow_chain(pid)
             page.delete(sid)
             self.pager.write_page(pid, page.to_bytes())
         if to_delete:
