@@ -176,3 +176,15 @@ def test_delete_marks_tombstones(tmp_path):
         assert sorted(r[0] for r in rows) == [0, 1, 3, 4]
     finally:
         p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-007-SCN-02")
+def test_select_empty_table_returns_empty_list(tmp_path):
+    p = Pager(str(tmp_path / "x.db"))
+    try:
+        _exec(p, "CREATE TABLE t(id INT, name TEXT)")
+        assert _select(p, "SELECT * FROM t") == []
+        assert _select(p, "SELECT id FROM t") == []
+    finally:
+        p.close()

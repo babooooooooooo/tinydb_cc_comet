@@ -7,6 +7,8 @@ fully implemented; DML (INSERT/SELECT/DELETE) is wired in and Task 19
 finishes SELECT projection/WHERE/DELETE tombstone on top of Task 18's
 INSERT + linear scan helper.
 """
+from typing import Any, Optional, Union
+
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
@@ -16,7 +18,7 @@ from tinydb.slotted_page import SlottedPage
 from tinydb.type_system import py_to_db
 
 
-def _python_type_to_db_type(value) -> str:
+def _python_type_to_db_type(value: object) -> str:
     """Map a parsed-literal Python value to its DB type tag (INT/TEXT/...).
 
     Used by SELECT/DELETE error messages so callers see ``"INT vs TEXT"``
@@ -51,7 +53,9 @@ class Executor:
 
     # --- public dispatch ----------------------------------------------------
 
-    def execute(self, stmt: object) -> list:
+    def execute(
+        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete],
+    ) -> Union[list, list[list[Any]]]:
         """Dispatch ``stmt`` to its ``_exec_*`` handler.
 
         Returns the handler's result (DDL returns ``[]``; DML returns row
@@ -136,7 +140,7 @@ class Executor:
         schema = ti.schema
 
         for row_vals in stmt.values:
-            validated: list = []
+            validated: list[Any] = []
             for (_name, col_type), v in zip(schema, row_vals):
                 # py_to_db returns the encoded bytes for valid types and
                 # raises TypeError/ValueError for invalid ones — we only
@@ -179,7 +183,7 @@ class Executor:
             self.pager.flush()
             return pid
 
-    def _scan_table(self, ti: TableInfo) -> list[tuple[int, list, int]]:
+    def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
 
         Iterates page ids from ``ti.root_page_id`` through
@@ -189,7 +193,7 @@ class Executor:
         page/slot coordinates to drive WHERE matching and DELETE.
         """
         pid = ti.root_page_id
-        results: list = []
+        results: list[tuple[int, list[Any], int]] = []
         while True:
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
@@ -203,7 +207,11 @@ class Executor:
             pid += 1
         return results
 
-    def _resolve_where(self, stmt_where, schema) -> tuple:
+    def _resolve_where(
+        self,
+        stmt_where: Optional[tuple[str, str, Any]],
+        schema: list[tuple[str, str]],
+    ) -> Optional[tuple[int, str, str, Any]]:
         """Validate WHERE clause and return ``(col_idx, col_type, op, lit)``.
 
         Returns ``(None, None, None, None)`` when ``stmt_where`` is None.
@@ -233,7 +241,7 @@ class Executor:
             ) from e
         return (col_idx, col_type, op, lit)
 
-    def _exec_select(self, stmt: Select) -> list:
+    def _exec_select(self, stmt: Select) -> list[list[Any]]:
         """Read rows from a table, applying WHERE filter and column projection.
 
         MVP semantics:
@@ -258,7 +266,7 @@ class Executor:
 
         # Named-column projection: validate all column names up front so an
         # unknown column surfaces before we return any partial result.
-        proj_idx: list = []
+        proj_idx: list[int] = []
         if stmt.columns != ["*"]:
             name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
             for cname in stmt.columns:
@@ -266,7 +274,7 @@ class Executor:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        results: list = []
+        results: list[list[Any]] = []
         for _sid, vals, _pid in self._scan_table(ti):
             if col_idx is not None and vals[col_idx] != lit:
                 continue
@@ -297,7 +305,7 @@ class Executor:
 
         # Collect (page_id, slot_id) pairs first to avoid mutating pages
         # while we are still scanning them.
-        to_delete: list = []
+        to_delete: list[tuple[int, int]] = []
         for sid, vals, pid in self._scan_table(ti):
             if col_idx is None or vals[col_idx] == lit:
                 to_delete.append((pid, sid))
