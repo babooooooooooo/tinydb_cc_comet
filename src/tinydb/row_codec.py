@@ -28,6 +28,10 @@ def encode_row(values: list, schema: list[tuple[str, str]]) -> bytes:
     """Encode a row: [null_bitmap] [value_0] [value_1] ...
 
     Bitmap is LSB-first: column 0 -> bit 0 of byte 0, column 1 -> bit 1, ...
+
+    Callers SHOULD pre-validate types via type_system.py_to_db for strict
+    type checking (e.g., reject bool-as-INT, NaN/Inf FLOAT). This module
+    performs mechanical encoding only.
     """
     if len(values) != len(schema):
         raise ValueError(f"values count {len(values)} != schema columns {len(schema)}")
@@ -43,7 +47,12 @@ def encode_row(values: list, schema: list[tuple[str, str]]) -> bytes:
 
 
 def decode_row(buf: bytes, schema: list[tuple[str, str]]) -> list:
-    """Decode a row into Python values (None for NULL columns)."""
+    """Decode a row into Python values (None for NULL columns).
+
+    Raises ValueError if buf is shorter than the null bitmap. If the bitmap
+    is intact but a value is truncated, ValueError propagates from the
+    underlying type decoders (e.g. "INT decode truncated at offset N").
+    """
     blen = _bitmap_len(len(schema))
     if len(buf) < blen:
         raise ValueError(f"row buffer too short for bitmap: {len(buf)} < {blen}")
