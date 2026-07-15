@@ -7,7 +7,7 @@ Page 2+ are available for table data.
 import mmap
 import os
 
-from tinydb.errors import DatabaseError
+from tinydb.errors import InvalidDatabaseFile, UnsupportedSchemaVersion
 
 MAGIC = b'TINYDB\x00\x01'  # 8 bytes
 SCHEMA_VERSION = 0x01  # 1 byte
@@ -55,14 +55,14 @@ class Pager:
             if not header.startswith(MAGIC):
                 self._file.close()
                 self._file = None
-                raise DatabaseError(
-                    f"invalid file magic: expected {MAGIC!r}, got {header[:len(MAGIC)]!r}"
+                raise InvalidDatabaseFile(
+                    f"not a tinydb file (magic={header[:len(MAGIC)]!r})"
                 )
             if header[len(MAGIC)] != SCHEMA_VERSION:
                 self._file.close()
                 self._file = None
-                raise DatabaseError(
-                    f"unsupported schema version: {header[len(MAGIC)]} (expected {SCHEMA_VERSION})"
+                raise UnsupportedSchemaVersion(
+                    f"schema_version={header[len(MAGIC)]} not supported (expected {SCHEMA_VERSION})"
                 )
 
         # mmap the file for read/write

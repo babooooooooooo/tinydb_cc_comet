@@ -8,7 +8,7 @@ import os
 import pytest
 
 from tinydb.pager import Pager, MAGIC, SCHEMA_VERSION, PAGE_SIZE
-from tinydb.errors import DatabaseError
+from tinydb.errors import InvalidDatabaseFile, UnsupportedSchemaVersion
 
 
 @pytest.mark.integration
@@ -44,7 +44,17 @@ def test_pager_opens_existing_file_with_valid_magic(tmp_path):
 def test_pager_raises_on_bad_magic(tmp_path):
     path = tmp_path / "bad.db"
     path.write_bytes(b"NOTADB\x00\x00\x00\x00\x00\x00\x00\x00" + b"\x00" * (PAGE_SIZE - 16))
-    with pytest.raises(DatabaseError, match="magic"):
+    with pytest.raises(InvalidDatabaseFile, match="not a tinydb file"):
+        Pager(str(path))
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-PAGER-001-SCN-06")
+def test_pager_raises_on_bad_schema_version(tmp_path):
+    path = tmp_path / "badver.db"
+    # MAGIC ok, but version byte is 0xFF (not 0x01)
+    path.write_bytes(MAGIC + bytes([0xff]) + b"\x00" * (PAGE_SIZE - 9))
+    with pytest.raises(UnsupportedSchemaVersion, match="schema_version"):
         Pager(str(path))
 
 
