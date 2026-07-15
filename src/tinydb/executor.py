@@ -3,8 +3,9 @@
 The Executor is the single bridge between parsed SQL statements and the
 on-disk storage layer (Pager + Catalog + SlottedPage). It dispatches each
 AST node to a dedicated ``_exec_*`` method. DDL (CREATE/DROP TABLE) is
-fully implemented; DML (INSERT/SELECT/DELETE) is wired in but raises
-``NotImplementedError`` until later tasks land.
+fully implemented; DML (INSERT/SELECT/DELETE) is wired in and Task 19
+finishes SELECT projection/WHERE/DELETE tombstone on top of Task 18's
+INSERT + linear scan helper.
 """
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ExecutionError, PageFull
@@ -13,6 +14,26 @@ from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
 from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import SlottedPage
 from tinydb.type_system import py_to_db
+
+
+def _python_type_to_db_type(value) -> str:
+    """Map a parsed-literal Python value to its DB type tag (INT/TEXT/...).
+
+    Used by SELECT/DELETE error messages so callers see ``"INT vs TEXT"``
+    instead of ``"INT vs str"`` — the spec talks in DB type names, and the
+    parser already maps tokens to Python primitive types (str/int/float/bool)
+    based on the literal token kind.
+    """
+    # Order matters: bool is a subclass of int in Python, must be checked first.
+    if isinstance(value, bool):
+        return "BOOL"
+    if isinstance(value, int):
+        return "INT"
+    if isinstance(value, float):
+        return "FLOAT"
+    if isinstance(value, str):
+        return "TEXT"
+    return type(value).__name__
 
 
 class Executor:
@@ -97,7 +118,7 @@ class Executor:
         self.pager.flush()
         return []
 
-    # --- DML placeholders (Task 18 / Task 19) -------------------------------
+    # --- DML: INSERT / SELECT / DELETE -------------------------------------
 
     def _exec_insert(self, stmt: Insert) -> list:
         """Insert row(s) into a table.
@@ -182,10 +203,110 @@ class Executor:
             pid += 1
         return results
 
+    def _resolve_where(self, stmt_where, schema) -> tuple:
+        """Validate WHERE clause and return ``(col_idx, col_type, op, lit)``.
+
+        Returns ``(None, None, None, None)`` when ``stmt_where`` is None.
+        Raises :class:`TypeError` on literal/column type mismatch (spec
+        §REQ-PARSE-005-SCN-04 mandates TypeError, not ExecutionError).
+        Raises :class:`ExecutionError` on unknown column or unsupported op.
+        """
+        if stmt_where is None:
+            return (None, None, None, None)
+        col_name, op, lit = stmt_where
+        col_idx = next(
+            (i for i, (n, _) in enumerate(schema) if n == col_name), None,
+        )
+        if col_idx is None:
+            raise ExecutionError(f"unknown column {col_name!r}")
+        col_type = schema[col_idx][1]
+        # MVP guard: parser already restricts to '='; re-check defensively.
+        if op != "=":
+            raise ExecutionError(
+                f"operator {op!r} not supported; MVP supports only ="
+            )
+        try:
+            py_to_db(lit, col_type)
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                f"{col_type} vs {_python_type_to_db_type(lit)}: {e}"
+            ) from e
+        return (col_idx, col_type, op, lit)
+
     def _exec_select(self, stmt: Select) -> list:
-        """Read rows from a table. Implemented in Task 19."""
-        raise NotImplementedError("SELECT implemented in Task 19")
+        """Read rows from a table, applying WHERE filter and column projection.
+
+        MVP semantics:
+          * WHERE supports only ``col = literal`` (parser already restricts
+            other operators per REQ-PARSE-005-SCN-04; this layer defensively
+            re-checks).
+          * Literal type mismatches against the column's declared type raise
+            :class:`TypeError` with messages shaped like ``"INT vs TEXT: ..."``
+            (spec §REQ-PARSE-005-SCN-04).
+          * ``SELECT *`` projects every schema column in schema order; a
+            named-column list projects in the order given by ``stmt.columns``.
+          * Unknown table or column names raise :class:`ExecutionError`.
+
+        Returns ``list[list]`` of decoded values — Task 20 wraps each row in
+        a ``Row`` object; until then the raw lists are the public contract.
+        """
+        ti = self.catalog.get_table(stmt.table)
+        if ti is None:
+            raise ExecutionError(f"table {stmt.table!r} does not exist")
+        schema = ti.schema
+        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
+
+        # Named-column projection: validate all column names up front so an
+        # unknown column surfaces before we return any partial result.
+        proj_idx: list = []
+        if stmt.columns != ["*"]:
+            name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+            for cname in stmt.columns:
+                if cname not in name_to_idx:
+                    raise ExecutionError(f"unknown column {cname!r}")
+                proj_idx.append(name_to_idx[cname])
+
+        results: list = []
+        for _sid, vals, _pid in self._scan_table(ti):
+            if col_idx is not None and vals[col_idx] != lit:
+                continue
+            # `list(vals)` copies so each row stands on its own (no shared refs).
+            if stmt.columns == ["*"]:
+                results.append(list(vals))
+            else:
+                results.append([vals[i] for i in proj_idx])
+        return results
 
     def _exec_delete(self, stmt: Delete) -> list:
-        """Delete rows from a table. Implemented in Task 19."""
-        raise NotImplementedError("DELETE implemented in Task 19")
+        """Delete rows matching the WHERE clause (or every row if no WHERE).
+
+        MVP semantics:
+          * WHERE supports only ``col = literal`` (same restriction as SELECT).
+          * Literal type mismatches raise :class:`TypeError` (spec).
+          * Each match is marked as a tombstone via :meth:`SlottedPage.delete`
+            — pages are rewritten and flushed in a batch. ``(page_id, slot_id)``
+            pairs are collected first so the scan does not observe mid-flight
+            mutations of pages that have not yet been re-scanned.
+          * Returns ``[]`` (mutation DML has no result data).
+        """
+        ti = self.catalog.get_table(stmt.table)
+        if ti is None:
+            raise ExecutionError(f"table {stmt.table!r} does not exist")
+        schema = ti.schema
+        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
+
+        # Collect (page_id, slot_id) pairs first to avoid mutating pages
+        # while we are still scanning them.
+        to_delete: list = []
+        for sid, vals, pid in self._scan_table(ti):
+            if col_idx is None or vals[col_idx] == lit:
+                to_delete.append((pid, sid))
+
+        for pid, sid in to_delete:
+            raw = self.pager.read_page(pid)
+            page = SlottedPage.from_bytes(pid, raw)
+            page.delete(sid)
+            self.pager.write_page(pid, page.to_bytes())
+        if to_delete:
+            self.pager.flush()
+        return []

@@ -28,6 +28,19 @@ def _exec(pager, sql):
         ex.execute(s)
 
 
+def _select(pager, sql):
+    """Drive SELECT through parse → Executor; return list[list] of decoded rows.
+
+    SELECT is read-only, so the helper does NOT re-persist the catalog.
+    Task 20 will wrap the result list in Row objects; until then the raw
+    decoded-value lists are what callers see.
+    """
+    cat = Catalog.from_bytes(pager.read_page(1))
+    ex = Executor(pager, cat)
+    stmt = parse(tokenize(sql)).statements[0]
+    return ex.execute(stmt)
+
+
 @pytest.mark.integration
 @pytest.mark.spec_id("REQ-STORAGE-005-SCN-04")
 def test_create_table_persists_to_catalog(tmp_path):
@@ -117,5 +130,49 @@ def test_scan_returns_all_inserted_rows(tmp_path):
         assert [1, "alice"] in decoded
         assert [2, "bob"] in decoded
         assert len(rows) == 2
+    finally:
+        p.close()
+
+# --- Task 19: SELECT projection + WHERE + DELETE -------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-007-SCN-02")
+def test_select_where_equality(tmp_path):
+    p = Pager(str(tmp_path / "x.db"))
+    try:
+        _exec(p, "CREATE TABLE t(id INT, name TEXT)")
+        _exec(p, "INSERT INTO t(id, name) VALUES (1, 'a')")
+        _exec(p, "INSERT INTO t(id, name) VALUES (2, 'b')")
+        rows = _select(p, "SELECT * FROM t WHERE id = 2")
+        assert rows == [[2, "b"]]
+    finally:
+        p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-007-SCN-02")
+def test_select_where_type_mismatch_raises(tmp_path):
+    p = Pager(str(tmp_path / "x.db"))
+    try:
+        _exec(p, "CREATE TABLE t(id INT)")
+        _exec(p, "INSERT INTO t(id) VALUES (1)")
+        with pytest.raises(TypeError, match="INT vs TEXT"):
+            _select(p, "SELECT * FROM t WHERE id = '1'")
+    finally:
+        p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-007-SCN-01")
+def test_delete_marks_tombstones(tmp_path):
+    p = Pager(str(tmp_path / "x.db"))
+    try:
+        _exec(p, "CREATE TABLE t(id INT)")
+        for i in range(5):
+            _exec(p, f"INSERT INTO t(id) VALUES ({i})")
+        _exec(p, "DELETE FROM t WHERE id = 2")
+        rows = _select(p, "SELECT * FROM t")
+        assert sorted(r[0] for r in rows) == [0, 1, 3, 4]
     finally:
         p.close()
