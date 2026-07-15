@@ -42,7 +42,7 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     SQL 解析管线                                  │
-│   tokenizer.scan(sql) → list[Token]                             │
+│   tokenizer.tokenize(sql) → list[Token]                          │
 │   parser.parse(tokens) → ASTNode                                │
 │        ├─ CreateTable / DropTable (DDL)                          │
 │        ├─ Insert / Select / Delete (DML)                         │
