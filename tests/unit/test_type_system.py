@@ -7,6 +7,7 @@ from tinydb.type_system import encode_text, decode_text
 from tinydb.type_system import encode_bool, decode_bool
 from tinydb.type_system import encode_float, decode_float
 from tinydb.type_system import parse_int_literal, parse_float_literal, parse_text_literal, parse_bool_literal
+from tinydb.type_system import py_to_db, db_to_py, validate_compare
 
 @pytest.mark.spec_id("REQ-TYPE-001-SCN-07")
 def test_int_encode_42_big_endian():
@@ -130,3 +131,53 @@ def test_parse_float_literal_rejects_Infinity():
         parse_float_literal("Infinity")
     with pytest.raises(ValueError):
         parse_float_literal("inf")
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-19")
+def test_py_to_db_int():
+    assert py_to_db(42, "INT") == b"\x00\x00\x00\x00\x00\x00\x00\x2a"
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-20")
+def test_py_to_db_text():
+    assert py_to_db("alice", "TEXT") == b"\x00\x05alice"
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-21")
+def test_py_to_db_float():
+    import struct as _st
+    assert py_to_db(2.5, "FLOAT") == _st.pack(">d", 2.5)
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-22")
+def test_py_to_db_float_nan_rejected():
+    with pytest.raises(ValueError):
+        py_to_db(float("nan"), "FLOAT")
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-23")
+def test_py_to_db_bool_true():
+    assert py_to_db(True, "BOOL") == b"\x01"
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-24")
+def test_py_to_db_float_to_int_rejected():
+    with pytest.raises(TypeError):
+        py_to_db(2.5, "INT")
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-18")
+def test_validate_compare_type_mismatch_raises():
+    with pytest.raises(TypeError, match="INT vs TEXT"):
+        validate_compare(b"\x00\x00\x00\x00\x00\x00\x00\x05", "INT",
+                          b"\x00\x01x", "TEXT")
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-18")
+def test_validate_compare_matching_type_ok():
+    # Should not raise
+    validate_compare(b"\x00\x05", "TEXT", b"\x00\x05", "TEXT")
+
+
+def test_db_to_py_roundtrip_int():
+    assert db_to_py(b"\x00\x00\x00\x00\x00\x00\x00\x2a", "INT") == 42
