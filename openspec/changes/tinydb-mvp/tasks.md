@@ -55,8 +55,8 @@
 - [x] 6.1 编写 `tests/unit/test_tokenizer.py`，红：覆盖 identifier / keyword / int / float / text literal（含 doubled single-quote）/ boolean / punctuation / position tracking / TokenError
 - [x] 6.2 实现 `tokenizer.py::tokenize(sql)` 主循环：跳过空白、跟踪 line/col、按字符分类（alpha→identifier or keyword、digit→number、'→text、字母 T/F→bool）
 - [x] 6.3 实现关键字字典（CREATE / TABLE / DROP / INSERT / INTO / VALUES / SELECT / FROM / WHERE / TRUE / FALSE / INT / TEXT / FLOAT / BOOL），绿：跑通 keyword 大小写不敏感用例
-- [ ] 6.4 实现 integer / float / text literal 三种字面量解析，text 含 doubled-quote 转义，绿：跑通字面量用例
-- [ ] 6.5 实现 boolean literal（识别 TRUE / FALSE token），连接到 type_system 的字面量拒绝逻辑，绿：跑通 bool literal
+- [x] 6.4 实现 integer / float / text literal 三种字面量解析，text 含 doubled-quote 转义，绿：跑通字面量用例
+- [x] 6.5 实现 boolean literal（识别 TRUE / FALSE token），连接到 type_system 的字面量拒绝逻辑，绿：跑通 bool literal
 - [x] 6.6 实现 punctuation（`( ) , ; = *`），绿：跑通 punctuation 用例
 - [x] 6.7 错误路径：`TokenError(line, col, message)`，绿：跑通 `@` 报 TokenError 用例
 

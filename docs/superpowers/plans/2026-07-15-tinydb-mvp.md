@@ -1796,7 +1796,7 @@ git commit -m "feat(tokenizer): identifier/keyword (case-insensitive)/punctuatio
 **Files:**
 - Modify: `tests/unit/test_tokenizer.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 @pytest.mark.spec_id("REQ-PARSE-001-SCN-03")
@@ -1825,12 +1825,12 @@ def test_tokenize_float_NaN_raises_TokenError():
         tokenize("NaN")
 ```
 
-- [ ] **Step 2: 跑测试验证 GREEN**（Step 3 中已实现的字面量分支应通过）
+- [x] **Step 2: 跑测试验证 GREEN**（Step 3 中已实现的字面量分支应通过）
 
 Run: `pytest tests/unit/test_tokenizer.py -v`
 Expected: PASS（9 passed）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/unit/test_tokenizer.py
