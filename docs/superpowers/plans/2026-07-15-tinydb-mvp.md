@@ -2261,7 +2261,7 @@ git commit -m "feat(parser): INSERT/SELECT/DELETE with WHERE col=literal and Sta
 - Test: `tests/integration/test_executor.py`
 - Create: `src/tinydb/executor.py`
 
-- [ ] **Step 1: 写失败测试（DDL on real pager）**
+- [x] **Step 1: 写失败测试（DDL on real pager）**
 
 ```python
 # tests/integration/test_executor.py
@@ -2300,12 +2300,12 @@ def test_drop_table_removes_from_catalog(tmp_path):
     p.close()
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/integration/test_executor.py -v`
 Expected: ImportError `Executor`
 
-- [ ] **Step 3: 实现 Executor + DDL**
+- [x] **Step 3: 实现 Executor + DDL**
 
 ```python
 # src/tinydb/executor.py
@@ -2359,12 +2359,12 @@ class Executor:
     def _exec_delete(self, stmt): ...
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_executor.py -v`
-Expected: PASS（2 passed）
+Expected: PASS（4 passed：2 DDL 持久化 + 2 DDL 错误分支，详见 commit `8ee22e3`）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/executor.py tests/integration/test_executor.py

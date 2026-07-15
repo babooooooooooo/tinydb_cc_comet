@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 17: Executor — DDL（CREATE/DROP）（tasks.md §8.1-8.3）`
-- **openspec task**: `8.1/8.2/8.3 Executor(pager, catalog).run() + _exec_create_table + _exec_drop_table`
-- **阶段**: `ready_to_dispatch`（Task 16 + C-1 + C-2 出关后启动）
+- **plan task**: `### Task 18: Executor — INSERT + scan helper（tasks.md §8.4-8.5）`
+- **openspec task**: `8.4 Executor._exec_insert + 8.5 线性扫描 helper（过滤 tombstone）`
+- **阶段**: `ready_to_dispatch`（Task 17 spec+quality 双审通过，SCN governance 修复完成，0 Critical）
 - **审查-修复轮次**: 0
-- **依赖**: Task 16 完成 + C-1 governance (tokenizer PUNCT +`  `) + C-2 governance (spec line 127)
+- **依赖**: Task 17 完成 + DDL 路径全测 + Executor 类骨架稳定（Pager+Catalog 实例化 + dispatch 表 + ExecutionError 兜底 + 5 占位 stub）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +29,21 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 17: Executor — DDL（CREATE/DROP）（tasks.md §8.1-8.3）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 review-fix + SCN governance 修复）
+  - implementer(DONE, TDD RED→GREEN 2 测试, executor.py 107 行) → spec reviewer(⚠️ APPROVED_WITH_CONCERNS, 唯一红字 SCN-02 冲突 + SCN-04 无 spec 锚) → 协调者 governance fix → code quality reviewer(❌ NEEDS_FIXES, HIGH-1 test helper 冗余持久化 + MEDIUM-2 DDL 错误分支零覆盖 + MEDIUM-3 类型注解不全) → fix subagent(DONE, 4 测试, executor.py 109 行)
+  - **SCN governance**: commit `2ab4138` — 扩展 `specs/storage-engine/spec.md` §"Catalog at page 1" 添加 Executor-driven SCN-04 (CREATE persists across reopen) + SCN-05 (DROP removes across reopen)；test_executor.py 标签 SCN-02 → SCN-04 + SCN-04 → SCN-05；plan §Task 17 line 2284/2293 同步。**真实影响**: test_catalog.py 因 `test_catalog_empty_roundtrip` 偏移 +1（SCN-02 实指 spec SCN-01 register），Task 17 plan 沿用旧映射导致冲突；用 spec 扩展而非标签重排，**保持 Task 12 历史报告不变**。
+  - **C-1 fix**（reviewer HIGH-1）: commit `8ee22e3` — 测试 helper `_exec` 移除末尾 `pager.write_page(1, cat.to_bytes()) + pager.flush()`，让 SCN-04/05 持久化路径**真实**由 Executor 内部覆盖而非 helper 屏蔽
+  - **C-2 fix**（reviewer MEDIUM-2）: 追加 `test_create_duplicate_table_raises` (SCN-04) + `test_drop_missing_table_raises` (SCN-05)，覆盖 DDL 两条 ExecutionError 防御分支
+  - **MEDIUM-3 fix**: `__init__(pager: Pager, catalog: Catalog) -> None` + `execute(stmt) -> list` + 5 `_exec_*` 方法加 `-> list` 返回注解 + import Pager/Catalog 显式类型
+  - 提交链: `0dd1ef7`（实现 + 2 测试）+ `2ab4138`（SCN governance）+ `8ee22e3`（review fix + 2 测试 + 类型注解）+ 本次（plan+tasks.md 勾选）
+  - **Implementer 关键决策**:
+    1. **Catalog 重复防御式 if-check** 而非 try/except ValueError（plan 示范写法），意图清晰
+    2. **drop_table leak page**（注释明示 "Task 21 will reclaim"），保持 MVP 行为
+    3. **DDL 返回 `[]`** 对齐 Database.execute `list[Row]` 契约，避免 Task 20 类型分支
+    4. **占位用 NotImplementedError** 而非 plan 示范的 `...` (Ellipsis) — Task 18/19 接续 implementer 第一行替换即获清晰失败信号
+    5. **dispatch 兜底 raise ExecutionError**(plan 未明示，低成本加固)，含 stmt 类型名便于诊断
+  - **接受的 MINOR**: docstring "type hints deferred to hardening pass" 已撤回（MEDIUM-3 全部补齐）
 
 - **Task 16: Parser — INSERT / SELECT / DELETE + StatementList（tasks.md §7.6-7.9）** — ✅ 已勾选（经历 1 轮 review + C-1/C-2 governance commits）
   - implementer(DONE_WITH_CONCERNS, TDD RED→GREEN, 16 测试, 369 行) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **3 Important I-1/I-2/I-3 + 4 Minor M-1..M-4**)
