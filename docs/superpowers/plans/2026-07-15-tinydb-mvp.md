@@ -888,7 +888,7 @@ git commit -m "feat(pager): create file/header with magic + schema_version; :mem
 - Modify: `tests/integration/test_pager.py`
 - Modify: `src/tinydb/pager.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/integration/test_pager.py` 追加：
 
@@ -931,12 +931,12 @@ def test_memory_mode_read_write_roundtrip():
     p.close()
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/integration/test_pager.py -v -k "alloc or read_page or write"`
 Expected: NotImplementedError / failing assertions
 
-- [ ] **Step 3: 实现 alloc / read / write**
+- [x] **Step 3: 实现 alloc / read / write**
 
 替换 `pager.py` 中 placeholder 方法并扩展 `__init__`：
 
@@ -1001,17 +1001,17 @@ class Pager:
             self._mmap[off:off + PAGE_SIZE] = data
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_pager.py -v`
-Expected: PASS（8 passed）
+Expected: PASS（8 passed；实际 12 passed：fix commit `4bfc4d6` 新增 reopen-monotonic + read_page(1) 测试，详见下文）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/pager.py`
-Expected: ≤ 100 行
+Expected: ≤ 100 行（实际 156 行，+56% 偏差；协调者接受为 MINOR，Task 9+ SlottedPage 集成阶段观察重构 ROI）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/pager.py tests/integration/test_pager.py
