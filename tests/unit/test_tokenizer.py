@@ -144,7 +144,7 @@ def test_tokenize_multiline_position():
 
 
 @pytest.mark.unit
-@pytest.mark.spec_id("REQ-TYPE-001-SCN-03")
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-02")
 def test_tokenize_int_negative():
     toks = tokenize("-7")
     assert len(toks) == 2  # INT + EOF

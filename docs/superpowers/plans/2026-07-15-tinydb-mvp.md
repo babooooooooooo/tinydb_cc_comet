@@ -1809,12 +1809,12 @@ def test_tokenize_text_doubled_quote():
     toks = tokenize("'it''s ok'")
     assert toks[0].type == "TEXT" and toks[0].value == "it's ok"
 
-@pytest.mark.spec_id("REQ-TYPE-001-SCN-03")
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-02")
 def test_tokenize_int_negative():
     toks = tokenize("-7")
     assert toks[0].type == "INT" and toks[0].value == -7
 
-@pytest.mark.spec_id("REQ-TYPE-001-SCN-04")
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-03")
 def test_tokenize_float_decimal():
     toks = tokenize("3.14")
     assert toks[0].type == "FLOAT" and abs(toks[0].value - 3.14) < 1e-9
