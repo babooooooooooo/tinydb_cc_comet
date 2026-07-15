@@ -7,10 +7,12 @@ fully implemented; DML (INSERT/SELECT/DELETE) is wired in but raises
 ``NotImplementedError`` until later tasks land.
 """
 from tinydb.catalog import Catalog
-from tinydb.errors import ExecutionError
+from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
+from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import SlottedPage
+from tinydb.type_system import py_to_db
 
 
 class Executor:
@@ -98,8 +100,87 @@ class Executor:
     # --- DML placeholders (Task 18 / Task 19) -------------------------------
 
     def _exec_insert(self, stmt: Insert) -> list:
-        """Insert row(s) into a table. Implemented in Task 18."""
-        raise NotImplementedError("INSERT implemented in Task 18")
+        """Insert row(s) into a table.
+
+        MVP behavior: ``stmt.columns`` is ignored — values are inserted in
+        schema order. Type validation runs through ``type_system.py_to_db``
+        so invalid Python types surface as :class:`ExecutionError`. Each
+        row walks the data-page chain until it lands on a page with free
+        space (or allocates a new one) and is encoded via
+        :func:`row_codec.encode_row`.
+        """
+        ti = self.catalog.get_table(stmt.table)
+        if ti is None:
+            raise ExecutionError(f"table {stmt.table!r} does not exist")
+        schema = ti.schema
+
+        for row_vals in stmt.values:
+            typed: list = []
+            for (_name, col_type), v in zip(schema, row_vals):
+                # py_to_db returns the encoded bytes for valid types and
+                # raises TypeError/ValueError for invalid ones — we only
+                # need the side effect, so the return value is discarded.
+                try:
+                    py_to_db(v, col_type)
+                except (TypeError, ValueError) as e:
+                    raise ExecutionError(str(e)) from e
+                typed.append(v)
+            row_bytes = encode_row(typed, schema)
+            self._insert_row_into_chain(ti, row_bytes)
+        return []
+
+    def _insert_row_into_chain(self, ti, row_bytes: bytes) -> int:
+        """Walk the data-page chain, allocating a new page when full.
+
+        Starts at ``ti.root_page_id`` and tries ``SlottedPage.insert`` on
+        each page in turn. On :class:`PageFull`, advances to the next page
+        id; when the chain tail (``ti.next_page_id``) is reached, a fresh
+        page is allocated, ``ti.next_page_id`` is advanced, and the catalog
+        is persisted. Returns the page id that accepted the row.
+        """
+        pid = ti.root_page_id
+        while True:
+            raw = self.pager.read_page(pid)
+            page = SlottedPage.from_bytes(pid, raw)
+            try:
+                page.insert(row_bytes)
+            except PageFull:
+                if pid == ti.next_page_id:
+                    new_pid = self.pager.alloc_page()
+                    ti.next_page_id = new_pid
+                    self.pager.write_page(1, self.catalog.to_bytes())
+                    self.pager.flush()
+                    pid = new_pid
+                    continue
+                pid += 1
+                continue
+            self.pager.write_page(pid, page.to_bytes())
+            self.pager.flush()
+            return pid
+
+    def _scan_table(self, ti) -> list:
+        """Linear-scan all data pages, filtering tombstones.
+
+        Iterates page ids from ``ti.root_page_id`` through
+        ``ti.next_page_id`` inclusive. Each surviving slot is decoded via
+        :func:`row_codec.decode_row` and returned as a 3-tuple of
+        ``(slot_id, decoded_values, page_id)`` so Task 19 can use the
+        page/slot coordinates to drive WHERE matching and DELETE.
+        """
+        pid = ti.root_page_id
+        results: list = []
+        while True:
+            raw = self.pager.read_page(pid)
+            page = SlottedPage.from_bytes(pid, raw)
+            for sid in range(page.num_slots):
+                row_bytes = page.get(sid)
+                if row_bytes is None:  # tombstone or out-of-range slot
+                    continue
+                results.append((sid, decode_row(row_bytes, ti.schema), pid))
+            if pid == ti.next_page_id:
+                break
+            pid += 1
+        return results
 
     def _exec_select(self, stmt: Select) -> list:
         """Read rows from a table. Implemented in Task 19."""
