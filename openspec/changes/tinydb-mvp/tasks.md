@@ -36,10 +36,10 @@
 - [x] 4.1 编写 `tests/unit/test_slotted_page.py`，红：覆盖 insert / update / tombstone / slot reuse / null bitmap / page full
 - [x] 4.2 实现 `slotted_page.py::SlottedPage` 数据类，持有 `page_id`、`num_slots`、`free_offset`、`slots: list[Slot]`、`data: bytearray`
 - [x] 4.3 实现 `SlottedPage.from_bytes(page_id, bytes)` 与 `to_bytes()` 序列化格式，绿：跑通 roundtrip
-- [ ] 4.4 实现 `SlottedPage.insert(row_bytes)`：tombstone 优先复用，否则 append 到末尾；返回 slot id；满则 raise `PageFull`，绿：跑通 insert 用例
-- [ ] 4.5 实现 `SlottedPage.delete(slot_id)`：标记 tombstone（offset=0xFFFF），绿：跑通 tombstone 用例
-- [ ] 4.6 实现 `SlottedPage.update(slot_id, row_bytes)`：同长或更短则在原位覆盖，否则 raise，绿：跑通 in-place update 用例
-- [ ] 4.7 实现 `SlottedPage.get(slot_id)`：返回解码后的字节或 None（tombstone）
+- [x] 4.4 实现 `SlottedPage.insert(row_bytes)`：tombstone 优先复用，否则 append 到末尾；返回 slot id；满则 raise `PageFull`，绿：跑通 insert 用例
+- [x] 4.5 实现 `SlottedPage.delete(slot_id)`：标记 tombstone（offset=0xFFFF），绿：跑通 tombstone 用例
+- [x] 4.6 实现 `SlottedPage.update(slot_id, row_bytes)`：同长或更短则在原位覆盖，否则 raise，绿：跑通 in-place update 用例
+- [x] 4.7 实现 `SlottedPage.get(slot_id)`：返回解码后的字节或 None（tombstone）
 - [ ] 4.8 在 `type_system.py` 或新文件 `row_codec.py` 中实现 `encode_row(values, schema)` 与 `decode_row(bytes, schema)`，含 null bitmap，绿：跑通 row encoding 用例
 
 ## 5. 存储引擎 · Catalog（spec: storage-engine, catalog 部分）

@@ -1175,7 +1175,7 @@ git commit -m "feat(slotted-page): add SlottedPage dataclass with to_bytes/from_
 - Modify: `tests/unit/test_slotted_page.py`
 - Modify: `src/tinydb/slotted_page.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `tests/unit/test_slotted_page.py` 追加：
 
@@ -1224,12 +1224,12 @@ def test_reuse_tombstoned_slot_on_insert():
     assert p.get(new_sid) == b"\xaa\xbb\xcc\xdd"
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_slotted_page.py -v -k "update or delete or reuse or full"`
 Expected: placeholder raises NotImplementedError
 
-- [ ] **Step 3: 实现 insert / delete / update / get**
+- [x] **Step 3: 实现 insert / delete / update / get**
 
 ```python
     def _data_end(self) -> int:
@@ -1307,17 +1307,17 @@ Expected: placeholder raises NotImplementedError
         return bytes(self.data[start_in_data:start_in_data + s.length])
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_slotted_page.py -v`
-Expected: PASS（7 passed）
+Expected: PASS（7 passed；实际 10 passed：implementer 多加了 3 个 follow-up 测试，详见 commit `d9751f7`）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/slotted_page.py`
-Expected: ≤ 150 行
+Expected: ≤ 150 行（实际 207 行，+38% 偏差；协调者接受为 MINOR，docstring-heavy 但功能完整）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/slotted_page.py tests/unit/test_slotted_page.py
