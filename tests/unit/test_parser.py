@@ -140,10 +140,7 @@ def test_parse_delete_with_where():
 @pytest.mark.spec_id("REQ-PARSE-007-SCN-02")
 def test_parse_multiple_statements():
     # Two statements separated by `;`. INSERT uses an explicit column list
-    # (per REQ-PARSE-004 grammar `INSERT INTO table(col, ...) VALUES ...`).
-    # The spec's SCN-02 example shows `INSERT INTO t VALUES (1)` without
-    # columns, but REQ-PARSE-004 mandates columns — we use the explicit form
-    # so the plan code's required-column branch is exercised end-to-end.
+    # per REQ-PARSE-004 grammar `INSERT INTO table(col, ...) VALUES ...`.
     stmt = parse(tokenize("CREATE TABLE t(id INT); INSERT INTO t(id) VALUES (1)"))
     assert len(stmt.statements) == 2
     assert isinstance(stmt.statements[0], CreateTable)

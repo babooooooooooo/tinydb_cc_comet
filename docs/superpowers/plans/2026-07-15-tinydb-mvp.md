@@ -2107,7 +2107,7 @@ def test_parse_delete_with_where():
 
 @pytest.mark.spec_id("REQ-PARSE-007-SCN-02")
 def test_parse_multiple_statements():
-    stmt = parse(tokenize("CREATE TABLE t(id INT); INSERT INTO t VALUES (1)"))
+    stmt = parse(tokenize("CREATE TABLE t(id INT); INSERT INTO t(id) VALUES (1)"))
     assert len(stmt.statements) == 2
     assert isinstance(stmt.statements[0], CreateTable)
     assert isinstance(stmt.statements[1], Insert)

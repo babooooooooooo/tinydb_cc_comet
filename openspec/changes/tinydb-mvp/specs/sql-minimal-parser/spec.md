@@ -124,7 +124,7 @@ All parse-time errors SHALL raise `ParseError` with `line`, `col`, and human-rea
 - **AND** message MUST contain `"expected table name"`
 
 #### Scenario: Multiple statements separated by ; supported at top level
-- **WHEN** parsing `CREATE TABLE t(id INT); INSERT INTO t VALUES (1)`
+- **WHEN** parsing `CREATE TABLE t(id INT); INSERT INTO t(id) VALUES (1)`
 - **THEN** the parser MUST emit a `StatementList` containing two AST nodes in source order
 
 ### Requirement: Parser is pure (no I/O)
