@@ -44,11 +44,11 @@
 
 ## 5. 存储引擎 · Catalog（spec: storage-engine, catalog 部分）
 
-- [ ] 5.1 编写 `tests/integration/test_catalog.py`，红：覆盖 register / lookup / persist across reopen / drop
-- [ ] 5.2 实现 `catalog.py::Catalog` 数据类：`tables: dict[name, TableInfo]`，`TableInfo = (schema, root_page_id, next_page_id)`
-- [ ] 5.3 实现 `Catalog.from_bytes(page1_bytes)` / `to_bytes()`：序列化为 JSON（候选 Q1，MVP 优先 JSON）
-- [ ] 5.4 在 Pager 中预留 page 1 给 catalog，新增表时 alloc 一个 page 作为 root_page，落盘在 page 1
-- [ ] 5.5 实现 `Catalog.create_table(name, schema)` / `drop_table(name)` / `get_table(name)`，绿：跑通 catalog 用例
+- [x] 5.1 编写 `tests/integration/test_catalog.py`，红：覆盖 register / lookup / persist across reopen / drop
+- [x] 5.2 实现 `catalog.py::Catalog` 数据类：`tables: dict[name, TableInfo]`，`TableInfo = (schema, root_page_id, next_page_id)`
+- [x] 5.3 实现 `Catalog.from_bytes(page1_bytes)` / `to_bytes()`：序列化为 JSON（候选 Q1，MVP 优先 JSON）
+- [x] 5.4 在 Pager 中预留 page 1 给 catalog，新增表时 alloc 一个 page 作为 root_page，落盘在 page 1
+- [x] 5.5 实现 `Catalog.create_table(name, schema)` / `drop_table(name)` / `get_table(name)`，绿：跑通 catalog 用例
 
 ## 6. SQL · Tokenizer（spec: sql-minimal-parser tokenizer 部分）
 

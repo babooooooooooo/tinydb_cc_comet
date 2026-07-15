@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 12: Catalog — register/lookup/persist/drop（tasks.md §5.1-5.5）`
-- **openspec task**: `5.1/5.2/5.3/5.4/5.5 Catalog.register_table / get_table / create_table / drop_table + JSON 持久化 + Pager page 1 预留`
-- **阶段**: `ready_to_dispatch`（等 Task 11 checkpoint 落盘后启动）
+- **plan task**: `### Task 13: Tokenizer — identifier/keyword/punct/literal（tasks.md §6.1-6.7）`
+- **openspec task**: `6.1/6.2/6.3/6.4/6.5/6.6/6.7 tokenizer.tokenize + 关键字 + 字面量 + punctuation + TokenError`
+- **阶段**: `ready_to_dispatch`（等 Task 12 checkpoint 落盘后启动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 11 完成（含 LSB-first 位序统一 + C-1 spec patch + I-1/I-2/I-3 fix）
+- **依赖**: Task 12 完成（Catalog + JSON 持久化 + INT-as-string）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -61,6 +61,19 @@
   - **关键教训**: 上一轮 Task 6 我用"选项 A 接受 MINOR"决策（行数偏差）是对的（可推迟），但 Task 7 是**真实 spec 偏差**（异常类不在层级内）—— 阻塞性问题必须走 review-fix 循环，不能用"接受偏差"绕过。**subagent-driven-development 的 review-fix 循环是质量底线**
   - 接受的 MINOR: 行数 99 vs plan 80 / `self._path` 私有 vs plan `self.path` 公开 / plan `MAGIC = b"TINYDB\x00"` (7B) vs 实现 `b'TINYDB\x00\x01'` (8B) — 实现版本与 spec 一致，plan 应更新（archive 阶段）
   - Opportunistic 修缮（M-3 from Task 7 review）：同步 plan §Task 7 reference 的 `MAGIC` 字面值与 spec + 实现一致
+
+- **Task 12: Catalog — JSON 持久化（tasks.md §5.1-5.5）** — ✅ 已勾选
+  - implementer(DONE, TDD RED→GREEN 4 passed, 84 行, 60 行测试) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, 0 Important, 11 Minor 全部可推迟)
+  - 提交: `f83dd20`（实现）+ 本次（plan+tasks.md 勾选）
+  - **关键决策**:
+    - INT-as-string 缓解 (R8 风险): 仅 `root_page_id` + `next_page_id` 字符串化，schema 列名/类型不受影响。`_enc_int` / `_dec_int` helper 单点封装
+    - JSON `separators=(",", ":")` 紧致化（节省 ~10% 字节）
+    - `from_bytes` 全 NUL → 空 catalog（不 crash）
+    - `get_table` 不存在返回 None（**不** raise），与 spec §5.5 一致
+    - `create_table` 重复 → ValueError，`drop_table` 不存在 → KeyError（Python dict API 风格）
+  - 接受的 MINOR: M1 `field` 未用 import / M2 docstring 无行数提示 / M3 plan 测试文件结构偏差 / M4 4 测试缺显式 drop negative (探针覆盖) / M5-M11 其他可推迟
+  - Opportunistic 队列追加: M1 移除 `field` 未用导入 (ruff F401 友好)
+  - 与 Task 11 经验对比: 一次通过 review，无 review-fix 循环。**说明**: Task 12 范围更窄（仅 dataclass + 序列化 + 方法），无需跨模块状态机设计判断；plan 测试代码原样可用，INT-as-string 设计 plan 已明确锁定
 
 - **Task 11: row_codec — encode_row / decode_row + null bitmap（tasks.md §4.8）** — ✅ 已勾选（经历 1 轮 review-fix 循环 + 协调者 C-1 spec patch）
   - implementer(DONE, TDD RED→GREEN 4 passed, 60 行, LSB-first) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, **1 Critical C-1 + 3 Important I-1/I-2/I-3 + 7 Minor**)

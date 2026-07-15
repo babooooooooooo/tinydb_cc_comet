@@ -1443,7 +1443,7 @@ git commit -m "feat(row-codec): add encode_row/decode_row with LSB-first null bi
 - Test: `tests/integration/test_catalog.py`
 - Create: `src/tinydb/catalog.py`
 
-- [ ] **Step 1: 写失败测试（JSON roundtrip + INT-as-string）**
+- [x] **Step 1: 写失败测试（JSON roundtrip + INT-as-string）**
 
 ```python
 # tests/integration/test_catalog.py
@@ -1497,12 +1497,12 @@ def test_catalog_encodes_int_fields_as_json_strings():
     assert c2.get_table("big").root_page_id == huge
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/integration/test_catalog.py -v`
 Expected: ImportError
 
-- [ ] **Step 3: 实现 Catalog**
+- [x] **Step 3: 实现 Catalog**
 
 ```python
 # src/tinydb/catalog.py
@@ -1582,17 +1582,17 @@ class Catalog:
         return self.tables.get(name)
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_catalog.py -v`
 Expected: PASS（4 passed）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/catalog.py`
 Expected: ≤ 90 行
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/catalog.py tests/integration/test_catalog.py
