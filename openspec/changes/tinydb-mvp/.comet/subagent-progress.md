@@ -13,11 +13,25 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 21: Overflow chain（tasks.md §4.8 + §4 既有 4.7 SlottedPage + Executor spill logic）`
-- **openspec task**: `§4.8 缺页时分配新页（overflow chain）；` spec §REQ-STORAGE-008 SCN-01/02/03`
-- **阶段**: `ready_to_dispatch`（Task 20 双审通过 + Round 1 fix 全 accepted + 22 tests pass → 25 含 3 资源测试 + 142 全量回归）
+- **plan task**: `### Task 22: Property-based Tests — Storage Invariants（tasks.md §10.3）`
+- **openspec task**: `§10.3 写 tests/property/test_storage_invariants.py — hypothesis 生成 INSERT/DELETE 序列对比 Python 镜像视图`
+- **阶段**: `ready_to_dispatch`（Task 21 双审通过含 1 轮 fix（M1 真测 SCN-03 + L1 page_type guard）+ 4 tests pass + 146 全量 regression）
 - **审查-修复轮次**: 0
-- **依赖**: Task 20 完成（Database + Row API 暴露溢出场景） + Executor `_insert_row_into_chain` 已有 overflow 框架（Task 18 落 `pid += 1` 线性探测） + `Pager.alloc_page()` 已实现
+- **依赖**: Task 21 overflow chain 完成 + hypothesis 已配置（§1.1 pyproject dev dep）+ 117 baseline + 25 Task 20 + 4 Task 21 = 146 tests
+
+## 累积待办（记录，Task 6 或回归时统一处理）
+
+- **Opportunistic 修缮队列**（非阻塞，可在 Task 9 Executor / Task 21 Overflow / archive 阶段统一补）:
+  - Task 3 MINOR: `decode_text` 长度前缀截断分支缺针对性单测
+  - Task 4 M2: `decode_bool`/`decode_float` 缺 decode 截断 `ValueError` 单测
+  - Task 6 I-1: 补 `test_validate_compare_float_nan_rejected`（FLOAT NaN/Inf 哨兵分支缺单测，13 个探针已验证行为正确）
+  - Task 6 I-2: `test_db_to_py_roundtrip_int` 补 `spec_id="REQ-TYPE-001-SCN-19"` + 注释
+  - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
+  - **Task 20 LOW-1** (`database.py:78-83`): `close()` 双重异常抑制（flush 抛异常会吞掉 close 异常）；后续 hardening 阶段可加 nested try/except
+  - **Task 20 LOW-2** (`database.py:88-89`): `__exit__` 未 catch `close()` 异常，原 user 异常被 close 异常掩盖；contextlib 标准 practice 是 `try/except: pass`
+  - **Task 21 N1** (test_overflow_chain.py:64-86): 新测试 `test_delete_spill_start_row_releases_chain` 只验 assert rows==[] 不直接看 page_type；可选加 raw file 解析，但 coupling to storage layout
+  - **Task 21 N2** (`executor.py:248-258`): `_free_overflow_chain` 不清 data page 的 `overflow_next` dangling pointer；当前 callers invariant 保证后续 `page.delete(sid)`，但 future foot-gun
+  - **跨 Task 21 governance (out of scope)**：`MAX_INLINE_PAYLOAD` triple drift（slotted_page.py:4078 vs design §3.4:3800 vs spec:3970）；建议 hardening pass reconcile 到 design 3800 并移除 `_CHUNK_SIZE = 4072` workaround
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -40,6 +54,26 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 21: Executor — Overflow Chain（spec §REQ-STORAGE-008 SCN-01/02/03）** — ✅ 已勾选（经历 1 轮 spec 审 + 2 轮 code quality 审含 1 轮 fix）
+  - implementer(DONE_WITH_CONCERNS, TDD RED→GREEN 3 测试 → 4 测试含 Round 1 M1 fix, executor.py 319 → 400 行) → spec reviewer(✅ APPROVED_WITH_NOTES, 3/3 SCN 100% 覆盖, 145 passed, 5 governance notes) → code quality round 1(✅ APPROVED_WITH_NITS, 4 Medium + 5 Low, 含 M1 真实测试 gap) → fix subagent(DONE, 新 SCN-03 真测 + 4 NIT 修复, 146 passed) → code quality round 2(✅ APPROVED_WITH_NITS, §A-§D 全 OK, 2 non-blocking nit)
+  - 提交链: `93bf62a`（feat: overflow spill/merge/free, executor.py 400 行 + 3 测试）+ `8284979`（fix: 真测 SCN-03 + page_type guard + bitmap doc fix, 4 测试）+ 本次（plan + tasks.md + subagent-progress 勾选）
+  - **Implementer 关键决策**:
+    1. **`_CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE = 4072` workaround**: 规避 slotted_page.MAX_INLINE_PAYLOAD=4078 与 slot dir 的 overlap 风险；spec reviewer 验证仅 1-slot 页可达 spill 路径（因为 4072B row 完全填满 page）→ workaround 正确且充分；cross-Task governance 仍是 pre-existing Task 4 spec drift
+    2. **`_insert_row_into_chain` 拆为 dispatcher + inline + overflow**：DRY 保留（inline-only 复用 Task 18 线性探测；overflow 是新 30 行）
+    3. **overflow page layout**：`page_type=2, num_slots=0, free_offset=PAGE_SIZE-len(chunk), overflow_next=next_or_NULL, data from offset 16`；不复用 `SlottedPage.from_bytes`（page_type=2 无 slot dir）
+    4. **不写 chunk_len 字段**：依靠 `decode_text` length-prefix + decode 忽略 trailing zeros；MVP 简化方案
+    5. **`_free_overflow_chain` 加 page_type guard**（Round 1 fix L1）：corrupt chain 时 raise RuntimeError 而非静默破坏
+    6. **`_exec_delete` free-before-tombstone**（plan + implementer 共识）：`_free_overflow_chain(pid)` 先于 `page.delete(sid)`；reader 走 `FLAG_TOMBSTONE` 路径不会 follow freed chain
+    7. **`_scan_table` tombstone-spill ordering**：先 `if FLAG_TOMBSTONE: continue`，再检查 SPILL_START 读 chain，避免 trailing-state reader
+    8. **executor.py 400 行 hard limit 1 line buffer**：所有新方法 docstring 单行；`_free_overflow_chain` 的 page_type guard 信息放 RuntimeError message
+  - **推迟到 opportunistic 队列**:
+    - N1 test rigor：可选加 raw file byte 0 解析断言，但 coupling storage layout
+    - N2 dangling pointer：当前 callers invariant 保证，future hardening pass
+    - **跨 Task 21 governance**: `MAX_INLINE_PAYLOAD` triple drift (slotted_page.py:4078 vs design §3.4:3800 vs spec:3970) — Task 4 pre-existing spec drift；建议 hardening pass reconcile 到 design 3800 并移除 `_CHUNK_SIZE = 4072`
+    - spec.md "Pager free-page pool" mitigation language 与 MVP scope 不一致（spec 说 "返回到 Pager free-page pool"，MVP 仅 `page_type=0`，无 free list）；建议 verify 阶段 spec clarification
+  - **测试统计**: 3 plan-anchored (带 spec_id) → Round 1 M1 fix 拆为 2 测试（sibling preservation + 真测 chain freeing）+ 1 防御 = **4 tests**
+  - **模块预算**: `executor.py` = **400 行**（plan §6.1 ≤ 400 ✓ 但**无 buffer**）；`slotted_page.py` = 208 行（+1 常量）；`test_overflow_chain.py` = 85 行
 
 - **Task 20: Database + Row API（tasks.md §9.1-9.6）** — ✅ 已勾选（经历 1 轮 spec 审 + 2 轮 code quality 审含 1 轮 fix）
   - implementer(DONE, TDD RED 18 failed → GREEN 22 tests, database.py 88 行) → spec reviewer(✅ APPROVED_WITH_NOTES, 18/18 spec scenarios + 17/17 plan tests, 5 extras 无 spec anchor 黄标 + REQ-API-003 编号 drift 黄标) → code quality round 1(❌ CHANGES_REQUESTED, 2 Important: Row 可变 + 类型注解不全) → fix subagent(DONE, frozen dataclass + tuple + __post_init__ + try/finally + 3 资源测试 + 5 spec_id 移除, 142 regression) → code quality round 2(✅ APPROVED_WITH_NITS, 9/9 Round 1 修复 OK, 2 LOW non-blocking nits logged)

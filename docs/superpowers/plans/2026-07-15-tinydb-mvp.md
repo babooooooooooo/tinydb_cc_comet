@@ -2905,7 +2905,7 @@ git commit -m "feat(api): Database.execute pipeline with Row dataclass and error
 - Test: `tests/integration/test_overflow_chain.py`
 - Modify: `src/tinydb/executor.py`
 
-- [ ] **Step 1: 写失败测试（spill + read + delete 三场景）**
+- [x] **Step 1: 写失败测试（spill + read + delete 三场景）** (Task 21)
 
 ```python
 # tests/integration/test_overflow_chain.py
@@ -2949,12 +2949,28 @@ def test_delete_spill_start_frees_chain(tmp_path):
     assert len(rows) == 1 and len(rows[0].payload) == 6000
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED** (Task 21)
 
 Run: `pytest tests/integration/test_overflow_chain.py -v`
 Expected: assertion failures (big row inserted but not retrievable)
 
-- [ ] **Step 3: 在 Executor 实现 overflow chain**
+实际 RED: 实现前 3 个测试 hang（在 `_insert_row_into_chain` 里一直 alloc page，因为 `SlottedPage.insert` raise PageFull 但 Executor 没拦截）。TDD RED 已验证 ✓。
+
+- [x] **Step 3: 在 Executor 实现 overflow chain** (Task 21)
+
+实现包括：
+1. `_CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE = 4072`（workaround 详见 Step 3 后注释）
+2. `_insert_row_into_chain` 重构 → dispatcher + `_insert_inline_only` + `_insert_with_overflow`
+3. `_read_overflow_chain(start_pid) -> bytes`：follow chain 拼接 chunks
+4. `_free_overflow_chain(start_pid)`：walk chain + page_type=0（带 page_type guard）
+5. `_scan_table` 增强：slot 有 SPILL_START 时拼接 chunks（tombstone 优先 skip，chain read 在其之后）
+6. `_exec_delete` 增强：slot 有 SPILL_START 时 free chain（tombs 前 free 以避免 half-state reader）
+
+相对 plan 模板的 4 处主动偏离：
+- `_CHUNK_SIZE = 4072` 而非 plan 模板的 3800：slotted_page.MAX_INLINE_PAYLOAD=4078 与 slot dir 存在 overlap 风险，implementer 主动减 6B 规避（详见 concern 1 governance note）
+- 不使用 plan 模板的 `chunk_len` 字段；依靠 `decode_text` length-prefix + decode 忽略 trailing zeros
+- `_insert_with_overflow` 一次性构造 overflow page（plan 模板 write-read-write 三次）
+- `_scan_table` 增加 `if slot.flags & FLAG_TOMBSTONE: continue` 在 `page.get(sid)` 之前
 
 在 `src/tinydb/executor.py` 添加：
 
@@ -3102,17 +3118,29 @@ class Executor:
         return []
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN** (Task 21)
 
 Run: `pytest tests/integration/test_overflow_chain.py -v`
-Expected: PASS（3 passed）
+Expected: PASS（**4 passed** = 3 plan-anchored SCN-01/02/03 + 1 Round 1 fix 新增真测 SCN-03 chain-freeing）
 
-- [ ] **Step 5: 行数审计**
+注：plan Step 1 列 3 测试含 `test_delete_spill_start_frees_chain`，但实际只删 small sibling row（不触发 `_free_overflow_chain`）。Round 1 code quality M1 fix 在 commit `8284979` 拆分为 `test_delete_sibling_preserves_spill_start_row`（保留原行为清晰命名）+ 新增 `test_delete_spill_start_row_releases_chain`（真测 SCN-03 chain freeing 路径 + DB reopen 验证）。
+
+- [x] **Step 5: 行数审计** (Task 21)
 
 Run: `wc -l src/tinydb/executor.py`
 Expected: ≤ 400 行
 
-- [ ] **Step 6: Commit**
+实际行数：`src/tinydb/executor.py` = **400 行**（plan §6.1 硬上限 — 正好达标 ✓，**无任何 buffer**）。
+
+紧凑策略：所有新方法 docstring 单行；`_CHUNK_SIZE` 常量行带 rationale 一行注释；`_free_overflow_chain` 的 page_type guard 信息放在 RuntimeError message 里；`_read_overflow_chain` docstring 简短。
+
+**跨 Task 治理项**：`MAX_INLINE_PAYLOAD` 在 slotted_page.py = 4078，design §3.4 = 3800，spec §REQ-STORAGE-008 = ~3970。Triple drift 由 Task 4 既有 spec 引入，Task 21 实施时用 `_CHUNK_SIZE = 4072` workaround。后续 hardening pass 建议 reconcile 到 design 值（3800）并移除 workaround。详见 spec reviewer report §4-5。
+
+- [x] **Step 6: Commit** (Task 21)
+
+实际 2 个 commit:
+1. `93bf62a feat(executor): overflow chain spill/merge/free for rows > MAX_INLINE_PAYLOAD`
+2. `8284979 fix(executor): Task 21 review nits — real SCN-03 test + page_type guard + bitmap doc fix`（Round 1 code quality M1/L1/M3/M4 NIT 修复）
 
 ```bash
 git add src/tinydb/executor.py tests/integration/test_overflow_chain.py
