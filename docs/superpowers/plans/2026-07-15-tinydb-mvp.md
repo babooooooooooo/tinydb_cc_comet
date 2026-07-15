@@ -754,7 +754,7 @@ git commit -m "feat(type-system): add py_to_db/db_to_py/validate_compare with st
 - Test: `tests/integration/test_pager.py`
 - Create: `src/tinydb/pager.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/integration/test_pager.py
@@ -794,12 +794,12 @@ def test_memory_mode_no_filesystem(tmp_path, monkeypatch):
     p.close()
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/integration/test_pager.py -v`
 Expected: ImportError `Pager`
 
-- [ ] **Step 3: 实现 Pager 基础（magic + version）**
+- [x] **Step 3: 实现 Pager 基础（magic + version）**
 
 ```python
 # src/tinydb/pager.py
@@ -866,12 +866,12 @@ class Pager:
     def __exit__(self, *a): self.close()
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_pager.py -v`
-Expected: PASS（4 passed）
+Expected: PASS（4 passed；实际 6 passed：implementer 多加了 bad_schema_version 测试，详见 commit `6d92cb2`）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/pager.py tests/integration/test_pager.py

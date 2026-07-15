@@ -25,9 +25,9 @@
 
 ## 3. 存储引擎 · Pager 层（spec: storage-engine, file/page 部分）
 
-- [ ] 3.1 编写 `tests/integration/test_pager.py`，红：覆盖文件创建、magic 校验、版本校验、`:memory:` 模式、page alloc/read/write 行为
-- [ ] 3.2 实现 `pager.py::Pager` 类，接受 path 或 `:memory:`，初始化时按需 open 或 create
-- [ ] 3.3 实现 page 0 文件头：`MAGIC = b'TINYDB\x00\x01'` + `SCHEMA_VERSION = 0x01`；open 已有文件时强制 magic 校验，绿：跑通 magic / version 异常用例
+- [x] 3.1 编写 `tests/integration/test_pager.py`，红：覆盖文件创建、magic 校验、版本校验、`:memory:` 模式、page alloc/read/write 行为
+- [x] 3.2 实现 `pager.py::Pager` 类，接受 path 或 `:memory:`，初始化时按需 open 或 create
+- [x] 3.3 实现 page 0 文件头：`MAGIC = b'TINYDB\x00\x01'` + `SCHEMA_VERSION = 0x01`；open 已有文件时强制 magic 校验，绿：跑通 magic / version 异常用例
 - [ ] 3.4 实现 `_path_for(page_id)` 与 `read_page(page_id)` / `write_page(page_id, bytes)` / `alloc_page()`，文件 backed 模式用 `mmap`，`:memory:` 用 bytearray 模拟，绿：跑通 page addressing 用例
 - [ ] 3.5 实现 `Pager.close()` 释放 mmap 与文件句柄；`Database.__exit__` 中调用
 
