@@ -1397,7 +1397,7 @@ def encode_row(values: list, schema: list[tuple[str, str]]) -> bytes:
     parts = [bytes(bitmap)]
     for i, (val, (_name, typ)) in enumerate(zip(values, schema)):
         if val is None:
-            bitmap[i // 8] |= 1 << (7 - (i % 8))
+            bitmap[i // 8] |= 1 << (i % 8)
             continue
         parts.append(_ENCODERS[typ](val))
     parts[0] = bytes(bitmap)
@@ -1412,7 +1412,7 @@ def decode_row(buf: bytes, schema: list[tuple[str, str]]) -> list:
     out = []
     off = blen
     for i, (_name, typ) in enumerate(schema):
-        null_bit = (bitmap[i // 8] >> (7 - (i % 8))) & 1
+        null_bit = (bitmap[i // 8] >> (i % 8)) & 1
         if null_bit:
             out.append(None)
             continue
@@ -1430,7 +1430,7 @@ Expected: PASS（4 passed）
 
 ```bash
 git add src/tinydb/row_codec.py tests/unit/test_row_codec.py
-git commit -m "feat(row-codec): add encode_row/decode_row with MSB-first null bitmap"
+git commit -m "feat(row-codec): add encode_row/decode_row with LSB-first null bitmap"
 ```
 
 ---

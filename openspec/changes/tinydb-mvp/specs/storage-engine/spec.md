@@ -70,7 +70,7 @@ The system SHALL organize each table data page as a slotted page: a fixed-size p
 
 ### Requirement: Row encoding with null bitmap
 
-The system SHALL encode each row as a null bitmap followed by length-prefixed column values. The null bitmap SHALL have one bit per column, MSB-first.
+The system SHALL encode each row as a null bitmap followed by length-prefixed column values. The null bitmap SHALL have one bit per column, LSB-first.
 
 #### Scenario: Encode row with all non-null columns
 - **WHEN** encoding `(42, 'alice', TRUE)` for schema `(INT, TEXT, BOOL)`
