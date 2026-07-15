@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 18: Executor — INSERT + scan helper（tasks.md §8.4-8.5）`
-- **openspec task**: `8.4 Executor._exec_insert + 8.5 线性扫描 helper（过滤 tombstone）`
-- **阶段**: `ready_to_dispatch`（Task 17 spec+quality 双审通过，SCN governance 修复完成，0 Critical）
+- **plan task**: `### Task 19: Executor — SELECT + DELETE（tasks.md §8.6-8.7）`
+- **openspec task**: `8.6 Executor._exec_select (扫描 + WHERE 类型校验 + 投影) + 8.7 Executor._exec_delete (扫描 → 匹配 WHERE → tombstone)`
+- **阶段**: `ready_to_dispatch`（Task 18 spec+quality 双审通过 + NIT 修复完成 + run→execute governance 修复）
 - **审查-修复轮次**: 0
-- **依赖**: Task 17 完成 + DDL 路径全测 + Executor 类骨架稳定（Pager+Catalog 实例化 + dispatch 表 + ExecutionError 兜底 + 5 占位 stub）
+- **依赖**: Task 18 完成 + INSERT + scan helper 稳定（`_scan_table` 返 3-tuple `(slot_id, values, pid)` + `py_to_db` 类型校验 + column name MVP 简化）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +29,27 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 18: Executor — INSERT + scan helper（tasks.md §8.4-8.5）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 NIT fix + governance run→execute 修复）
+  - implementer(DONE, TDD RED→GREEN 6 测试, executor.py 190 行) → spec reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 NEEDS_FIXES, 3 governance follow-ups) → 协调者 governance fix run→execute → code quality reviewer(✅ APPROVED_WITH_NITS, 1 HIGH-1 + 2 MEDIUM + 3 LOW) → fix subagent(DONE, 113 测试零破坏, executor.py 190 行)
+  - **C-1 governance**: commit `a2fad94` — spec.md + tasks.md + design.md + handoff + context 中 `Executor.run(stmt)` → `Executor.execute(stmt)` 同步（5 文件 8 行）。**真实影响**: Task 17 implementer 沿用 plan 写法用 `execute` 而 spec/tasks 写 `run`，Task 19 implementer 可能困惑；协调者拍板"code wins"更新 spec/tasks 跟随代码（避免代码 churn）
+  - **C-2 fix** (HIGH-1): commit `cb093f6` — 类型验证错误信息包含列名 `raise ExecutionError(f"column {_name}: {e}") from e`，便于多列 INSERT 调试
+  - **C-3 fix** (MEDIUM-1): `typed` → `validated` 重命名（声明 + append + encode_row 调用 3 处），消除命名误导（实际值未转换）
+  - **C-4 fix** (MEDIUM-2): 关键函数补 type annotations — `execute(self, stmt: object)` + `_insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> int` + `_scan_table(self, ti: TableInfo) -> list[tuple[int, list, int]]` + `from tinydb.catalog import Catalog, TableInfo`
+  - 提交链: `60f81cc`（实现 + 2 测试）+ `a2fad94`（run→execute governance）+ `cb093f6`（3 NIT fix）+ 本次（plan+tasks.md 勾选）
+  - **Implementer 关键决策**:
+    1. **35 inserts 替代 plan 的 25**：plan §step 1 假设 200 字节 row 误导；实际 INT row ~9 字节，受 `MAX_SLOTS=32` 限制 → 35 行触发 slot 溢出 → 第二页 alloc
+    2. **`pid += 1` 线性探测（MVP 简化）**: docstring L137-140 明示 `next_page_id == tail` 不变量；`Pager.alloc_page()` 保证单调递增，chain 连续
+    3. **`_scan_table` 返 3-tuple `(slot_id, values, pid)` 而非 plan 写 2-tuple**: Task 19 DELETE 需要 `pid+sid` tombstone，SELECT 也需要 pid 投影
+    4. **模块顶部 import 优于 plan lazy import**: PEP 8 偏好，运行时开销相同
+    5. **`py_to_db` 仅副作用校验**: valid types 返 encoded bytes 丢弃
+    6. **MVP 列名简化（plan §Task 18:2441 明示）**: `INSERT INTO t(col)` 中 col 被忽略，按 schema 顺序插入
+  - **推迟到 opportunistic 队列**:
+    - LOW-1 NamedTuple `ScannedRow` 提升类型可读性（+9 行 vs ~0 收益）
+    - LOW-2 测试断言加消息
+    - LOW-3 tuple unpacking 测试 `r[1]` → `for _, vals, _ in rows`
+    - spec.md "Row CRUD executor operations" 加 MVP column-list-ignored 显式声明
+    - plan §Task 18 注释 25 → 35 修正（防止后续 implementer 重复错误）
 
 - **Task 17: Executor — DDL（CREATE/DROP）（tasks.md §8.1-8.3）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 review-fix + SCN governance 修复）
   - implementer(DONE, TDD RED→GREEN 2 测试, executor.py 107 行) → spec reviewer(⚠️ APPROVED_WITH_CONCERNS, 唯一红字 SCN-02 冲突 + SCN-04 无 spec 锚) → 协调者 governance fix → code quality reviewer(❌ NEEDS_FIXES, HIGH-1 test helper 冗余持久化 + MEDIUM-2 DDL 错误分支零覆盖 + MEDIUM-3 类型注解不全) → fix subagent(DONE, 4 测试, executor.py 109 行)

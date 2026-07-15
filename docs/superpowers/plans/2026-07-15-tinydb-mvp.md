@@ -2381,7 +2381,7 @@ git commit -m "feat(executor): DDL create/drop table with catalog persistence"
 - Modify: `tests/integration/test_executor.py`
 - Modify: `src/tinydb/executor.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 @pytest.mark.spec_id("REQ-STORAGE-007-SCN-03")
@@ -2425,12 +2425,12 @@ def _select(pager, sql):
     return ex.execute(parse(tokenize(sql)).statements[0])
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/integration/test_executor.py -v`
 Expected: NotImplementedError
 
-- [ ] **Step 3: 实现 INSERT + scan helper**
+- [x] **Step 3: 实现 INSERT + scan helper**
 
 ```python
     def _exec_insert(self, stmt: Insert):
@@ -2495,12 +2495,12 @@ Expected: NotImplementedError
         return results
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_executor.py -v`
-Expected: PASS（4 passed）
+Expected: PASS（6 passed：4 既有 DDL + 2 新增 INSERT/scan，详见 commit `60f81cc`）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/executor.py tests/integration/test_executor.py
