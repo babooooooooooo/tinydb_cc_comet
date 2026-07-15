@@ -1028,7 +1028,7 @@ git commit -m "feat(pager): add alloc/read/write_page with mmap growth and :memo
 - Test: `tests/unit/test_slotted_page.py`
 - Create: `src/tinydb/slotted_page.py`
 
-- [ ] **Step 1: 写失败测试（from_bytes / to_bytes / 空 page 插入）**
+- [x] **Step 1: 写失败测试（from_bytes / to_bytes / 空 page 插入）**
 
 ```python
 # tests/unit/test_slotted_page.py
@@ -1058,12 +1058,12 @@ def test_insert_first_row_records_slot():
     assert p2.get(0) == b"\x01\x02\x03"
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_slotted_page.py -v`
 Expected: ImportError `SlottedPage`
 
-- [ ] **Step 3: 实现 SlottedPage 框架 + 序列化**
+- [x] **Step 3: 实现 SlottedPage 框架 + 序列化**
 
 ```python
 # src/tinydb/slotted_page.py
@@ -1153,12 +1153,12 @@ class SlottedPage:
     def get(self, slot_id: int) -> Optional[bytes]: ...
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_slotted_page.py -v`
 Expected: PASS（2 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/slotted_page.py tests/unit/test_slotted_page.py
