@@ -376,7 +376,7 @@ git commit -m "feat(type-system): add INT 8-byte big-endian encode/decode with o
 - Modify: `tests/unit/test_type_system.py`
 - Modify: `src/tinydb/type_system.py`
 
-- [ ] **Step 1: 写失败测试（TEXT encode/decode + Unicode）**
+- [x] **Step 1: 写失败测试（TEXT encode/decode + Unicode）**
 
 在 `tests/unit/test_type_system.py` 追加：
 
@@ -409,12 +409,12 @@ def test_text_decode_truncated_length_raises():
         decode_text(b"\x00\x05abc", 0)  # length says 5, only 3 bytes follow
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_type_system.py -v -k text`
 Expected: ImportError `encode_text`
 
-- [ ] **Step 3: 实现 TEXT 编解码**
+- [x] **Step 3: 实现 TEXT 编解码**
 
 ```python
 def encode_text(value: str) -> bytes:
@@ -430,12 +430,12 @@ def decode_text(buf: bytes, offset: int) -> tuple[str, int]:
     return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_type_system.py -v`
 Expected: PASS（10 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/type_system.py tests/unit/test_type_system.py
