@@ -532,7 +532,7 @@ git commit -m "feat(type-system): add BOOL single-byte and FLOAT 8-byte IEEE 754
 - Test: `tests/unit/test_type_system.py`（追加）
 - Modify: `src/tinydb/type_system.py`
 
-- [ ] **Step 1: 写失败测试（字面量解析 + NaN/Inf 拒绝）**
+- [x] **Step 1: 写失败测试（字面量解析 + NaN/Inf 拒绝）**
 
 ```python
 from tinydb.type_system import parse_int_literal, parse_float_literal, parse_text_literal, parse_bool_literal
@@ -575,12 +575,12 @@ def test_parse_float_literal_rejects_Infinity():
         parse_float_literal("inf")
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_type_system.py -v -k parse_`
 Expected: ImportError `parse_int_literal`
 
-- [ ] **Step 3: 实现字面量解析**
+- [x] **Step 3: 实现字面量解析**
 
 ```python
 def parse_int_literal(s: str) -> int:
@@ -608,12 +608,12 @@ def parse_bool_literal(s: str) -> bool:
     raise ValueError(f"invalid bool literal: {s!r}")
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_type_system.py -v`
 Expected: PASS（22 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/type_system.py tests/unit/test_type_system.py
