@@ -1,5 +1,6 @@
 """4-type system: INT/TEXT/FLOAT/BOOL encode/decode + literal parse + py_to_db/db_to_py + validate_compare. <= 150 lines."""
 
+import math
 import struct
 
 _INT_FMT = ">q"  # signed 64-bit big-endian
@@ -53,3 +54,31 @@ def decode_float(buf: bytes, offset: int) -> tuple[float, int]:
     if offset + 8 > len(buf):
         raise ValueError("FLOAT decode truncated")
     return struct.unpack_from(_FLOAT_FMT, buf, offset)[0], offset + 8
+
+
+def parse_int_literal(s: str) -> int:
+    return int(s)
+
+
+def parse_float_literal(s: str) -> float:
+    v = float(s)
+    if math.isnan(v) or math.isinf(v):
+        raise ValueError(f"FLOAT inf/NaN not allowed: {s!r}")
+    return v
+
+
+def parse_text_literal(s: str) -> str:
+    # s already includes surrounding single quotes (tokenizer produces raw text)
+    if len(s) < 2 or s[0] != "'" or s[-1] != "'":
+        raise ValueError(f"invalid text literal: {s!r}")
+    inner = s[1:-1].replace("''", "'")
+    return inner
+
+
+def parse_bool_literal(s: str) -> bool:
+    u = s.upper()
+    if u == "TRUE":
+        return True
+    if u == "FALSE":
+        return False
+    raise ValueError(f"invalid bool literal: {s!r}")

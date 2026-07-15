@@ -6,6 +6,7 @@ from tinydb.type_system import encode_int, decode_int
 from tinydb.type_system import encode_text, decode_text
 from tinydb.type_system import encode_bool, decode_bool
 from tinydb.type_system import encode_float, decode_float
+from tinydb.type_system import parse_int_literal, parse_float_literal, parse_text_literal, parse_bool_literal
 
 @pytest.mark.spec_id("REQ-TYPE-001-SCN-07")
 def test_int_encode_42_big_endian():
@@ -84,3 +85,48 @@ def test_float_encode_3_14_ieee754_be():
 def test_float_roundtrip_negative_zero():
     val, off = decode_float(encode_float(-0.0), 0)
     assert val == -0.0 and math.copysign(1.0, val) == -1.0
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-01")
+def test_parse_int_literal_positive():
+    assert parse_int_literal("42") == 42
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-02")
+def test_parse_int_literal_negative():
+    assert parse_int_literal("-7") == -7
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-03")
+def test_parse_float_literal_decimal():
+    assert parse_float_literal("3.14") == 3.14
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-04")
+def test_parse_text_literal_strips_quotes():
+    assert parse_text_literal("'hello world'") == "hello world"
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-05")
+def test_parse_bool_literal_true():
+    assert parse_bool_literal("TRUE") is True
+    assert parse_bool_literal("true") is True
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-06")
+def test_parse_bool_literal_false():
+    assert parse_bool_literal("false") is False
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-07")
+def test_parse_float_literal_rejects_NaN():
+    with pytest.raises(ValueError, match="NaN not allowed"):
+        parse_float_literal("NaN")
+
+
+@pytest.mark.spec_id("REQ-TYPE-001-SCN-08")
+def test_parse_float_literal_rejects_Infinity():
+    with pytest.raises(ValueError):
+        parse_float_literal("Infinity")
+    with pytest.raises(ValueError):
+        parse_float_literal("inf")
