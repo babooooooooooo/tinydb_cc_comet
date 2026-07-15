@@ -6,7 +6,9 @@ AST node to a dedicated ``_exec_*`` method. DDL (CREATE/DROP TABLE) is
 fully implemented; DML (INSERT/SELECT/DELETE) is wired in but raises
 ``NotImplementedError`` until later tasks land.
 """
+from tinydb.catalog import Catalog
 from tinydb.errors import ExecutionError
+from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
 from tinydb.slotted_page import SlottedPage
 
@@ -20,13 +22,13 @@ class Executor:
     flushes page 1 (the catalog slot) back to disk.
     """
 
-    def __init__(self, pager, catalog):
+    def __init__(self, pager: Pager, catalog: Catalog) -> None:
         self.pager = pager
         self.catalog = catalog
 
     # --- public dispatch ----------------------------------------------------
 
-    def execute(self, stmt):
+    def execute(self, stmt) -> list:
         """Dispatch ``stmt`` to its ``_exec_*`` handler.
 
         Returns the handler's result (DDL returns ``[]``; DML returns row
@@ -46,7 +48,7 @@ class Executor:
 
     # --- DDL: CREATE / DROP TABLE ------------------------------------------
 
-    def _exec_create_table(self, stmt: CreateTable):
+    def _exec_create_table(self, stmt: CreateTable) -> list:
         """Create an empty table and persist the catalog entry.
 
         Allocates one fresh page for the table's root (data) page,
@@ -76,7 +78,7 @@ class Executor:
         self.pager.flush()
         return []
 
-    def _exec_drop_table(self, stmt: DropTable):
+    def _exec_drop_table(self, stmt: DropTable) -> list:
         """Remove a table from the catalog.
 
         MVP behavior: best-effort drop that leaks the table's root page(s).
@@ -95,14 +97,14 @@ class Executor:
 
     # --- DML placeholders (Task 18 / Task 19) -------------------------------
 
-    def _exec_insert(self, stmt: Insert):
+    def _exec_insert(self, stmt: Insert) -> list:
         """Insert row(s) into a table. Implemented in Task 18."""
         raise NotImplementedError("INSERT implemented in Task 18")
 
-    def _exec_select(self, stmt: Select):
+    def _exec_select(self, stmt: Select) -> list:
         """Read rows from a table. Implemented in Task 19."""
         raise NotImplementedError("SELECT implemented in Task 19")
 
-    def _exec_delete(self, stmt: Delete):
+    def _exec_delete(self, stmt: Delete) -> list:
         """Delete rows from a table. Implemented in Task 19."""
         raise NotImplementedError("DELETE implemented in Task 19")
