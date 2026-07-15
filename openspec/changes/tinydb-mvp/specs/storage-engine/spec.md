@@ -102,6 +102,17 @@ The system SHALL persist the catalog (table name to schema + root_page_id) as JS
 - **THEN** the catalog MUST no longer contain `t`
 - **AND** the root page id MUST be added to a free-page list (best-effort; MVP may just leak and recover at next alloc)
 
+#### Scenario: Executor-driven CREATE TABLE persists to catalog across reopen
+- **WHEN** executing `CREATE TABLE users(id INT, name TEXT)` through the Executor
+- **AND** closing and reopening the same `.db` file
+- **THEN** the reopened catalog MUST contain `users` with its schema preserved
+- **AND** the table's root page MUST be initialized as an empty slotted page
+
+#### Scenario: Executor-driven DROP TABLE removes from catalog across reopen
+- **WHEN** executing `CREATE TABLE` then `DROP TABLE` through the Executor on the same `.db` file
+- **AND** closing and reopening the same `.db` file
+- **THEN** the reopened catalog MUST NOT contain the dropped table
+
 ### Requirement: Row CRUD executor operations
 
 The executor SHALL provide the following operations against the storage engine, accessible via `Executor.run(stmt)`.

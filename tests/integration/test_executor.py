@@ -25,7 +25,7 @@ def _exec(pager, sql):
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-STORAGE-005-SCN-02")
+@pytest.mark.spec_id("REQ-STORAGE-005-SCN-04")
 def test_create_table_persists_to_catalog(tmp_path):
     p = Pager(str(tmp_path / "x.db"))
     try:
@@ -41,7 +41,7 @@ def test_create_table_persists_to_catalog(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.spec_id("REQ-STORAGE-005-SCN-04")
+@pytest.mark.spec_id("REQ-STORAGE-005-SCN-05")
 def test_drop_table_removes_from_catalog(tmp_path):
     p = Pager(str(tmp_path / "x.db"))
     try:

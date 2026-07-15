@@ -2281,7 +2281,7 @@ def _exec(pager, sql):
     pager.write_page(1, cat.to_bytes())
     pager.flush()
 
-@pytest.mark.spec_id("REQ-STORAGE-005-SCN-02")
+@pytest.mark.spec_id("REQ-STORAGE-005-SCN-04")
 def test_create_table_persists_to_catalog(tmp_path):
     p = Pager(str(tmp_path / "x.db"))
     _exec(p, "CREATE TABLE users(id INT, name TEXT)")
@@ -2290,7 +2290,7 @@ def test_create_table_persists_to_catalog(tmp_path):
     assert cat.get_table("users").schema == [("id","INT"),("name","TEXT")]
     p.close()
 
-@pytest.mark.spec_id("REQ-STORAGE-005-SCN-04")
+@pytest.mark.spec_id("REQ-STORAGE-005-SCN-05")
 def test_drop_table_removes_from_catalog(tmp_path):
     p = Pager(str(tmp_path / "x.db"))
     _exec(p, "CREATE TABLE users(id INT)")
