@@ -6,7 +6,7 @@ AST node to a dedicated ``_exec_*`` method. DDL (CREATE/DROP TABLE) is
 fully implemented; DML (INSERT/SELECT/DELETE) is wired in but raises
 ``NotImplementedError`` until later tasks land.
 """
-from tinydb.catalog import Catalog
+from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
@@ -30,7 +30,7 @@ class Executor:
 
     # --- public dispatch ----------------------------------------------------
 
-    def execute(self, stmt) -> list:
+    def execute(self, stmt: object) -> list:
         """Dispatch ``stmt`` to its ``_exec_*`` handler.
 
         Returns the handler's result (DDL returns ``[]``; DML returns row
@@ -115,7 +115,7 @@ class Executor:
         schema = ti.schema
 
         for row_vals in stmt.values:
-            typed: list = []
+            validated: list = []
             for (_name, col_type), v in zip(schema, row_vals):
                 # py_to_db returns the encoded bytes for valid types and
                 # raises TypeError/ValueError for invalid ones — we only
@@ -123,13 +123,13 @@ class Executor:
                 try:
                     py_to_db(v, col_type)
                 except (TypeError, ValueError) as e:
-                    raise ExecutionError(str(e)) from e
-                typed.append(v)
-            row_bytes = encode_row(typed, schema)
+                    raise ExecutionError(f"column {_name}: {e}") from e
+                validated.append(v)
+            row_bytes = encode_row(validated, schema)
             self._insert_row_into_chain(ti, row_bytes)
         return []
 
-    def _insert_row_into_chain(self, ti, row_bytes: bytes) -> int:
+    def _insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> int:
         """Walk the data-page chain, allocating a new page when full.
 
         Starts at ``ti.root_page_id`` and tries ``SlottedPage.insert`` on
@@ -158,7 +158,7 @@ class Executor:
             self.pager.flush()
             return pid
 
-    def _scan_table(self, ti) -> list:
+    def _scan_table(self, ti: TableInfo) -> list[tuple[int, list, int]]:
         """Linear-scan all data pages, filtering tombstones.
 
         Iterates page ids from ``ti.root_page_id`` through
