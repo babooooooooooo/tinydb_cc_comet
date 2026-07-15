@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 13: Tokenizer — identifier/keyword/punct/literal（tasks.md §6.1-6.7）`
-- **openspec task**: `6.1/6.2/6.3/6.4/6.5/6.6/6.7 tokenizer.tokenize + 关键字 + 字面量 + punctuation + TokenError`
-- **阶段**: `ready_to_dispatch`（等 Task 12 checkpoint 落盘后启动）
+- **plan task**: `### Task 14: Tokenizer — 字面量层 + NaN/Inf 拒绝（tasks.md §6.4-6.5）`
+- **openspec task**: `6.4/6.5 integer/float/text literal + bool literal 连接到 type_system 拒绝逻辑`
+- **阶段**: `ready_to_dispatch`（等 Task 13 checkpoint 落盘后启动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 12 完成（Catalog + JSON 持久化 + INT-as-string）
+- **依赖**: Task 13 完成（Tokenizer 主体 + doubled-quote bug 修复 + 14 测试）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -61,6 +61,19 @@
   - **关键教训**: 上一轮 Task 6 我用"选项 A 接受 MINOR"决策（行数偏差）是对的（可推迟），但 Task 7 是**真实 spec 偏差**（异常类不在层级内）—— 阻塞性问题必须走 review-fix 循环，不能用"接受偏差"绕过。**subagent-driven-development 的 review-fix 循环是质量底线**
   - 接受的 MINOR: 行数 99 vs plan 80 / `self._path` 私有 vs plan `self.path` 公开 / plan `MAGIC = b"TINYDB\x00"` (7B) vs 实现 `b'TINYDB\x00\x01'` (8B) — 实现版本与 spec 一致，plan 应更新（archive 阶段）
   - Opportunistic 修缮（M-3 from Task 7 review）：同步 plan §Task 7 reference 的 `MAGIC` 字面值与 spec + 实现一致
+
+- **Task 13: Tokenizer — identifier / keyword / punctuation（tasks.md §6.1-6.3 + §6.6 + §6.7）** — ✅ 已勾选（经历 1 轮 review-fix-re-review + 2 个协调者 commit）
+  - implementer #1(DONE, 4 passed, 122 行) → thorough reviewer(❌ NEEDS_FIXES, **C-1 doubled-quote 双重解码 bug** + I-1 测试覆盖不足 + I-2 死 import + M-1 末尾换行 + M-2 design.md 命名漂移)
+  - **fix implementer #1** (被 token 上限中断): 完成 10 个新测试 (test_tokenizer.py 142 行)，但未修改实现
+  - **fix implementer #2** (haiku 接续): commit `3a069d8` — 修复 doubled-quote 双重解码 + 移除 `parse_bool_literal` 死 import。**关键修复**: scanner 移除 `buf` 缓冲，`raw = sql[i:j+1]` 直接切片，`parse_text_literal` 作为唯一折叠入口
+  - **协调者补充**: commit `19827b3` — SCN-13 测试期望 bug 修复（line==3 → line==2，因为输入只有一个 `\n`）+ design.md:45 `tokenizer.scan` → `tokenizer.tokenize` 命名漂移修复（M-2）；commit `b1841b4` — M-1 末尾换行修复
+  - re-reviewer(⚠️ APPROVED_WITH_CONCERNS, C-1 + I-1 + I-2 + SCN-13 + M-2 全部 ADDRESSED, 仅 M-1 残留) → 协调者补 M-1 后 Task 13 完整出关
+  - 提交链: `5c5e300`（实现）+ `3a069d8`（Fix 1+3 haiku）+ `19827b3`（协调者 SCN-13 + design）+ `b1841b4`（协调者 M-1） + 本次（plan+tasks.md 勾选）
+  - **关键治理决策**: C-1 doubled-quote bug 走"标准 implementer 修复循环"（与 Task 11 C-1 spec patch 路径不同）。**Task 11 C-1 是 spec 治理问题 → 协调者 spec patch 路径**；**Task 13 C-1 是实现数据正确性问题 → implementer 修复循环路径**。两条路径并存，按问题性质选择
+  - **token 上限事件**: fix implementer #1 中断时未保留 commit，但测试文件已写盘 142 行。fix implementer #2 (haiku) 接续完成 Fix 1+3，体现了 subagent-driven-development 的 fresh-subagent-per-task 韧性（不依赖上下文继承）
+  - 接受的 MINOR: 全部 0 残留（reviewer 后续 M-1 已修复）
+  - Opportunistic 队列追加: 无（Task 13 完整出关）
+  - 14/14 row_codec-style tests + 87/87 全量
 
 - **Task 12: Catalog — JSON 持久化（tasks.md §5.1-5.5）** — ✅ 已勾选
   - implementer(DONE, TDD RED→GREEN 4 passed, 84 行, 60 行测试) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, 0 Important, 11 Minor 全部可推迟)

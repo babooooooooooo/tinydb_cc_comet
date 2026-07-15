@@ -1609,7 +1609,7 @@ git commit -m "feat(catalog): JSON-encoded catalog with INT-as-string for 2^53-s
 - Test: `tests/unit/test_tokenizer.py`
 - Modify: `src/tinydb/tokenizer.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/unit/test_tokenizer.py
@@ -1647,12 +1647,12 @@ def test_tokenizer_error_reports_position():
     assert excinfo.value.col == 1
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_tokenizer.py -v`
 Expected: ImportError `tokenize`
 
-- [ ] **Step 3: 实现 tokenizer 主体（identifier/keyword/punct/position）**
+- [x] **Step 3: 实现 tokenizer 主体（identifier/keyword/punct/position）**
 
 ```python
 # src/tinydb/tokenizer.py
@@ -1775,12 +1775,12 @@ def _advance(i, line, col, c):
 
 并对所有字符消费改用此 helper。完整重写见提交时版本。
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_tokenizer.py -v`
 Expected: PASS（4 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/tokenizer.py tests/unit/test_tokenizer.py
