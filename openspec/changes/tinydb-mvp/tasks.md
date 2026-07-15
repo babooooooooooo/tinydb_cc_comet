@@ -20,8 +20,8 @@
 - [x] 2.4 实现 `type_system.py::encode_bool / decode_bool`（1 字节 0/1），绿：跑通 BOOL roundtrip
 - [x] 2.5 实现 `type_system.py::encode_float / decode_float`（`struct.pack('>d', v)`），绿：跑通 FLOAT roundtrip
 - [x] 2.6 在 `tokenizer.py` 中实现 4 个字面量识别（`parse_int_literal`、`parse_float_literal`、`parse_text_literal`、`parse_bool_literal`），绿：跑通 4 类型字面量解析 + NaN/Inf 拒绝
-- [ ] 2.7 实现 `type_system.py::py_to_db(value, column_type)` 与 `db_to_py(bytes, column_type)`，绿：跑通所有 Python ↔ DB 转换用例（含 float NaN 拒绝、float→INT 拒绝）
-- [ ] 2.8 实现 `type_system.py::validate_compare(col_value, lit_value)` 用于 executor 严格类型守卫，绿：跑通 strict type coercion rejection 用例
+- [x] 2.7 实现 `type_system.py::py_to_db(value, column_type)` 与 `db_to_py(bytes, column_type)`，绿：跑通所有 Python ↔ DB 转换用例（含 float NaN 拒绝、float→INT 拒绝）
+- [x] 2.8 实现 `type_system.py::validate_compare(col_value, lit_value)` 用于 executor 严格类型守卫，绿：跑通 strict type coercion rejection 用例
 
 ## 3. 存储引擎 · Pager 层（spec: storage-engine, file/page 部分）
 

@@ -630,7 +630,7 @@ git commit -m "feat(type-system): add literal parsers with NaN/Inf rejection"
 - Modify: `tests/unit/test_type_system.py`
 - Modify: `src/tinydb/type_system.py`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 from tinydb.type_system import py_to_db, db_to_py, validate_compare
@@ -677,12 +677,12 @@ def test_db_to_py_roundtrip_int():
     assert db_to_py(b"\x00\x00\x00\x00\x00\x00\x00\x2a", "INT") == 42
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_type_system.py -v -k "py_to_db or db_to_py or validate"`
 Expected: ImportError
 
-- [ ] **Step 3: 实现 `py_to_db` / `db_to_py` / `validate_compare`**
+- [x] **Step 3: 实现 `py_to_db` / `db_to_py` / `validate_compare`**
 
 ```python
 def py_to_db(value, column_type: str) -> bytes:
@@ -727,17 +727,17 @@ def validate_compare(col_bytes: bytes, col_type: str,
             raise ValueError("FLOAT inf/NaN not allowed")
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_type_system.py -v`
-Expected: PASS（30 passed）
+Expected: PASS（30 passed；实际 31 passed：implementer 多加了 1 个 roundtrip 测试，详见 commit `81064c5`）
 
-- [ ] **Step 5: 行数审计**
+- [x] **Step 5: 行数审计**
 
 Run: `wc -l src/tinydb/type_system.py`
-Expected: ≤ 100 行
+Expected: ≤ 100 行（实际 129 行，**+29 MINOR 偏差**；协调者决策接受，理由：4 路 if-守卫 + 注释无法在不损可读性下压缩；< 模块 150 行硬上限）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/type_system.py tests/unit/test_type_system.py
