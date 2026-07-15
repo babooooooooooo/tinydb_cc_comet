@@ -13,18 +13,21 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 2: Type System — INT 编解码（tasks.md §2.2）`
-- **openspec task**: `2.2 实现 type_system.py::encode_int / decode_int（8-byte big-endian）`
+- **plan task**: `### Task 3: Type System — TEXT 编解码（tasks.md §2.3）`
+- **openspec task**: `2.3 实现 type_system.py::encode_text / decode_text（length-prefixed UTF-8）`
 - **阶段**: `implementing`（待派发 implementer）
-- **审查-修复轮次**: 0（thorough 上限 2 轮）
-- **依赖**: Task 1 已完成勾选
+- **审查-修复轮次**: 0
+- **依赖**: Task 2 已完成勾选
 
 ## 已完成 Task
 
+- **Task 2: Type System INT 编解码（tasks.md §2.2）** — ✅ 已勾选
+  - implementer(DONE, TDD RED→GREEN 5 passed) → thorough reviewer(APPROVED)
+  - 提交: `7d9401c`
+  - 接受的 MINOR（记录）: M1 非-int 输入不在本任务职责（留 Task 5 py_to_db 处理）；M2 负数 roundtrip 测试复用 SCN-07 标记（traceability 建议，不阻塞）
 - **Task 1: 项目骨架与配置（tasks.md §1，1.1–1.5）** — ✅ 已勾选
-  - implementer(DONE_WITH_CONCERNS) → spec review(PASSED, 2 偏差已接受) → code quality review(approved-with-concerns) → final-fix 第1轮(DONE)
-  - 骨架提交: `7842098`；concerns 修复提交: `87ef1ef`（I1 markers + I3 EOF newlines + I2 README status）
-  - 遗留提醒: Task 20 须替换 `__init__.py` 的 Database/Row placeholder（见 memory task-20-placeholder）
+  - 骨架 `7842098` + concerns 修复 `87ef1ef` + 勾选 `31db9df`
+  - 遗留提醒: Task 20 须替换 `__init__.py` 的 Database/Row placeholder
 
 ## 待办 Task（plan 顺序）
 

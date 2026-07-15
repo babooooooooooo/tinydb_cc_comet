@@ -15,7 +15,7 @@
 ## 2. 类型系统（spec: type-system-basic）
 
 - [ ] 2.1 编写 `tests/unit/test_type_system.py`，红：覆盖 `specs/type-system-basic/spec.md` 中所有 Scenario 用例
-- [ ] 2.2 实现 `type_system.py::encode_int / decode_int`（8-byte big-endian），绿：跑通 INT roundtrip + OverflowError
+- [x] 2.2 实现 `type_system.py::encode_int / decode_int`（8-byte big-endian），绿：跑通 INT roundtrip + OverflowError
 - [ ] 2.3 实现 `type_system.py::encode_text / decode_text`（length-prefixed UTF-8），绿：跑通 TEXT roundtrip + UnicodeEncodeError
 - [ ] 2.4 实现 `type_system.py::encode_bool / decode_bool`（1 字节 0/1），绿：跑通 BOOL roundtrip
 - [ ] 2.5 实现 `type_system.py::encode_float / decode_float`（`struct.pack('>d', v)`），绿：跑通 FLOAT roundtrip

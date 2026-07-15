@@ -293,7 +293,7 @@ git commit -m "chore: scaffold tinydb MVP package skeleton with empty modules"
 - Test: `tests/unit/test_type_system.py`
 - Create: `src/tinydb/type_system.py`
 
-- [ ] **Step 1: 写失败测试（INT encode/decode + Overflow）**
+- [x] **Step 1: 写失败测试（INT encode/decode + Overflow）**
 
 ```python
 # tests/unit/test_type_system.py
@@ -326,12 +326,12 @@ def test_int_roundtrip_negative():
     assert val == -1 and off == 8
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_type_system.py -v`
 Expected: ImportError / AttributeError `encode_int`
 
-- [ ] **Step 3: 写 INT 编解码实现**
+- [x] **Step 3: 写 INT 编解码实现**
 
 在 `src/tinydb/type_system.py` 顶部添加：
 
@@ -354,12 +354,12 @@ def decode_int(buf: bytes, offset: int) -> tuple[int, int]:
     return struct.unpack_from(_INT_FMT, buf, offset)[0], offset + _INT_SIZE
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_type_system.py -v`
 Expected: PASS（5 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/type_system.py tests/unit/test_type_system.py
