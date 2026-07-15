@@ -84,12 +84,14 @@
 
 ## 9. Python API（spec: python-api）
 
-- [ ] 9.1 编写 `tests/integration/test_database_api.py`，红：覆盖 file-backed 持久化、`:memory:` 不写盘、context manager、execute 行为（SELECT/DDL/DML/multi-statement）、ParseError / ExecutionError 传播、Row 属性访问 / 迭代 / repr / 等价
-- [ ] 9.2 实现 `database.py::Database` 类：`__init__(path)`、`__enter__`、`__exit__`、`close()`、`execute(sql)`
-- [ ] 9.3 实现 `Row` 数据类：`__init__(values, columns)`、`__getattr__`、`__iter__`、`__repr__`、`__eq__`、`__iter__` schema 顺序
-- [ ] 9.4 在 `Database.execute` 内串联：tokenize → parse → executor.execute → 包装为 list[Row] 或 []
-- [ ] 9.5 错误映射：parser 抛 `ParseError` 时重新 raise 为 `tinydb.errors.ParseError`（保持兼容）；executor 抛 `KeyError(no such table)` 等转为 `tinydb.errors.ExecutionError`
-- [ ] 9.6 MVP 限定保证：`Database` 类**不实现** `begin` / `commit` / `rollback`（留给 tinydb-acid），并在 docstring 明确声明
+- [x] 9.1 编写 `tests/integration/test_database_api.py`，红：覆盖 file-backed 持久化、`:memory:` 不写盘、context manager、execute 行为（SELECT/DDL/DML/multi-statement）、ParseError / ExecutionError 传播、Row 属性访问 / 迭代 / repr / 等价
+- [x] 9.2 实现 `database.py::Database` 类：`__init__(path)`、`__enter__`、`__exit__`、`close()`、`execute(sql)`
+- [x] 9.3 实现 `Row` 数据类：`__init__(values, columns)`、`__getattr__`、`__iter__`、`__repr__`、`__eq__`、`__iter__` schema 顺序
+- [x] 9.4 在 `Database.execute` 内串联：tokenize → parse → executor.execute → 包装为 list[Row] 或 []
+- [x] 9.5 错误映射：parser 抛 `ParseError` 时重新 raise 为 `tinydb.errors.ParseError`（保持兼容）；executor 抛 `KeyError(no such table)` 等转为 `tinydb.errors.ExecutionError`
+- [x] 9.6 MVP 限定保证：`Database` 类**不实现** `begin` / `commit` / `rollback`（留给 tinydb-acid），并在 docstring 明确声明
+
+> Task 20 完成于 `87a996f` + `24ccfcd`（Round 1 code quality fix）。25 tests pass + 142 全量回归通过。Database 89 行（≤ 90 预算）。详见 plan §Task 20 step 5 行数审计 / spec reviewer 报告 §2 / code quality round 2 报告 §2。
 
 ## 10. 端到端 SQL 测试集 + 属性测试
 

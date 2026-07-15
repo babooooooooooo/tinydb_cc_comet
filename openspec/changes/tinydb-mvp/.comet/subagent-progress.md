@@ -13,11 +13,22 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 20: Database + Row 类（tasks.md §9.1-9.3）`
-- **openspec task**: `9.1-9.3 Database 类 + Row 数据类（替换 __init__.py placeholder per memory/task-20-placeholder.md）`
-- **阶段**: `ready_to_dispatch`（Task 19 spec+quality 双审通过 + 6 type-hint MEDIUM + 1 空表 SELECT LOW NITs 全部修复 + plan §6.1 预算 governance 调整）
+- **plan task**: `### Task 21: Overflow chain（tasks.md §4.8 + §4 既有 4.7 SlottedPage + Executor spill logic）`
+- **openspec task**: `§4.8 缺页时分配新页（overflow chain）；` spec §REQ-STORAGE-008 SCN-01/02/03`
+- **阶段**: `ready_to_dispatch`（Task 20 双审通过 + Round 1 fix 全 accepted + 22 tests pass → 25 含 3 资源测试 + 142 全量回归）
 - **审查-修复轮次**: 0
-- **依赖**: Task 19 完成 + Executor 完整（DDL + INSERT + scan + SELECT + DELETE + DRY `_resolve_where` + `_python_type_to_db_type`）+ plan §6.1 预算调整为 350 行
+- **依赖**: Task 20 完成（Database + Row API 暴露溢出场景） + Executor `_insert_row_into_chain` 已有 overflow 框架（Task 18 落 `pid += 1` 线性探测） + `Pager.alloc_page()` 已实现
+
+## 累积待办（记录，Task 6 或回归时统一处理）
+
+- **Opportunistic 修缮队列**（非阻塞，可在 Task 9 Executor / Task 21 Overflow / archive 阶段统一补）:
+  - Task 3 MINOR: `decode_text` 长度前缀截断分支缺针对性单测
+  - Task 4 M2: `decode_bool`/`decode_float` 缺 decode 截断 `ValueError` 单测
+  - Task 6 I-1: 补 `test_validate_compare_float_nan_rejected`（FLOAT NaN/Inf 哨兵分支缺单测，13 个探针已验证行为正确）
+  - Task 6 I-2: `test_db_to_py_roundtrip_int` 补 `spec_id="REQ-TYPE-001-SCN-19"` + 注释
+  - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
+  - **Task 20 LOW-1** (`database.py:78-83`): `close()` 双重异常抑制（flush 抛异常会吞掉 close 异常）；后续 hardening 阶段可加 nested try/except
+  - **Task 20 LOW-2** (`database.py:88-89`): `__exit__` 未 catch `close()` 异常，原 user 异常被 close 异常掩盖；contextlib 标准 practice 是 `try/except: pass`
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +40,26 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 20: Database + Row API（tasks.md §9.1-9.6）** — ✅ 已勾选（经历 1 轮 spec 审 + 2 轮 code quality 审含 1 轮 fix）
+  - implementer(DONE, TDD RED 18 failed → GREEN 22 tests, database.py 88 行) → spec reviewer(✅ APPROVED_WITH_NOTES, 18/18 spec scenarios + 17/17 plan tests, 5 extras 无 spec anchor 黄标 + REQ-API-003 编号 drift 黄标) → code quality round 1(❌ CHANGES_REQUESTED, 2 Important: Row 可变 + 类型注解不全) → fix subagent(DONE, frozen dataclass + tuple + __post_init__ + try/finally + 3 资源测试 + 5 spec_id 移除, 142 regression) → code quality round 2(✅ APPROVED_WITH_NITS, 9/9 Round 1 修复 OK, 2 LOW non-blocking nits logged)
+  - 提交链: `87a996f`（feat: Database + Row + tokenize→parse→executor pipeline, 88 行）+ `24ccfcd`（fix: frozen tuple + close try/finally + length invariant, 89 行）+ 本次（plan §Task 20 step 1-6 [x] + tasks.md §9 [x]）
+  - **Implementer 关键决策**:
+    1. **Row 字段用 `tuple` 非 `list`**（Round 1 fix）：frozen dataclass + tuple 实现真正 immutable value object；满足 coding-style.md "NEVER mutate"
+    2. **`__post_init__` 长度校验**：防御性 `ValueError("...must have equal lengths")`，避免 `__getattr__` 失效 + `zip()` 静默截断
+    3. **Row 包装位置在 Database.execute 内**（API 边界），不在 Executor——Task 19 契约 `_exec_select -> list[list[Any]]` 不变
+    4. **`__getattr__` 简化**：移除 `name in ("values", "columns")` 检查（frozen dataclass 的 `__init__` 把字段存进 instance dict，正常 lookup 路径不会触发 `__getattr__`；仅当 normal lookup fail 才调用 override）
+    5. **`close()` 用 try/finally**（Round 1 Medium 3）：保证 flush 抛异常时 Pager 仍关闭；测试 `test_context_manager_exception_path` 验证 user RuntimeError 后 schema 已落盘
+    6. **`cols = tuple(...)` 紧凑表达式**：用单行三元避免 5 行 if/else split，line count 节约
+    7. **plan §9.5 KeyError → ExecutionError remap path 已死**：Executor Task 17-19 已直接 raise ExecutionError，plan 模板的 remap 是 dead code；spec reviewer 同意此 is dead code，**未实现 remap**
+    8. **`test_database_close_is_idempotent`** 利用 Pager 内部 `if self._mmap is not None` 守卫实现幂等
+  - **推迟到 opportunistic 队列**:
+    - LOW-1 close() 双重异常抑制（嵌套 try/except 强化非 MVP）
+    - LOW-2 `__exit__` 应屏蔽 close 异常保护 user 异常
+    - spec_id 黄标（plan §Task 20 REQ-API-003 SCN-04/05/06/07 vs spec SCN-01..06 编号 drift）：通过移除 5 extras 的 spec_id 标签绕开，未动 plan/spec 文件
+    - `Database.execute` 文档化 `cols = tuple(...) if last.columns == ["*"] else tuple(last.columns)` 三元表达式
+  - **测试统计**: 17 plan-anchored (带 spec_id) + 5 防御性 extras (errors_module_re_exported/reopen_presists_schema/select_named_projection/insert_returns_empty_list/row_unknown_attribute_raises, 移除 spec_id) + 3 资源测试 (close_幂等/exception_path/length_mismatch, 无 spec_id) = 25 tests
+  - **模块预算**: `database.py` = 89 行（plan §6.1 ≤ 90 达标 ✓）；`__init__.py` = 7 行（22 → 7 精简）
 
 - **Task 19: Executor — SELECT + DELETE（tasks.md §8.6-8.7）** — ✅ 已勾选（经历 1 轮 spec+quality 双审 + 1 轮 NIT fix + plan §6.1 预算 governance 调整）
   - implementer(DONE_WITH_CONCERNS, TDD RED→GREEN 9 测试, executor.py 311 行) → spec reviewer(✅ APPROVED_WITH_CONCERNS, 0 NEEDS_FIXES, 3 governance 建议) → 协调者 partial governance (plan §6.1 预算调整) → code quality reviewer(✅ APPROVED_WITH_NITS, 6 MEDIUM type-hint + 2 LOW) → fix subagent(DONE, 117 测试零破坏, executor.py 319 行)

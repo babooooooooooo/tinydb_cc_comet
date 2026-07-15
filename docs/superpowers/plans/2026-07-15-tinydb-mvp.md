@@ -2649,7 +2649,7 @@ git commit -m "feat(executor): SELECT projection + WHERE equality + DELETE tombs
 - Test: `tests/integration/test_database_api.py`
 - Create: `src/tinydb/database.py`
 
-- [ ] **Step 1: 写失败测试（导入、context manager、Row）**
+- [x] **Step 1: 写失败测试（导入、context manager、Row）**
 
 ```python
 # tests/integration/test_database_api.py
@@ -2776,12 +2776,22 @@ def test_database_has_no_transaction_methods():
         assert not hasattr(Database, m), f"Database must not have {m}"
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED** (Task 20)
 
 Run: `pytest tests/integration/test_database_api.py -v`
 Expected: ImportError `Database`
 
-- [ ] **Step 3: 实现 Database + Row**
+实际 RED: 18/22 failed（`NotImplementedError: Database is implemented in Task 20` 来自 `__init__.py` 占位 stub），4/22 passed（仅 import/version/errors 的非 Database 测试）。TDD RED 已验证 ✓。
+
+- [x] **Step 3: 实现 Database + Row**
+
+实际实施相对 plan 模板 4 处主动偏离（Round 2 fix commit `24ccfcd` 之后）：
+1. Row 字段用 `tuple[Any, ...]`/`tuple[str, ...]` + `@dataclass(frozen=True)`（非 plan 模板的 `list` 可变；immutable per coding-style.md）
+2. 数据库连接错误用 try/finally 而非裸调，确保 flush 失败时 close 仍执行
+3. 新增 `__post_init__` 校验 `len(values) == len(columns)`，不等抛 ValueError
+4. `Database.execute` 中 Row 包装用 `Row(values=tuple(r), columns=tuple(cols))` 防御性转换
+
+plan §9.5 的 `except KeyError → ExecutionError` 路径实际被取消（Executor 已直接 raise ExecutionError，remap 路径不可达，是 plan 模板的 stale 死代码；spec reviewer 已 verified this is dead code）。
 
 ```python
 # src/tinydb/database.py
@@ -2858,17 +2868,27 @@ class Database:
     def __exit__(self, *a): self.close()
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/integration/test_database_api.py -v`
-Expected: PASS（约 16 passed）
+Expected: PASS（**25 passed** = 17 plan-anchored + 5 防御性 extras + 3 Round 1 fix 新增资源测试）
 
-- [ ] **Step 5: 行数审计**
+注：实际测试数超出 plan Step 1 估算的 16。偏差成因：spec reviewer 发现 `test_database_has_no_transaction_methods` 实际在 plan Step 1 第 17 个测试中（与 plan 行 2773-2776 一致），所以 plan-anchored 是 17 不是 16。另外 Implementer 加 5 个防御性测试覆盖 schema reopen/named projection/unknown attribute/errors re-export/insert empty return；Round 1 code quality fix 加 3 个资源测试 (close 幂等/exception 路径/length 不变量)。8 个超出 plan 的测试保留在文件中，不带 `spec_id` 标签（spec 实际未定义这些 SCN）。
+
+- [x] **Step 5: 行数审计** (Task 20)
 
 Run: `wc -l src/tinydb/database.py`
 Expected: ≤ 90 行
 
-- [ ] **Step 6: Commit**
+实际行数：`src/tinydb/database.py` = **89 行**（≤ 90 — 达标 ✓）。
+
+紧凑策略：合并 `Row.__post_init__` 到 4 行，`Row.__getattr__` 简化（无 try/except ValueError），`Database.__init__.__doc__` 压缩到 1 行。Round 1 fix 在边缘（原本 90 行）加 `try/finally` + `__post_init__` 会超，最终通过紧凑 `__getattr__` 节省 2 行 ≤ 90。
+
+- [x] **Step 6: Commit**
+
+实际 2 个 commit:
+1. `87a996f feat(api): Database.execute pipeline with Row dataclass and error mapping`
+2. `24ccfcd fix(api): Task 20 code quality fixes — frozen Row + close try/finally + length invariant + resource tests`（Round 1 code quality review CHANGES_REQUESTED 修复）
 
 ```bash
 git add src/tinydb/database.py tests/integration/test_database_api.py
