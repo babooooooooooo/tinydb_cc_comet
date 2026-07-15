@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from tinydb.errors import TokenError
 from tinydb.type_system import (
-    parse_bool_literal,
     parse_float_literal,
     parse_int_literal,
     parse_text_literal,
@@ -96,19 +95,22 @@ def tokenize(sql: str) -> list[Token]:
         if c == "'":
             start_col = col
             j = i + 1
-            buf: list[str] = []
             while j < n:
                 if sql[j] == "'":
+                    # doubled-quote ('') is an escape for a literal quote;
+                    # skip both characters without consuming the body content.
                     if j + 1 < n and sql[j + 1] == "'":
-                        buf.append("'")
                         j += 2
                         continue
                     break
-                buf.append(sql[j])
                 j += 1
             if j >= n:
                 raise TokenError(line, start_col, "unterminated text literal")
-            val = parse_text_literal("'" + "".join(buf) + "'")
+            # raw contains the complete literal (boundary quotes + '' escapes).
+            # parse_text_literal performs the single '' -> ' decode — folding here
+            # would double-decode and turn "''" into "'".
+            raw = sql[i:j + 1]
+            val = parse_text_literal(raw)
             tokens.append(Token("TEXT", val, line, start_col))
             for k in range(i, j + 1):
                 i, line, col = _advance(i, line, col, sql[k])
