@@ -100,23 +100,11 @@ def test_parse_select_with_where():
 @pytest.mark.unit
 @pytest.mark.spec_id("REQ-PARSE-005-SCN-04")
 def test_parse_select_rejects_unsupported_operator():
-    # Build tokens directly: tokenizer.py's PUNCT list is `(),;=*` (Task 13)
-    # and does NOT include `>`. The spec scenario `WHERE id > 1` therefore
-    # cannot reach the parser without bypassing tokenization. Pre-built
-    # tokens let us exercise the same parser branch the spec mandates.
-    tokens = [
-        Token("KEYWORD", "SELECT", 1, 1),
-        Token("PUNCT", "*", 1, 8),
-        Token("KEYWORD", "FROM", 1, 10),
-        Token("IDENT", "users", 1, 15),
-        Token("KEYWORD", "WHERE", 1, 21),
-        Token("IDENT", "id", 1, 27),
-        Token("PUNCT", ">", 1, 30),
-        Token("INT", 1, 1, 32),
-        Token("EOF", None, 1, 33),
-    ]
+    # End-to-end after C-1 governance fix: tokenizer PUNCT set now includes
+    # `<>` so `WHERE id > 1` tokenizes successfully and reaches the parser,
+    # which raises ParseError for unsupported comparison operators.
     with pytest.raises(ParseError, match=r"operator > not supported"):
-        parse(tokens)
+        parse(tokenize("SELECT * FROM users WHERE id > 1"))
 
 
 @pytest.mark.unit

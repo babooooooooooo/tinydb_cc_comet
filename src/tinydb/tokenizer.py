@@ -122,7 +122,7 @@ def tokenize(sql: str) -> list[Token]:
                 i, line, col = _advance(i, line, col, sql[k])
             continue
         # punctuation
-        if c in "(),;=*":
+        if c in "(),;=*<>":
             tokens.append(Token("PUNCT", c, line, col))
             i, line, col = _advance(i, line, col, c)
             continue

@@ -57,7 +57,7 @@
 - [x] 6.3 实现关键字字典（CREATE / TABLE / DROP / INSERT / INTO / VALUES / SELECT / FROM / WHERE / TRUE / FALSE / INT / TEXT / FLOAT / BOOL），绿：跑通 keyword 大小写不敏感用例
 - [x] 6.4 实现 integer / float / text literal 三种字面量解析，text 含 doubled-quote 转义，绿：跑通字面量用例
 - [x] 6.5 实现 boolean literal（识别 TRUE / FALSE token），连接到 type_system 的字面量拒绝逻辑，绿：跑通 bool literal
-- [x] 6.6 实现 punctuation（`( ) , ; = *`），绿：跑通 punctuation 用例
+- [x] 6.6 实现 punctuation（`( ) , ; = * < >`，含 Task 16 C-1 governance 扩展比较运算符），绿：跑通 punctuation 用例
 - [x] 6.7 错误路径：`TokenError(line, col, message)`，绿：跑通 `@` 报 TokenError 用例
 
 ## 7. SQL · Parser（spec: sql-minimal-parser parser 部分）

@@ -37,6 +37,20 @@ def test_tokenize_punctuation():
 
 
 @pytest.mark.unit
+@pytest.mark.spec_id("REQ-PARSE-001-SCN-05")
+def test_tokenize_punctuation_comparison_ops():
+    # Regression for C-1 governance: PUNCT extended to include `<` and `>`
+    # so spec §REQ-PARSE-005-SCN-04 (WHERE id > 1) can tokenize end-to-end
+    # and reach the parser for unsupported-operator check.
+    toks = tokenize("WHERE id < 5")
+    puncts = [t.value for t in toks if t.type == "PUNCT"]
+    assert "<" in puncts and ">" not in puncts
+    toks = tokenize("WHERE id > 5")
+    puncts = [t.value for t in toks if t.type == "PUNCT"]
+    assert ">" in puncts and "<" not in puncts
+
+
+@pytest.mark.unit
 @pytest.mark.spec_id("REQ-PARSE-001-SCN-06")
 def test_tokenizer_error_reports_position():
     with pytest.raises(TokenError) as excinfo:
