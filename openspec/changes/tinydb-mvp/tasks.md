@@ -62,11 +62,11 @@
 
 ## 7. SQL · Parser（spec: sql-minimal-parser parser 部分）
 
-- [ ] 7.1 编写 `tests/unit/test_parser.py`，红：覆盖 5 个语句的 AST 形状、column 重复、类型不支持、count mismatch、未支持操作符、ParseError 携带位置、StatementList 多语句
-- [ ] 7.2 实现 `parser.py::parse(tokens)` 主入口：循环解析语句，分号分隔，返回 `StatementList`
-- [ ] 7.3 定义 AST 数据类（`StatementList`、`CreateTable`、`DropTable`、`Insert`、`Select`、`Delete`），所有节点带 `line`、`col`
-- [ ] 7.4 实现 `parse_create_table`：识别 `CREATE TABLE name (col TYPE, ...)`；重复列名检测；不支持类型 raise ParseError，绿：跑通 CreateTable 用例
-- [ ] 7.5 实现 `parse_drop_table`：识别 `DROP TABLE name`；缺失表名 raise ParseError，绿：跑通 DropTable 用例
+- [x] 7.1 编写 `tests/unit/test_parser.py`，红：覆盖 5 个语句的 AST 形状、column 重复、类型不支持、count mismatch、未支持操作符、ParseError 携带位置、StatementList 多语句
+- [x] 7.2 实现 `parser.py::parse(tokens)` 主入口：循环解析语句，分号分隔，返回 `StatementList`
+- [x] 7.3 定义 AST 数据类（`StatementList`、`CreateTable`、`DropTable`、`Insert`、`Select`、`Delete`），所有节点带 `line`、`col`
+- [x] 7.4 实现 `parse_create_table`：识别 `CREATE TABLE name (col TYPE, ...)`；重复列名检测；不支持类型 raise ParseError，绿：跑通 CreateTable 用例
+- [x] 7.5 实现 `parse_drop_table`：识别 `DROP TABLE name`；缺失表名 raise ParseError，绿：跑通 DropTable 用例
 - [ ] 7.6 实现 `parse_insert`：识别 `INSERT INTO name (cols) VALUES (row), (row)`；列数不匹配 raise ParseError，绿：跑通 Insert 用例
 - [ ] 7.7 实现 `parse_select`：识别 `SELECT * | cols FROM name [WHERE col = lit]`；不支持操作符 raise ParseError；缺失 FROM raise ParseError，绿：跑通 Select 用例
 - [ ] 7.8 实现 `parse_delete`：识别 `DELETE FROM name [WHERE col = lit]`；WHERE 可选，绿：跑通 Delete 用例

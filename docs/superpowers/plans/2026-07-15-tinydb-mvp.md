@@ -1847,7 +1847,7 @@ git commit -m "test(tokenizer): cover integer/float/text/NaN literal paths"
 - Test: `tests/unit/test_parser.py`
 - Create: `src/tinydb/parser.py`
 
-- [ ] **Step 1: 写失败测试（CREATE/DROP AST 形状 + 错误）**
+- [x] **Step 1: 写失败测试（CREATE/DROP AST 形状 + 错误）**
 
 ```python
 # tests/unit/test_parser.py
@@ -1883,12 +1883,12 @@ def test_parse_drop_table_missing_name_raises():
         parse(tokenize("DROP TABLE"))
 ```
 
-- [ ] **Step 2: 跑测试验证 RED**
+- [x] **Step 2: 跑测试验证 RED**
 
 Run: `pytest tests/unit/test_parser.py -v`
 Expected: ImportError `parse`
 
-- [ ] **Step 3: 实现 AST + parse() + CREATE/DROP**
+- [x] **Step 3: 实现 AST + parse() + CREATE/DROP**
 
 ```python
 # src/tinydb/parser.py
@@ -2030,12 +2030,12 @@ def parse(tokens: list[Token]) -> StatementList:
     return _Parser(tokens).parse_statement_list()
 ```
 
-- [ ] **Step 4: 跑测试验证 GREEN**
+- [x] **Step 4: 跑测试验证 GREEN**
 
 Run: `pytest tests/unit/test_parser.py -v`
 Expected: PASS（5 passed）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tinydb/parser.py tests/unit/test_parser.py
