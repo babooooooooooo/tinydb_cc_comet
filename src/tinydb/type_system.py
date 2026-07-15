@@ -30,3 +30,26 @@ def decode_text(buf: bytes, offset: int) -> tuple[str, int]:
     if offset + 2 + n > len(buf):
         raise ValueError(f"TEXT payload truncated (need {n} bytes)")
     return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
+
+
+def encode_bool(value: bool) -> bytes:
+    return b"\x01" if value else b"\x00"
+
+
+def decode_bool(buf: bytes, offset: int) -> tuple[bool, int]:
+    if offset + 1 > len(buf):
+        raise ValueError("BOOL decode truncated")
+    return buf[offset] != 0, offset + 1
+
+
+_FLOAT_FMT = ">d"
+
+
+def encode_float(value: float) -> bytes:
+    return struct.pack(_FLOAT_FMT, value)
+
+
+def decode_float(buf: bytes, offset: int) -> tuple[float, int]:
+    if offset + 8 > len(buf):
+        raise ValueError("FLOAT decode truncated")
+    return struct.unpack_from(_FLOAT_FMT, buf, offset)[0], offset + 8
