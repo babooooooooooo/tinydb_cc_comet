@@ -13,11 +13,11 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 15: Parser — AST 节点 + parse() 入口 + CREATE/DROP（tasks.md §7.1-7.5）`
-- **openspec task**: `7.1/7.2/7.3/7.4/7.5 AST dataclass + parse() 入口 + CreateTable + DropTable`
-- **阶段**: `ready_to_dispatch`（Task 14 出关后启动）
+- **plan task**: `### Task 16: Parser — INSERT / SELECT / DELETE + StatementList（tasks.md §7.6-7.8）`
+- **openspec task**: `7.6/7.7/7.8 parse_insert + parse_select + parse_delete + 纯函数确定性测试 + SCN-06 multi-statement`
+- **阶段**: `ready_to_dispatch`（Task 15 出关后启动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 14 完成（Tokenizer 字面量层 + NaN/Inf 拒绝）
+- **依赖**: Task 15 完成（Parser AST 骨架 + CREATE/DROP）+ 协调者修 tokenizer.KEYWORDS 缺 DELETE (commit `d235ace`)
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
@@ -29,6 +29,26 @@
   - Task 6 I-3: 删除 `test_type_system.py:148` 行内 `import struct as _st`（与 line 2 全局 import 重复）
 
 ## 已完成 Task
+
+- **Task 15: Parser — AST 节点 + parse() 入口 + CREATE/DROP（tasks.md §7.1-7.5）** — ✅ 已勾选（经历 1 轮 review-fix + 协调者 DELETE keyword fix）
+  - implementer(DONE, TDD RED→GREEN, 5 测试, 213 行, ≤ 600 预算 35% 使用率) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **1 Important I-1 tokenizer.KEYWORDS 缺 DELETE**, 5 Minor M-1..M-5)
+  - **协调者 DELETE fix** (Important I-1): commit `d235ace` — tokenizer.KEYWORDS 集合添加 `"DELETE"` + 新增 `test_tokenize_delete_keyword` 回归测试 (REQ-PARSE-001-SCN-15)。诊断: plan §Task 13 Step 1 KEYWORDS 模板也漏 "DELETE"（不是 implementer 漏），spec §REQ-PARSE-005 明确要求 DELETE 解析。修复后 `tokenize("DELETE FROM t")` 正确 emit KEYWORD("DELETE") + KEYWORD("FROM")
+  - 提交链: `0005040`（实现 + 5 测试）+ `d235ace`（协调者 DELETE fix + 回归测试）+ `58fc4f5`（plan+tasks.md 勾选）
+  - **Implementer 关键设计**:
+    1. **if-elif dispatch** 而非 dict：`parse_statement` 仅 dispatch CREATE/DROP，其他 KEYWORD raise `ParseError("X not supported yet")` —— 避免 Task 16 之前 AttributeError 漏出（Task 16 只需加 if 分支）
+    2. **Insert/Select/Delete dataclass 骨架完整**：Task 16 可直接加 `_parse_*` 方法而不必改 dataclass 形状
+    3. **EOF 兜底显式化**：`type EOF not supported in MVP` 而非 IndexError
+    4. **空 columns 防御**：`CREATE TABLE t()` 显式 raise `"expected column name"`
+    5. **错误位置精确指向出错 token**：`peek().line/col` 取值（不用 `self.i` 偏移）
+  - **Reviewer 探针 20 个全过**（含 multi-statement StatementList + VARCHAR(10) col=19 + CreateTable line/col 指向 CREATE + 纯函数验证 20 + 多次调用一致性 16）
+  - **接受的 MINOR**:
+    - M-1: trailing comma 消息措辞（spec 未禁，可推迟）
+    - M-2: `;;` 双分号 显式 raise（defensive 设计）
+    - M-3: AST 字段泛型收紧（Task 16 implementer 处理：`Insert.values: list[list[Any]]` + `Select.where: Optional[tuple[str, str, Any]]`）
+    - M-4: "X not supported yet" 兜底 TODO 注释（Task 16 implementer 移除）
+    - M-5: SCN-06 multi-statement 测试（Task 16 一起加，Task 15 探针覆盖）
+  - 5/5 parser + 95/95 全量（89 baseline + Task 14 的 2 + Task 15 的 5 + tokenizer DELETE 回归 1）
+  - Opportunistic 队列追加: M-3 AST 字段泛型收紧 (Task 16 必做) / M-4 兜底分支清理 (Task 16 必做) / M-5 SCN-06 multi-statement 测试 (Task 16 必做)
 
 - **Task 14: Tokenizer — 字面量层 + NaN/Inf 拒绝（tasks.md §6.4-6.5）** — ✅ 已勾选（经历 1 轮 review-fix + 协调者 SCN fix）
   - implementer(DONE_WITH_CONCERNS, 124→131 行, +2 测试) → thorough reviewer(⚠️ APPROVED_WITH_CONCERNS, 0 Critical, **1 Important: spec_id SCN-03 → SCN-02 误标**)
