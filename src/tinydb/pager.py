@@ -44,11 +44,16 @@ class Pager:
         size = self._file.tell()
 
         if is_new or size == 0:
-            # Fresh file: write header (full 4KB page 0)
+            # Fresh file: write header (page 0) + zero-filled catalog slot (page 1).
+            # Page 1 is reserved for the catalog (Task 12). Pre-allocating it now
+            # guarantees read_page(1) returns 4KB zero bytes on a fresh file
+            # without bumping against mmap boundary.
             self._file.seek(0)
-            self._file.write(MAGIC + bytes([SCHEMA_VERSION]) + b"\x00" * HEADER_RESERVED)
+            self._file.write(
+                MAGIC + bytes([SCHEMA_VERSION]) + b"\x00" * HEADER_RESERVED + b"\x00" * PAGE_SIZE
+            )
             self._file.flush()
-            size = PAGE_SIZE
+            size = PAGE_SIZE * 2
         else:
             # Existing file: validate header
             self._file.seek(0)
@@ -69,6 +74,12 @@ class Pager:
         # mmap the file for read/write
         self._file.seek(0)
         self._mmap = mmap.mmap(self._file.fileno(), size, access=mmap.ACCESS_WRITE)
+
+        # Reseed next_page_id from current file size: file has page 0 (header) +
+        # page 1 (catalog slot) + N data pages. Without this reseed, reopening
+        # a file that previously allocated data pages would re-allocate the
+        # same page ids and silently overwrite persisted page contents.
+        self._next_page_id = max(self._next_page_id, self._mmap.size() // PAGE_SIZE)
 
     def _alloc_page(self, page_id: int) -> bytearray:
         """Allocate a new page in :memory: mode (Task 8 will generalize)."""
@@ -93,9 +104,11 @@ class Pager:
     def close(self) -> None:
         """Release mmap and file handle."""
         if self._mmap is not None:
-            self._mmap.close()
-            self._mmap = None
-        if self._file is not None:
+            try:
+                self._mmap.close()
+            finally:
+                self._mmap = None
+        if self._file is not None and not self._file.closed:
             self._file.close()
             self._file = None
 

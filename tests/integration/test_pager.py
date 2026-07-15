@@ -17,7 +17,8 @@ def test_pager_creates_new_file_with_magic(tmp_path):
     path = tmp_path / "test.db"
     p = Pager(str(path))
     try:
-        assert p.page_count() == 1  # at least page 0 (header)
+        # page 0 (header) + page 1 (catalog slot, zero-filled) pre-allocated on fresh file
+        assert p.page_count() == 2
     finally:
         p.close()
     # File should exist
@@ -34,7 +35,8 @@ def test_pager_opens_existing_file_with_valid_magic(tmp_path):
     # Then reopen
     p2 = Pager(str(path))
     try:
-        assert p2.page_count() == 1
+        # page 0 (header) + page 1 (catalog slot)
+        assert p2.page_count() == 2
     finally:
         p2.close()
 
@@ -122,3 +124,36 @@ def test_memory_mode_read_write_roundtrip():
     p.write_page(pid, payload)
     assert p.read_page(pid) == payload
     p.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-04")
+def test_pager_reopen_continues_page_id_monotonic(tmp_path):
+    """Reopening a file with previously allocated pages must not re-allocate same page_id."""
+    path = str(tmp_path / "a.db")
+    p1 = Pager(path)
+    a = p1.alloc_page()  # 2
+    b = p1.alloc_page()  # 3
+    c = p1.alloc_page()  # 4
+    p1.write_page(b, b"\xcd" * PAGE_SIZE)
+    p1.flush()
+    p1.close()
+
+    p2 = Pager(path)
+    d = p2.alloc_page()  # must be > 4
+    assert d > c
+    p2.close()
+
+
+@pytest.mark.integration
+@pytest.mark.spec_id("REQ-STORAGE-002-SCN-05")
+def test_pager_read_page_one_returns_4096_bytes(tmp_path):
+    """Newly created file should have page 1 (catalog slot) readable as 4096 zero bytes."""
+    path = str(tmp_path / "a.db")
+    p = Pager(path)
+    try:
+        page1 = p.read_page(1)
+        assert len(page1) == PAGE_SIZE
+        assert page1 == b"\x00" * PAGE_SIZE
+    finally:
+        p.close()
