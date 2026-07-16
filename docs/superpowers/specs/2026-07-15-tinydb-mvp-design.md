@@ -2,6 +2,8 @@
 comet_change: tinydb-mvp
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-16-tinydb-mvp
+status: final
 ---
 
 # Design: tinydb-mvp — 深度技术设计
@@ -150,7 +152,7 @@ flags:  u16  (bit 0 = TOMBSTONE; bit 1 = SPILL_START)
 每行 = `null_bitmap + length_prefixed_values`：
 
 ```
-[null_bitmap]    ceil(col_count / 8) 字节，bit i 表示 col[i] 是否 NULL（MSB-first）
+[null_bitmap]    ceil(col_count / 8) 字节，bit i 表示 col[i] 是否 NULL（LSB-first：column 0 → byte 0 bit 0，column 1 → byte 0 bit 1）
 [values...]      每列变长编码：
    INT    ：固定 8 B 大端
    FLOAT  ：固定 8 B IEEE 754 大端

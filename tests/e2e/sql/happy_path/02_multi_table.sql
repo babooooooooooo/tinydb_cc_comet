@@ -1,0 +1,6 @@
+CREATE TABLE a(id INT);
+CREATE TABLE b(id INT, name TEXT);
+INSERT INTO a(id) VALUES (1);
+INSERT INTO b(id, name) VALUES (10, 'x');
+SELECT * FROM a;
+SELECT * FROM b
