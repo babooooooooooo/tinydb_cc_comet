@@ -13,7 +13,7 @@ tinydb MVP is a teaching-grade embedded database. It explicitly does NOT provide
 - **Joins**: only single-table SELECT. There is no `FROM t1 JOIN t2 ON ...`.
 - **Indexes**: linear scan only. Every `SELECT` and `DELETE` walks the table's page chain from `root_page_id` to `next_page_id`. Performance degrades linearly with row count.
 - **Type coercion**: strict mode. The literal in a WHERE clause must match the column's declared DB type exactly — `'5'` will not compare with an `INT` column (raises `TypeError`), and a `FLOAT` literal will not match an `INT` column. Booleans are `TRUE` / `FALSE` keywords, not 0/1 integers.
-- **Column types**: only `INT` / `TEXT` / `FLOAT` / `BOOL`. No `VARCHAR`, `BIGINT`, `DECIMAL`, `DATE`, `TIMESTAMP`, `BLOB`, `NULL`-able types. (The internal null bitmap in `row_codec.py` is reserved for future nullable support; MVP columns are implicitly non-null and an omitted INSERT value is a parse error, not NULL.)
+- **Column types**: only `INT` / `TEXT` / `FLOAT` / `BOOL`. No `VARCHAR`, `BIGINT`, `DECIMAL`, `DATE`, `TIMESTAMP`, `BLOB`, nullable types. (MVP columns are implicitly non-null; an omitted INSERT value is a parse error, not NULL.)
 - **Catalog size**: the catalog is a single 4 KB page (page 1) holding JSON-serialized table metadata. Beyond ~100 tables the catalog may overflow; v2 moves to a multi-page catalog.
 - **Page size**: fixed at 4 KB (`PAGE_SIZE = 4096` in `src/tinydb/pager.py`). Larger pages are a v2 change.
 - **DROP TABLE**: best-effort. The table's entry is removed from the catalog and its root/overflow pages are leaked on disk; there is no free-page list in MVP. Reclaiming those pages lands in `tinydb-engine-v2`.

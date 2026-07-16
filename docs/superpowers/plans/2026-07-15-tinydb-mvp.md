@@ -3530,7 +3530,7 @@ git commit -m "test(integration): full SQL lifecycle CREATE/INSERT/SELECT/DELETE
 - Create: `examples/demo.py`
 - Create: `docs/MVP_LIMITATIONS.md`
 
-- [ ] **Step 1: 写 demo.py**
+- [x] **Step 1: 写 demo.py** (Task 28)
 
 ```python
 # examples/demo.py
@@ -3558,7 +3558,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: 写 MVP_LIMITATIONS.md**
+- [x] **Step 2: 写 MVP_LIMITATIONS.md** (Task 28)
 
 ```markdown
 # MVP Limitations
@@ -3580,12 +3580,12 @@ tinydb MVP is a teaching-grade embedded database. It explicitly does NOT provide
 All of the above are scoped to follow-up changes: `tinydb-acid`, `tinydb-engine-v2`.
 ```
 
-- [ ] **Step 3: 跑 demo 验证输出**
+- [x] **Step 3: 跑 demo 验证输出** (Task 28)
 
 Run: `python examples/demo.py`
 Expected: 3 段输出，row repr 与 docstring 描述一致
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** (Task 28)
 
 ```bash
 git add README.md examples/demo.py docs/MVP_LIMITATIONS.md

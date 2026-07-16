@@ -29,7 +29,7 @@ A runnable end-to-end example lives at [`examples/demo.py`](examples/demo.py) â€
 python examples/demo.py
 ```
 
-## Module map (line budgets per proposal Impact)
+## Module map (line budgets per proposal)
 
 | Module | Budget | Responsibility |
 |--------|--------|----------------|

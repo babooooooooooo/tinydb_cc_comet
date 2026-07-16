@@ -15,11 +15,11 @@
 
 - **plan task**: `### Task 28: Documentation — README 模块导览 + demo + LIMITATIONS（tasks.md §11）`
 - **openspec task**: `§11 README module map + examples/demo.py + docs/MVP_LIMITATIONS.md`
-- **阶段**: `ready_to_dispatch`（Task 27 已完成勾选、提交 `108b9a4`、thorough reviewer APPROVED 0 BLOCKING / 0 HIGH / 0 MEDIUM / 0 LOW；focused 1 passed, integration regression 61 passed；BOOL WHERE active = TRUE 端到端验证通过）
+- **阶段**: `task-review`（implementer DONE；commit `5a35646b` 已 cherry-pick 为 `cdf0cde`；`python examples/demo.py` 输出三段，exit 0；pytest 167 passed；LIMITATIONS.md 修正了 NOT NULL 解析 inaccuracy；行预算超限（slotted_page.py 208 vs 150；executor.py 400 vs 400 borderline）由 implementer 标记但未修；无生产代码改动；等待 thorough reviewer）
 - **审查-修复轮次**: 0
-- **依赖**: README/示例/limitations 在 plan 阶段未指定具体大纲，需 implementer 从 proposals.md / design.md 抽取
-- **范围约束**: 仅修改 README.md、新增 examples/demo.py、新增 docs/MVP_LIMITATIONS.md；demo.py 裸 INSERT 改用显式列列表；不得修改生产代码或 plan/OpenSpec task
-- **下一步**: 派发 fresh implementer；TDD 不适用该文档任务；走 reviewer 单一规范 review；通过后勾选 plan steps 1-5、提交 checkpoint、立即继续 Task 29
+- **依赖**: README/示例/limitations 在 plan 阶段未指定具体大纲，已由 implementer 从 design.md + parser/executor 源码抽取
+- **范围约束**: 已确认仅修改 README.md + 新增 examples/demo.py + 新增 docs/MVP_LIMITATIONS.md
+- **下一步**: 派发 fresh thorough reviewer；reviewer 通过后勾选 plan steps 1-4、提交 checkpoint、立即继续 Task 29
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
