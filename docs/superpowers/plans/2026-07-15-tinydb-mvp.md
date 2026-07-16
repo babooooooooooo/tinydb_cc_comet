@@ -3393,7 +3393,7 @@ git commit -m "test(e2e): 12 golden SQL scenarios with byte-comparison runner"
 **Files:**
 - Create: `tests/integration/test_parser_executor_roundtrip.py`
 
-- [ ] **Step 1: 写跨模块集成测试**
+- [x] **Step 1: 写跨模块集成测试**
 
 ```python
 # tests/integration/test_parser_executor_roundtrip.py
@@ -3417,12 +3417,12 @@ def test_parser_is_pure_no_state_leak(tmp_path):
     assert a.statements[0].name == b.statements[0].name
 ```
 
-- [ ] **Step 2: 跑测试验证 GREEN**
+- [x] **Step 2: 跑测试验证 GREEN** (Task 25)
 
 Run: `pytest tests/integration/test_parser_executor_roundtrip.py -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** (Task 25)
 
 ```bash
 git add tests/integration/test_parser_executor_roundtrip.py

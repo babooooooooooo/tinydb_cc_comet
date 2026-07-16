@@ -13,17 +13,17 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 24: E2E Golden SQL 测试集（tasks.md §10.1-10.2）`
-- **openspec task**: `§10.1 创建 tests/e2e/sql/ golden 文件 + §10.2 实现 tests/e2e/conftest.py runner`
-- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，2 LOW non-blocking notes）
+- **plan task**: `### Task 25: Integration 套件 — parser↔executor roundtrip（tasks.md §8.2）`
+- **openspec task**: `§8.2 parser→executor→storage roundtrip integration tests`
+- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，3 LOW non-blocking notes）
 - **审查-修复轮次**: 0
-- **依赖**: Task 22/23 property suites complete + Database public API + parser/executor lifecycle complete
-- **范围决策**: 用户确认补充 `tests/e2e/test_golden_sql.py` collector；golden INSERT 使用显式列列表以匹配 parser 契约；plan 已记录该小范围修正
-- **实现提交**: `14aca37`; **变更文件**: 32 files under `tests/e2e/` (conftest 136 lines, collector 15 lines, 15 SQL/expected pairs)
-- **TDD 证据**: RED empty suite/fixture param collision/wrong expected/reopen directive parsing；GREEN `pytest tests/e2e/ -v` → 15 passed；full `pytest tests/ -q` → 164 passed；reviewer independently 15 passed
-- **审查结论**: APPROVED；`indirect=True`、line-aware `-- REOPEN`、per-statement split 均必要/正确；LOW-1 multi-statement 场景当前由 fixture 拆成单语句（遵循原 plan，非阻塞），LOW-2 测试 runner broad `Exception` 捕获符合 error envelope 目的
-- **风险信号**: SQL/external input handling（固定 golden SQL）；多文件测试基础设施但单文件 diff <200 行
-- **下一步**: 勾选 plan/OpenSpec task，提交进度，然后立即派发 Task 25
+- **依赖**: parser, executor, Database API, and E2E runner complete
+- **范围约束**: 仅新增 `tests/integration/test_parser_executor_roundtrip.py`；计划模板中的裸 INSERT 改为显式列列表以匹配当前 parser 契约
+- **实现提交**: `e9368fd`; **变更文件**: `tests/integration/test_parser_executor_roundtrip.py`（95 lines）
+- **TDD 证据**: RED missing-file error；GREEN focused 3 passed；integration regression 58 passed；full regression 167 passed；reviewer static review APPROVED
+- **审查结论**: APPROVED；显式列列表为 parser 必需修正；LOW 为 AST 共享引用/只断言计数/tokenizer purity 深度增强建议，均不阻塞
+- **风险信号**: cross-module coordination + SQL/external input（fixed integration SQL）；无生产/API/schema 变更，diff <200 行
+- **下一步**: 勾选 plan task，提交进度，然后立即派发 Task 26
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
