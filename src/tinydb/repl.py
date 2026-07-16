@@ -18,3 +18,32 @@ def _read_one_statement(prompt: str) -> str | None:
 def main() -> int:
     """Run the tinydb REPL."""
     return 0
+
+
+import sys
+
+from tinydb.database import Database
+from tinydb.parser import Select, parse
+from tinydb.tokenizer import tokenize
+
+
+def _run_sql(db: Database, sql: str) -> None:
+    try:
+        statements = parse(tokenize(sql)).statements
+        last_is_select = bool(statements) and isinstance(statements[-1], Select)
+    except Exception:
+        last_is_select = False
+
+    try:
+        rows = db.execute(sql)
+    except Exception as exc:
+        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return
+
+    if not last_is_select:
+        print("OK")
+    elif not rows:
+        print("(no rows)")
+    else:
+        for row in rows:
+            print(repr(row))
