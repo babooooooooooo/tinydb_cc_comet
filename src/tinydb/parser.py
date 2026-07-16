@@ -1,4 +1,4 @@
-"""Recursive descent SQL parser -> AST (CREATE/DROP/INSERT/SELECT/DELETE). <= 600 lines."""
+"""Recursive descent SQL parser -> AST (CREATE/DROP/INSERT/SELECT/DELETE/UPDATE). <= 750 lines."""
 
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -53,25 +53,91 @@ class Insert:
     col: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Select:
-    """SELECT <cols> FROM <table> [WHERE <col> <op> <val>] statement."""
+    """SELECT <cols> FROM <table> [WHERE <expr>] [ORDER BY ...] [LIMIT N] [OFFSET N].
+
+    Engine-v1 upgrade: columns is tuple, where holds Expr, order_by/limit/offset
+    default to empty/None for backward compatibility with MVP instances.
+    """
 
     table: str
-    columns: list  # list[str]  ("*" or column names)
-    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
-    line: int
-    col: int
+    columns: tuple  # tuple[str, ...]  ("*" or column names)
+    where: Optional[Any] = None      # Expr (EqualsExpr | AndExpr | OrExpr | NotExpr)
+    order_by: tuple = ()              # tuple[OrderByItem, ...]
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+    line: int = 0
+    col: int = 0
 
 
-@dataclass
+@dataclass(frozen=True)
 class Delete:
-    """DELETE FROM <table> [WHERE <col> <op> <val>] statement."""
+    """DELETE FROM <table> [WHERE <expr>] statement."""
 
     table: str
-    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
-    line: int
-    col: int
+    where: Optional[Any] = None  # Expr | None
+    line: int = 0
+    col: int = 0
+
+
+# --- engine-v1 expression AST ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EqualsExpr:
+    """MVP-compatible: ``col = literal`` comparison."""
+
+    column: str
+    value: Any
+
+
+@dataclass(frozen=True)
+class AndExpr:
+    """Short-circuit AND: ``left AND right``."""
+
+    left: Any
+    right: Any
+
+
+@dataclass(frozen=True)
+class OrExpr:
+    """Short-circuit OR: ``left OR right``."""
+
+    left: Any
+    right: Any
+
+
+@dataclass(frozen=True)
+class NotExpr:
+    """Unary NOT: ``NOT operand``."""
+
+    operand: Any
+
+
+# --- engine-v1 SELECT sub-clauses -------------------------------------------
+
+
+@dataclass(frozen=True)
+class OrderByItem:
+    """ORDER BY item: column + ASC/DESC."""
+
+    column: str
+    descending: bool = False
+
+
+# --- engine-v1 UPDATE statement ----------------------------------------------
+
+
+@dataclass(frozen=True)
+class Update:
+    """UPDATE <table> SET <col=lit>[, ...] [WHERE <expr>] statement."""
+
+    table: str
+    sets: tuple                       # tuple[tuple[str, Expr], ...]
+    where: Optional[Any] = None       # Expr | None
+    line: int = 0
+    col: int = 0
 
 
 # --- Parser ------------------------------------------------------------------
