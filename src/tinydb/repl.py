@@ -197,6 +197,9 @@ def _handle_meta(line: str, db: Database) -> bool:
         for name in sorted(db.catalog.tables):
             print(name)
         return True
+    if command in {".schema", ".read"} and not argument:
+        print(f"ERROR: missing argument for {command}", file=sys.stderr)
+        return True
     if command == ".schema":
         table = db.catalog.get_table(argument)
         if table is None:
