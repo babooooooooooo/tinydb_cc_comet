@@ -19,18 +19,25 @@ def main() -> int:
     """Run the tinydb REPL."""
     db_path = ":memory:"
     db = Database(db_path)
+    buf = ""
     try:
         while True:
             try:
-                line = _read_one_statement(_make_prompt(db_path))
+                prompt = CONTINUATION_PROMPT if buf else _make_prompt(db_path)
+                line = _read_one_statement(prompt)
             except KeyboardInterrupt:
                 print("\n(Use .exit or Ctrl-D to exit)")
+                buf = ""
                 continue
             if line is None:
                 return 0
-            if not line.strip():
+            if not line.strip() and not buf:
                 continue
-            _run_sql(db, line)
+            buf += line + "\n"
+            if _is_unterminated(buf):
+                continue
+            _run_sql(db, buf)
+            buf = ""
     finally:
         db.close()
 
