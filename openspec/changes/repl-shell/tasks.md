@@ -12,7 +12,7 @@
 
 ## 2. 主循环与 SQL 路径
 
-- [ ] 2.1 实现 `_make_prompt(db) -> str`：当前数据库路径（`:memory:` 时显示 `:memory:`）
+- [x] 2.1 实现 `_make_prompt(db) -> str`：当前数据库路径（`:memory:` 时显示 `:memory:`）
 - [ ] 2.2 实现 `_read_one_statement() -> str | None`：单行读入；EOF 返回 `None`
 - [ ] 2.3 实现 `_run_sql(db, sql) -> None`：调用 `db.execute(sql)`，打印 `Row(...)` repr 或 `(no rows)`；捕 `Exception` 打印 `ERROR: <Class>: <msg>` 单行
 - [ ] 2.4 `main()` 串接 prompt → 读 → execute → 循环；EOF/Ctrl-D 正常退出码 0
