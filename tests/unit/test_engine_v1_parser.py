@@ -168,3 +168,54 @@ def test_parse_where_unterminated_not():
 def test_parse_where_missing_rparen():
     with pytest.raises(ParseError):
         _parse("SELECT * FROM t WHERE (a=1")
+
+
+# --- Task 6: ORDER BY / LIMIT / OFFSET -----------------------------------
+
+
+@pytest.mark.unit
+def test_parse_select_order_by_asc():
+    s = _parse("SELECT * FROM t ORDER BY x")
+    assert len(s.order_by) == 1
+    assert s.order_by[0].column == "x"
+    assert s.order_by[0].descending is False
+
+
+@pytest.mark.unit
+def test_parse_select_order_by_desc():
+    s = _parse("SELECT * FROM t ORDER BY x DESC")
+    assert s.order_by[0].descending is True
+
+
+@pytest.mark.unit
+def test_parse_select_order_by_multi_key():
+    s = _parse("SELECT * FROM t ORDER BY a ASC, b DESC")
+    assert [(o.column, o.descending) for o in s.order_by] == [
+        ("a", False), ("b", True),
+    ]
+
+
+@pytest.mark.unit
+def test_parse_select_limit_offset():
+    s = _parse("SELECT * FROM t LIMIT 10 OFFSET 5")
+    assert s.limit == 10 and s.offset == 5
+
+
+@pytest.mark.unit
+def test_parse_select_limit_only():
+    s = _parse("SELECT * FROM t LIMIT 10")
+    assert s.limit == 10 and s.offset is None
+
+
+@pytest.mark.unit
+def test_parse_select_offset_only():
+    s = _parse("SELECT * FROM t OFFSET 5")
+    assert s.offset == 5 and s.limit is None
+
+
+@pytest.mark.unit
+def test_parse_select_order_limit_offset_chain():
+    s = _parse("SELECT * FROM t WHERE a=1 ORDER BY b DESC LIMIT 2 OFFSET 1")
+    assert s.where is not None
+    assert len(s.order_by) == 1 and s.order_by[0].descending is True
+    assert s.limit == 2 and s.offset == 1

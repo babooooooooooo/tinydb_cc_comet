@@ -378,11 +378,63 @@ class _Parser:
         table = self.advance().value
 
         where = self._parse_where()
+        order_by = self._parse_order_by()
+        limit = self._parse_limit()
+        offset = self._parse_offset()
 
         return Select(
             table=table, columns=tuple(cols), where=where,
+            order_by=order_by, limit=limit, offset=offset,
             line=kw.line, col=kw.col,
         )
+
+    # --- ORDER BY / LIMIT / OFFSET ---------------------------------------
+
+    def _parse_order_by(self) -> tuple:
+        if not self._peek_kw("ORDER"):
+            return ()
+        self.advance()
+        self.expect_keyword("BY")
+        items: list = []
+        while True:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column in ORDER BY")
+            col = self.advance().value
+            desc = False
+            if self._peek_kw("ASC"):
+                self.advance()
+            elif self._peek_kw("DESC"):
+                self.advance()
+                desc = True
+            items.append(OrderByItem(column=col, descending=desc))
+            if self._peek_punct(","):
+                self.advance()
+                continue
+            break
+        return tuple(items)
+
+    def _parse_limit(self) -> Optional[int]:
+        if not self._peek_kw("LIMIT"):
+            return None
+        self.advance()
+        t = self.advance()
+        if t.type != "INT":
+            raise ParseError(
+                t.line, t.col, "LIMIT must be a non-negative integer",
+            )
+        return int(t.value)
+
+    def _parse_offset(self) -> Optional[int]:
+        if not self._peek_kw("OFFSET"):
+            return None
+        self.advance()
+        t = self.advance()
+        if t.type != "INT":
+            raise ParseError(
+                t.line, t.col, "OFFSET must be a non-negative integer",
+            )
+        return int(t.value)
 
     # --- DELETE FROM <table> [WHERE ...] -----------------------------------
 
