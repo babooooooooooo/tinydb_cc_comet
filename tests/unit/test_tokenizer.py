@@ -186,3 +186,24 @@ def test_tokenize_delete_keyword():
     assert len(toks) == 2  # KEYWORD + EOF
     t = toks[0]
     assert t.type == "KEYWORD" and t.value == "DELETE" and t.line == 1 and t.col == 1
+
+
+@pytest.mark.unit
+def test_tokenizer_recognizes_not_null_primary_key_unique_as_keywords():
+    sql = "CREATE TABLE t(id INT NOT NULL PRIMARY KEY, email TEXT UNIQUE)"
+    tokens = tokenize(sql)
+    keywords = [t.value for t in tokens if t.type == "KEYWORD"]
+    assert "NOT" in keywords
+    assert "NULL" in keywords
+    assert "PRIMARY" in keywords
+    assert "KEY" in keywords
+    assert "UNIQUE" in keywords
+
+
+@pytest.mark.unit
+def test_tokenizer_does_not_treat_null_as_ident():
+    # NULL should now be a KEYWORD, not an IDENT.
+    tokens = tokenize("SELECT NULL FROM t")
+    null_tokens = [t for t in tokens if t.value == "NULL"]
+    assert len(null_tokens) == 1
+    assert null_tokens[0].type == "KEYWORD"
