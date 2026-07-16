@@ -1,5 +1,7 @@
 # MVP Limitations
 
+> **Scope:** This document covers the **engine** layer (`database.py`, `executor.py`, `parser.py`, `pager.py`, `slotted_page.py`, `catalog.py`, `type_system.py`, `row_codec.py`, `tokenizer.py`). The interactive shell `tinydb-repl` (`src/tinydb/repl.py`) is a thin stdlib-only wrapper over `Database.execute(sql)`; it adds no engine surface and inherits the limitations below. For REPL behavior contract, see `README.md` § REPL and `openspec/specs/repl-shell/spec.md`.
+
 tinydb MVP is a teaching-grade embedded database. It explicitly does NOT provide:
 
 - **ACID / crash safety**: pages are written best-effort. Process kill mid-write MAY corrupt the file. There is no write-ahead log, no fsync barrier, no recovery. The on-disk format uses magic `b'TINYDB\x00\x01'` and `SCHEMA_VERSION = 0x01` (see `src/tinydb/pager.py`) so a truncated file will refuse to open rather than silently misread, but it cannot be repaired.

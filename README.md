@@ -3,6 +3,8 @@
 > Minimal embedded relational database for teaching and embedding. **MVP: non-ACID, no crash safety.**
 
 > **Status:** MVP complete — `CREATE` / `DROP` / `INSERT` / `SELECT` / `DELETE` over `INT` / `TEXT` / `FLOAT` / `BOOL`. Non-ACID, single-process. See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
+>
+> A stdlib-only interactive shell (`tinydb-repl`) ships with the package — see [§ REPL](#repl).
 
 ## Quick start
 
@@ -67,5 +69,6 @@ On Unix-like platforms with `readline`, history persists at `~/.tinydb_history` 
 | `parser.py` | 600 | recursive descent parser |
 | `executor.py` | 400 | AST -> storage |
 | `database.py` | 100 | public API |
+| `repl.py` | 350 | interactive SQL shell (zero runtime deps) |
 
 Budgets reflect the proposal's `<= N` line ceilings. See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for what MVP does NOT do.
