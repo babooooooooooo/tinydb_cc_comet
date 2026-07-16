@@ -3156,7 +3156,7 @@ git commit -m "feat(executor): overflow chain spill/merge/free for rows > MAX_IN
 **Files:**
 - Create: `tests/property/test_storage_invariants.py`
 
-- [ ] **Step 1: 写属性测试（Python 镜像维护）**
+- [x] **Step 1: 写属性测试（Python 镜像维护）**
 
 ```python
 # tests/property/test_storage_invariants.py
@@ -3201,7 +3201,7 @@ def test_insert_then_persist_roundtrip(tmp_path_factory, n):
     assert len(rows) == n
 ```
 
-- [ ] **Step 2: 跑测试验证（hypothesis 自动找最小反例）**
+- [x] **Step 2: 跑测试验证（hypothesis 自动找最小反例）**
 
 Run: `pytest tests/property/test_storage_invariants.py -v`
 Expected: PASS（200 + 100 examples）
@@ -3210,7 +3210,7 @@ Expected: PASS（200 + 100 examples）
 
 若 hypothesis 找到失败用例，加载 `superpowers:systematic-debugging` skill 定位根因，禁止拍脑袋 patch。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** (Task 22)
 
 ```bash
 git add tests/property/test_storage_invariants.py

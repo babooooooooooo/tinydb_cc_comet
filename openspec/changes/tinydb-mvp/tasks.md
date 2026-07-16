@@ -98,7 +98,7 @@
 
 - [ ] 10.1 创建 `tests/e2e/sql/` 目录与 golden 文件：编写 12-15 个 `.sql` + 对应 `.expected.txt` 的 SQL 场景（CREATE / INSERT / SELECT * / SELECT cols / SELECT WHERE / DELETE 全表 / DELETE WHERE / 多语句 / 错误用例各一例）
 - [ ] 10.2 实现 `tests/e2e/conftest.py` 提供 `run_sql(db, sql_file)` helper，对比 stdout / stderr 与 golden 文件
-- [ ] 10.3 编写 `tests/property/test_storage_invariants.py`：用 hypothesis 生成随机 INSERT/DELETE 序列，断言"扫描结果 == 由 Python 镜像维护的逻辑视图"
+- [x] 10.3 编写 `tests/property/test_storage_invariants.py`：用 hypothesis 生成随机 INSERT/DELETE 序列，断言"扫描结果 == 由 Python 镜像维护的逻辑视图"
 - [ ] 10.4 编写 `tests/property/test_parser_robustness.py`：用 hypothesis 生成随机字符串输入，断言 tokenizer / parser 不抛未捕获异常（可抛 ParseError / TokenError，但不能误抛系统异常）
 
 ## 11. 文档与可演示脚本
