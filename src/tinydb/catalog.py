@@ -95,7 +95,15 @@ class Catalog:
         data = json.loads(text)
         c = cls()
         for name, info in data.get("tables", {}).items():
-            cols = tuple(_load_column(c_) for c_ in info["schema"])
+            schema_entries = info["schema"]
+            # R1 mitigation (D3): a single table's schema must be uniformly
+            # legacy-list or new-object format. Mixing is a serialization bug.
+            kinds = {type(item).__name__ for item in schema_entries}
+            if len(kinds) > 1:
+                raise InvalidDatabaseFile(
+                    f"table {name!r}: mixed legacy/new column formats not allowed"
+                )
+            cols = tuple(_load_column(c_) for c_ in schema_entries)
             c.tables[name] = TableInfo(
                 name=name,
                 columns=cols,
