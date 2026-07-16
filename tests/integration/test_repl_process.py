@@ -118,6 +118,16 @@ def test_repl_error_is_single_line_and_loop_continues():
 
 
 @pytest.mark.integration
+def test_repl_execution_error_is_single_line_and_loop_continues():
+    result = run_repl("SELECT * FROM ghost;\nCREATE TABLE ok(id INT);\n.exit\n")
+    assert result.returncode == 0
+    error_lines = [line for line in result.stderr.splitlines() if line]
+    assert len(error_lines) == 1
+    assert error_lines[0].startswith("ERROR: ExecutionError:")
+    assert "OK" in result.stdout
+
+
+@pytest.mark.integration
 def test_repl_database_flag_persists(tmp_path):
     database = tmp_path / "persist.db"
     first = run_repl(
