@@ -46,7 +46,7 @@
 ## 7. 测试
 
 - [x] 7.1 `tests/unit/test_repl.py`：覆盖元命令分发、schema 回向格式化、表格化列宽算法、多行未终止判断、history 路径展开
-- [ ] 7.2 `tests/integration/test_repl_process.py`：`subprocess.Popen(['tinydb-repl', tmp_db])`，stdin 喂 SQL → 读 stdout 断言；至少 4 场景：基本 CRUD、`.tables`、`.read`、EOF 退出码 0
+- [x] 7.2 `tests/integration/test_repl_process.py`：`subprocess.Popen(['tinydb-repl', tmp_db])`，stdin 喂 SQL → 读 stdout 断言；至少 4 场景：基本 CRUD、`.tables`、`.read`、EOF 退出码 0
 
 ## 8. CLI 旗标
 
@@ -55,8 +55,8 @@
 
 ## 9. 文档
 
-- [ ] 9.1 `README.md` 增加 `## REPL` 章节：启动示例（`tinydb-repl` / `tinydb-repl data.db`）、元命令清单、历史文件位置
-- [ ] 9.2 `examples/repl_smoke.sh`：bash 脚本，`printf` 喂 4 条 SQL 给 `tinydb-repl` 并 grep 关键输出（人眼/CI smoke 用）
+- [x] 9.1 `README.md` 增加 `## REPL` 章节：启动示例（`tinydb-repl` / `tinydb-repl data.db`）、元命令清单、历史文件位置
+- [x] 9.2 `examples/repl_smoke.sh`：bash 脚本，`printf` 喂 4 条 SQL 给 `tinydb-repl` 并 grep 关键输出（人眼/CI smoke 用）
 
 ## 10. 行数审计与最终自检
 

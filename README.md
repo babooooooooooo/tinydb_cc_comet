@@ -29,6 +29,32 @@ A runnable end-to-end example lives at [`examples/demo.py`](examples/demo.py) â€
 python3 examples/demo.py
 ```
 
+## REPL
+
+After `pip install -e ".[dev]"`, start an in-memory shell:
+
+```bash
+tinydb-repl
+```
+
+Open or create a file-backed database with `--database`:
+
+```bash
+tinydb-repl --database data.db
+```
+
+The REPL supports multi-line SQL: an unterminated single quote or open parenthesis shows `...>` to continue the statement. SELECT renders an aligned table, DDL/DML prints `OK`, and execution errors print a single `ERROR: <Class>: <message>` line without exiting the session.
+
+| Meta command | Effect |
+|---|---|
+| `.exit` / `.quit` | exit cleanly |
+| `.help` | show meta-command help |
+| `.tables` | list table names (one per line) |
+| `.schema <name>` | print reverse-generated `CREATE TABLE` |
+| `.read <path>` | execute a UTF-8 SQL script |
+
+On Unix-like platforms with `readline`, history persists at `~/.tinydb_history` (missing file or write failures are silent). Platforms without `readline` (e.g. default Windows) fall back to built-in `input()`: SQL, meta-commands, and output all work, but history is not loaded or saved.
+
 ## Module map (line budgets per proposal)
 
 | Module | Budget | Responsibility |
