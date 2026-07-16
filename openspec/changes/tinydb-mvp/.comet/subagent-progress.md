@@ -13,13 +13,13 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 26: Integration 套件 — storage page chain（tasks.md §3 / §5）`
-- **openspec task**: `§3 / §5 storage multi-page allocation and persistence integration tests`
-- **阶段**: `checkoff`（thorough reviewer APPROVED；0 blocking / 0 high；1 MEDIUM（multi-page 测试仅断言 count, 不断言 order；plan 模板即如此，并不覆盖 plan；non-blocking）；2 LOW（marker 注册确认 / parser-contract 文档校正确认）；focused 2 passed, integration regression 60 passed；可推进 plan steps 1-3 勾选并提交 checkpoint）
+- **plan task**: `### Task 28: Documentation — README 模块导览 + demo + LIMITATIONS（tasks.md §11）`
+- **openspec task**: `§11 README module map + examples/demo.py + docs/MVP_LIMITATIONS.md`
+- **阶段**: `ready_to_dispatch`（Task 27 已完成勾选、提交 `108b9a4`、thorough reviewer APPROVED 0 BLOCKING / 0 HIGH / 0 MEDIUM / 0 LOW；focused 1 passed, integration regression 61 passed；BOOL WHERE active = TRUE 端到端验证通过）
 - **审查-修复轮次**: 0
-- **依赖**: Pager, SlottedPage, Catalog, Executor, Database API complete
-- **范围约束**: 已确认仅新增 `tests/integration/test_storage_page_chain.py`；无生产代码改动
-- **下一步**: 派发 fresh thorough reviewer（spec compliance + code quality）；reviewer 通过后勾选 plan steps 1-3、提交 checkpoint、立即继续 Task 27
+- **依赖**: README/示例/limitations 在 plan 阶段未指定具体大纲，需 implementer 从 proposals.md / design.md 抽取
+- **范围约束**: 仅修改 README.md、新增 examples/demo.py、新增 docs/MVP_LIMITATIONS.md；demo.py 裸 INSERT 改用显式列列表；不得修改生产代码或 plan/OpenSpec task
+- **下一步**: 派发 fresh implementer；TDD 不适用该文档任务；走 reviewer 单一规范 review；通过后勾选 plan steps 1-5、提交 checkpoint、立即继续 Task 29
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 

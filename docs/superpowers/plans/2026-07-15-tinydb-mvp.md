@@ -3485,7 +3485,7 @@ git commit -m "test(integration): multi-page allocation and persistence chain"
 **Files:**
 - Create: `tests/integration/test_full_sql_lifecycle.py`
 
-- [ ] **Step 1: 写端到端 lifecycle**
+- [x] **Step 1: 写端到端 lifecycle** (Task 27)
 
 ```python
 # tests/integration/test_full_sql_lifecycle.py
@@ -3507,12 +3507,12 @@ def test_full_lifecycle_create_insert_select_delete_reopen(tmp_path):
     assert sorted(r.id for r in rows) == [1, 3]
 ```
 
-- [ ] **Step 2: 跑测试验证 GREEN**
+- [x] **Step 2: 跑测试验证 GREEN** (Task 27)
 
 Run: `pytest tests/integration/test_full_sql_lifecycle.py -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** (Task 27)
 
 ```bash
 git add tests/integration/test_full_sql_lifecycle.py
