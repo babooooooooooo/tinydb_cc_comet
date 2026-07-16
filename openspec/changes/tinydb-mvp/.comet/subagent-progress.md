@@ -15,12 +15,15 @@
 
 - **plan task**: `### Task 24: E2E Golden SQL 测试集（tasks.md §10.1-10.2）`
 - **openspec task**: `§10.1 创建 tests/e2e/sql/ golden 文件 + §10.2 实现 tests/e2e/conftest.py runner`
-- **阶段**: `ready_to_dispatch`（Task 23 已完成勾选、提交 `e9fb59b`、thorough reviewer APPROVED）
+- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，2 LOW non-blocking notes）
 - **审查-修复轮次**: 0
 - **依赖**: Task 22/23 property suites complete + Database public API + parser/executor lifecycle complete
 - **范围决策**: 用户确认补充 `tests/e2e/test_golden_sql.py` collector；golden INSERT 使用显式列列表以匹配 parser 契约；plan 已记录该小范围修正
-- **允许文件**: `tests/e2e/conftest.py`、`tests/e2e/test_golden_sql.py`、`tests/e2e/sql/**/*.sql`、对应 `.expected.txt`；不得修改生产代码或 OpenSpec task
-- **下一步**: 派发 fresh implementer；严格执行 TDD RED→GREEN；覆盖 12 个 happy-path + 3 个 error-case golden scenarios
+- **实现提交**: `14aca37`; **变更文件**: 32 files under `tests/e2e/` (conftest 136 lines, collector 15 lines, 15 SQL/expected pairs)
+- **TDD 证据**: RED empty suite/fixture param collision/wrong expected/reopen directive parsing；GREEN `pytest tests/e2e/ -v` → 15 passed；full `pytest tests/ -q` → 164 passed；reviewer independently 15 passed
+- **审查结论**: APPROVED；`indirect=True`、line-aware `-- REOPEN`、per-statement split 均必要/正确；LOW-1 multi-statement 场景当前由 fixture 拆成单语句（遵循原 plan，非阻塞），LOW-2 测试 runner broad `Exception` 捕获符合 error envelope 目的
+- **风险信号**: SQL/external input handling（固定 golden SQL）；多文件测试基础设施但单文件 diff <200 行
+- **下一步**: 勾选 plan/OpenSpec task，提交进度，然后立即派发 Task 25
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 

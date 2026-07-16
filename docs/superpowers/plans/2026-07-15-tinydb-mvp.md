@@ -3274,7 +3274,7 @@ git commit -m "test(property): parser robustness with random SQL strings, seed=2
 - Create: `tests/e2e/test_golden_sql.py`
 - Create: 12-15 SQL/expected 文件
 
-- [ ] **Step 1: 写 conftest helper**
+- [x] **Step 1: 写 conftest helper**
 
 ```python
 # tests/e2e/conftest.py
@@ -3336,7 +3336,7 @@ def test_golden_sql(golden_sql):
 
 The original template omitted this collector module; without it, pytest does not collect a test from `conftest.py` alone. Golden INSERT statements must use explicit column lists (for example, `INSERT INTO users(id, name) VALUES ...`) because the MVP parser requires them; this corrects the template's bare-INSERT examples without changing the intended scenarios.
 
-- [ ] **Step 2: 写 golden SQL 文件（12 个示例）**
+- [x] **Step 2: 写 golden SQL 文件（12 个示例）**
 
 `tests/e2e/sql/happy_path/01_create_insert_select.sql`:
 ```sql
@@ -3372,12 +3372,12 @@ Row(id=2, name='bob')
 | 14 | `error_cases/02_unsupported_type.sql` | VARCHAR → ParseError |
 | 15 | `error_cases/03_value_mismatch.sql` | 列数不匹配 → ParseError |
 
-- [ ] **Step 3: 跑测试验证**
+- [x] **Step 3: 跑测试验证** (Task 24)
 
 Run: `pytest tests/e2e/ -v`
 Expected: 12-15 PASS（首次编写 expected 时对照实际输出人工校对）
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** (Task 24)
 
 ```bash
 git add tests/e2e/
