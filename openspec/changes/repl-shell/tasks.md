@@ -19,7 +19,7 @@
 
 ## 3. 多行延续
 
-- [ ] 3.1 实现 `_is_unterminated(buf: str) -> bool`：扫描 `'` 数为奇 或 `(` > `)` → True
+- [x] 3.1 实现 `_is_unterminated(buf: str) -> bool`：扫描 `'` 数为奇 或 `(` > `)` → True
 - [ ] 3.2 `main()` 改为 buffer 累积：未终止则进入 `...>` 续行 prompt，继续 read；终止则执行并清空 buffer
 
 ## 4. 元命令分发

@@ -62,3 +62,65 @@ def _run_sql(db: Database, sql: str) -> None:
     else:
         for row in rows:
             print(repr(row))
+
+
+def _is_unterminated(buf: str) -> bool:
+    in_sq = False
+    in_dq = False
+    in_lc = False
+    in_bc = False
+    parens = 0
+    i = 0
+    while i < len(buf):
+        char = buf[i]
+        nxt = buf[i + 1] if i + 1 < len(buf) else ""
+        if in_lc:
+            in_lc = char != "\n"
+            i += 1
+            continue
+        if in_bc:
+            if char == "*" and nxt == "/":
+                in_bc = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_sq:
+            if char == "'" and nxt == "'":
+                i += 2
+            elif char == "'":
+                in_sq = False
+                i += 1
+            else:
+                i += 1
+            continue
+        if in_dq:
+            if char == '"' and nxt == '"':
+                i += 2
+            elif char == '"':
+                in_dq = False
+                i += 1
+            else:
+                i += 1
+            continue
+        if char == "-" and nxt == "-":
+            in_lc = True
+            i += 2
+        elif char == "/" and nxt == "*":
+            in_bc = True
+            i += 2
+        elif char == "'":
+            in_sq = True
+            i += 1
+        elif char == '"':
+            in_dq = True
+            i += 1
+        elif char == "(":
+            parens += 1
+            i += 1
+        elif char == ")":
+            parens -= 1
+            i += 1
+        else:
+            i += 1
+    return in_sq or in_dq or in_lc or in_bc or parens > 0
