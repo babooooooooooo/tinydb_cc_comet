@@ -206,7 +206,9 @@ class _Parser:
             return self._parse_select()
         if kw == "DELETE":
             return self._parse_delete()
-        # All five supported statement keywords are dispatched above.
+        if kw == "UPDATE":
+            return self._parse_update()
+        # All six supported statement keywords are dispatched above.
         # Reaching here means a KEYWORD (e.g. TABLE / INTO / VALUES / FROM /
         # WHERE / INT / TEXT / FLOAT / BOOL) appeared where a statement was
         # expected — that is a genuine syntax error, not an "unsupported"
@@ -396,6 +398,47 @@ class _Parser:
         where = self._parse_where()
 
         return Delete(table=table, where=where, line=kw.line, col=kw.col)
+
+    # --- UPDATE <table> SET <col>=<lit>[, ...] [WHERE <expr>] ---------------
+
+    def _parse_update(self) -> Update:
+        kw = self.expect_keyword("UPDATE")
+        tt = self.peek()
+        if tt.type != "IDENT":
+            raise ParseError(tt.line, tt.col, "expected table name")
+        table = self.advance().value
+        self.expect_keyword("SET")
+
+        sets: list = []
+        while True:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column name in SET")
+            col = self.advance().value
+            self.expect("PUNCT", "=")
+            lit_tok = self.advance()
+            if lit_tok.type not in _LITERAL_TYPES:
+                raise ParseError(
+                    lit_tok.line, lit_tok.col,
+                    "SET right-hand side must be a literal",
+                )
+            sets.append((col, EqualsExpr(column=col, value=lit_tok.value)))
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+
+        if not sets:
+            raise ParseError(
+                kw.line, kw.col,
+                "UPDATE requires at least one SET assignment",
+            )
+
+        where = self._parse_where()
+        return Update(
+            table=table, sets=tuple(sets), where=where,
+            line=kw.line, col=kw.col,
+        )
 
     # --- shared WHERE clause helper ----------------------------------------
 

@@ -15,7 +15,7 @@ from tinydb.parser import parse
 
 
 def _parse(sql: str):
-    return parse(tokenize(sql))
+    return parse(tokenize(sql)).statements[0]
 
 
 @pytest.mark.unit
@@ -71,3 +71,45 @@ def test_ast_select_columns_is_tuple():
     s = Select(table="t", columns=("x",), line=1, col=1)
     assert isinstance(s.columns, tuple)
     assert s.columns == ("x",)
+
+
+# --- Task 4: UPDATE statement ----------------------------------------------
+
+
+@pytest.mark.unit
+def test_parse_update_basic():
+    stmt = _parse("UPDATE t SET a=1 WHERE b=2")
+    assert isinstance(stmt, Update)
+    assert stmt.table == "t"
+    assert len(stmt.sets) == 1
+    assert stmt.sets[0][0] == "a"
+    assert isinstance(stmt.sets[0][1], EqualsExpr)
+    assert stmt.sets[0][1].value == 1
+    assert isinstance(stmt.where, EqualsExpr)
+    assert stmt.where.column == "b"
+
+
+@pytest.mark.unit
+def test_parse_update_multi_set():
+    stmt = _parse("UPDATE t SET a=1, b='x'")
+    assert [s[0] for s in stmt.sets] == ["a", "b"]
+    assert stmt.where is None
+
+
+@pytest.mark.unit
+def test_parse_update_no_set_raises():
+    with pytest.raises(ParseError):
+        _parse("UPDATE t")
+
+
+@pytest.mark.unit
+def test_parse_update_set_rhs_expr_raises():
+    # '*' is PUNCT, not a literal token; parser rejects it as the RHS.
+    with pytest.raises(ParseError):
+        _parse("UPDATE t SET a=*")
+
+
+@pytest.mark.unit
+def test_parse_update_missing_comma_raises():
+    with pytest.raises(ParseError):
+        _parse("UPDATE t SET a=1 b=2")
