@@ -14,7 +14,7 @@
 
 ## 2. 类型系统（spec: type-system-basic）
 
-- [ ] 2.1 编写 `tests/unit/test_type_system.py`，红：覆盖 `specs/type-system-basic/spec.md` 中所有 Scenario 用例
+- [x] 2.1 编写 `tests/unit/test_type_system.py`，红：覆盖 `specs/type-system-basic/spec.md` 中所有 Scenario 用例
 - [x] 2.2 实现 `type_system.py::encode_int / decode_int`（8-byte big-endian），绿：跑通 INT roundtrip + OverflowError
 - [x] 2.3 实现 `type_system.py::encode_text / decode_text`（length-prefixed UTF-8），绿：跑通 TEXT roundtrip + UnicodeEncodeError
 - [x] 2.4 实现 `type_system.py::encode_bool / decode_bool`（1 字节 0/1），绿：跑通 BOOL roundtrip
@@ -103,14 +103,23 @@
 
 ## 11. 文档与可演示脚本
 
-- [ ] 11.1 在 README 中补充"模块导览"段，链接每个模块并标注预期行数
-- [ ] 11.2 编写 `examples/demo.py`：从打开 → 建表 → 插入 → 查 → 关闭的端到端最小演示，README "快速开始" 段引用此脚本
-- [ ] 11.3 编写 `docs/MVP_LIMITATIONS.md`：列出 MVP 已知约束（非 ACID、单进程、固定 4KB 页、单页 catalog、strict 类型等）
+- [x] 11.1 在 README 中补充"模块导览"段，链接每个模块并标注预期行数
+- [x] 11.2 编写 `examples/demo.py`：从打开 → 建表 → 插入 → 查 → 关闭的端到端最小演示，README "快速开始" 段引用此脚本
+- [x] 11.3 编写 `docs/MVP_LIMITATIONS.md`：列出 MVP 已知约束（非 ACID、单进程、固定 4KB 页、单页 catalog、strict 类型等）
+
+> §11 全部完成于 Task 28 (`cdf0cde` + `2151459`)。
 
 ## 12. 验收前检查
 
-- [ ] 12.1 全测试套件通过（`pytest`），覆盖率 ≥ 85%（`pytest --cov=tinydb --cov-report=term-missing`）
-- [ ] 12.2 行数审计：grep 行数与 proposal Impact 段模块预算上限对照，每个模块不超过预算
-- [ ] 12.3 运行 `openspec validate tinydb-mvp --strict` 应通过
-- [ ] 12.4 运行 `examples/demo.py`，人眼确认输出符合预期
-- [ ] 12.5 把 `open guard --apply` 至通过，进入 design 阶段前的最后清场（由 /comet-build 调度承担）
+- [x] 12.1 全测试套件通过（`pytest`），覆盖率 ≥ 85%（`pytest --cov=tinydb --cov-report=term-missing`）
+- [x] 12.2 行数审计：grep 行数与 proposal Impact 段模块预算上限对照，每个模块不超过预算
+- [x] 12.3 运行 `openspec validate tinydb-mvp --strict` 应通过
+- [x] 12.4 运行 `examples/demo.py`，人眼确认输出符合预期
+- [x] 12.5 把 `open guard --apply` 至通过，进入 design 阶段前的最后清场（由 /comet-build 调度承担）
+
+> §12 全部完成于 Task 29 (`f2baaac`) / Task 30 (`ebdf9c1`) / Task 32 (`46f8fdc`) / Task 33 (本 commit)。具体：
+> 12.1: 167 passed, coverage 92.73% (gate ≥85%)
+> 12.2: `wc -l` vs proposal Impact budgets — `slotted_page.py` 已上调预算从 ≤150 → ≤220 经用户决策，余者全部 OK 或 AT LIMIT
+> 12.3: `openspec validate tinydb-mvp --strict` — `Change 'tinydb-mvp' is valid`
+> 12.4: `python3 examples/demo.py` 输出三段与 plan Task 30 §12.4 期望逐行匹配
+> 12.5: Task 33 阶段守卫运行见 `comet guard tinydb-mvp build --apply`
