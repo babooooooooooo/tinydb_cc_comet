@@ -442,21 +442,65 @@ class _Parser:
 
     # --- shared WHERE clause helper ----------------------------------------
 
-    def _parse_where(self) -> Optional[EqualsExpr]:
-        """Parse `WHERE <col> = <literal>` if present; otherwise return None.
+    def _parse_where(self) -> Optional[Any]:
+        """Parse `WHERE <expr>` if present; otherwise return None.
 
-        engine-v1 returns an EqualsExpr AST node (not a tuple) so the
-        executor's eval_expr can consume it uniformly with AND/OR/NOT.
+        Engine-v1 returns an Expr AST (EqualsExpr / AndExpr / OrExpr /
+        NotExpr); the executor's eval_expr handles all four uniformly.
         """
         if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
             return None
         self.advance()
+        return self._parse_expr()
 
+    # --- expression precedence chain (OR < AND < NOT < primary) ----------
+
+    def _peek_kw(self, kw: str) -> bool:
+        t = self.peek()
+        return t.type == "KEYWORD" and t.value == kw
+
+    def _peek_punct(self, p: str) -> bool:
+        t = self.peek()
+        return t.type == "PUNCT" and t.value == p
+
+    def _parse_expr(self) -> Any:
+        return self._parse_or_expr()
+
+    def _parse_or_expr(self) -> Any:
+        left = self._parse_and_expr()
+        while self._peek_kw("OR"):
+            self.advance()
+            right = self._parse_and_expr()
+            left = OrExpr(left=left, right=right)
+        return left
+
+    def _parse_and_expr(self) -> Any:
+        left = self._parse_not_expr()
+        while self._peek_kw("AND"):
+            self.advance()
+            right = self._parse_not_expr()
+            left = AndExpr(left=left, right=right)
+        return left
+
+    def _parse_not_expr(self) -> Any:
+        if self._peek_kw("NOT"):
+            self.advance()
+            return NotExpr(operand=self._parse_not_expr())
+        return self._parse_primary()
+
+    def _parse_primary(self) -> Any:
+        if self._peek_punct("("):
+            self.advance()
+            inner = self._parse_expr()
+            self.expect("PUNCT", ")")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self) -> EqualsExpr:
         ct = self.peek()
         if ct.type != "IDENT":
             raise ParseError(ct.line, ct.col, "expected column in WHERE")
         cname = self.advance().value
-
         op_tok = self.advance()
         if op_tok.type != "PUNCT" or op_tok.value not in SUPPORTED_OPS:
             op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
@@ -464,7 +508,6 @@ class _Parser:
                 op_tok.line, op_tok.col,
                 f"operator {op_repr} not supported; MVP supports only =",
             )
-
         lit = self.advance()
         if lit.type not in _LITERAL_TYPES:
             raise ParseError(lit.line, lit.col, "expected literal")

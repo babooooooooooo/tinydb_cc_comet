@@ -113,3 +113,58 @@ def test_parse_update_set_rhs_expr_raises():
 def test_parse_update_missing_comma_raises():
     with pytest.raises(ParseError):
         _parse("UPDATE t SET a=1 b=2")
+
+
+# --- Task 5: WHERE compound expressions -----------------------------------
+
+
+@pytest.mark.unit
+def test_parse_and_or_not_associativity():
+    s = _parse("SELECT * FROM t WHERE a=1 AND b=2 OR c=3")
+    expr = s.where
+    # Left-assoc: Or(And(EQ a 1, EQ b 2), EQ c 3)
+    assert isinstance(expr, OrExpr)
+    assert isinstance(expr.left, AndExpr)
+    assert isinstance(expr.left.left, EqualsExpr)
+    assert isinstance(expr.left.right, EqualsExpr)
+    assert isinstance(expr.right, EqualsExpr)
+
+
+@pytest.mark.unit
+def test_parse_and_or_precedence():
+    s = _parse("SELECT * FROM t WHERE a=1 OR b=2 AND c=3")
+    # AND binds tighter: Or(EQ a 1, And(EQ b 2, EQ c 3))
+    assert isinstance(s.where, OrExpr)
+    assert isinstance(s.where.right, AndExpr)
+
+
+@pytest.mark.unit
+def test_parse_not_with_parens():
+    s = _parse("SELECT * FROM t WHERE NOT (a=1 OR b=2)")
+    assert isinstance(s.where, NotExpr)
+    assert isinstance(s.where.operand, OrExpr)
+
+
+@pytest.mark.unit
+def test_parse_not_right_associative():
+    s = _parse("SELECT * FROM t WHERE NOT NOT a=1")
+    assert isinstance(s.where, NotExpr)
+    assert isinstance(s.where.operand, NotExpr)
+
+
+@pytest.mark.unit
+def test_parse_where_unterminated_or():
+    with pytest.raises(ParseError):
+        _parse("SELECT * FROM t WHERE a=1 OR")
+
+
+@pytest.mark.unit
+def test_parse_where_unterminated_not():
+    with pytest.raises(ParseError):
+        _parse("SELECT * FROM t WHERE NOT")
+
+
+@pytest.mark.unit
+def test_parse_where_missing_rparen():
+    with pytest.raises(ParseError):
+        _parse("SELECT * FROM t WHERE (a=1")
