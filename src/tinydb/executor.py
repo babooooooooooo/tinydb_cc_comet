@@ -96,7 +96,7 @@ class Executor:
     # --- public dispatch ----------------------------------------------------
 
     def execute(
-        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete],
+        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete, Update],
     ) -> Union[list, list[list[Any]]]:
         """Dispatch ``stmt`` to its ``_exec_*`` handler.
 
@@ -109,6 +109,7 @@ class Executor:
             Insert:      self._exec_insert,
             Select:      self._exec_select,
             Delete:      self._exec_delete,
+            Update:      self._exec_update,
         }
         handler = dispatch.get(type(stmt))
         if handler is None:
@@ -467,4 +468,85 @@ class Executor:
             self.pager.write_page(pid, page.to_bytes())
         if to_delete:
             self.pager.flush()
+        return []
+
+    def _exec_update(self, stmt: Update) -> list:
+        """UPDATE <table> SET <col=lit>[, ...] [WHERE <expr>]. Returns [].
+
+        Algorithm:
+          1. Validate SET columns and literal types against the schema.
+          2. Scan matching (sid, vals, pid) rows via eval_expr.
+          3. Group matches by page id; process each page independently.
+          4. For each match: build new row bytes, try in-place update on the
+             same slot; if grew, free the overflow chain (if any), delete
+             the slot, then re-insert in the same page (PageFull triggers a
+             queue to chain-insert after page flush).
+          5. Flush page, then drain pending chain inserts.
+
+        Returns ``[]`` (DML protocol).
+        """
+        ti = self.catalog.get_table(stmt.table)
+        if ti is None:
+            raise ExecutionError(f"table {stmt.table!r} does not exist")
+        schema = ti.schema
+
+        # 1) Validate SET columns + literal types
+        col_name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+        for col_name, expr in stmt.sets:
+            if col_name not in col_name_to_idx:
+                raise ExecutionError(f"unknown column {col_name!r}")
+            if not isinstance(expr, EqualsExpr):
+                raise ExecutionError("SET right-hand side must be a literal")
+            col_type = schema[col_name_to_idx[col_name]][1]
+            try:
+                py_to_db(expr.value, col_type)
+            except (TypeError, ValueError) as e:
+                raise TypeError(
+                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+                ) from e
+
+        # 2) Collect matches
+        matches: list[tuple[int, int, list[Any]]] = []
+        for sid, vals, pid in self._scan_table(ti):
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
+                matches.append((pid, sid, vals))
+
+        # 3) Group by page
+        by_page: dict[int, list[tuple[int, list[Any]]]] = {}
+        for pid, sid, vals in matches:
+            by_page.setdefault(pid, []).append((sid, vals))
+
+        # 4) Per-page in-place update + fallback
+        for pid, sid_vals_list in by_page.items():
+            page = SlottedPage.from_bytes(pid, self.pager.read_page(pid))
+            pending_chain_inserts: list[bytes] = []
+            for sid, vals in sid_vals_list:
+                new_vals = list(vals)
+                for col_name, expr in stmt.sets:
+                    new_vals[col_name_to_idx[col_name]] = expr.value
+                new_bytes = encode_row(new_vals, schema)
+
+                old_slot = page.slots[sid]
+                grew = len(new_bytes) > old_slot.length
+                if not grew:
+                    try:
+                        page.update(sid, new_bytes)
+                        continue
+                    except PageFull:
+                        grew = True
+                # Fallback: grew == True → delete + insert (or chain)
+                if old_slot.flags & FLAG_SPILL_START:
+                    self._free_overflow_chain(pid)
+                page.delete(sid)
+                try:
+                    page.insert(new_bytes)
+                except PageFull:
+                    pending_chain_inserts.append(new_bytes)
+
+            # Flush this page before chain inserts (may advance next_page_id).
+            self.pager.write_page(pid, page.to_bytes())
+            for new_bytes in pending_chain_inserts:
+                self._insert_row_into_chain(ti, new_bytes)
+
+        self.pager.flush()
         return []

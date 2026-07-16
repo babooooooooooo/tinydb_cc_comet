@@ -169,3 +169,85 @@ def test_executor_select_order_by_unknown_column_raises():
             db.execute("SELECT * FROM t ORDER BY z")
     finally:
         os.unlink(path)
+
+
+# --- Task 10: UPDATE executor ---------------------------------------------
+
+
+@pytest.mark.integration
+def test_executor_update_in_place_no_grow():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT, b TEXT)")
+        db.execute("INSERT INTO t (a, b) VALUES (1, 'x')")
+        out = db.execute("UPDATE t SET a=99 WHERE b='x'")
+        assert out == []  # DML protocol
+        rows = db.execute("SELECT a, b FROM t")
+        assert [r.a for r in rows] == [99]
+        assert [r.b for r in rows] == ["x"]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_update_in_place_shrink():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT, b TEXT)")
+        db.execute("INSERT INTO t (a, b) VALUES (1, 'hello world')")
+        db.execute("UPDATE t SET b='hi'")
+        rows = db.execute("SELECT a, b FROM t")
+        assert [r.a for r in rows] == [1]
+        assert [r.b for r in rows] == ["hi"]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_update_compound_where():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT, b INT)")
+        for a, b in [(1, 1), (1, 2), (2, 1)]:
+            db.execute(f"INSERT INTO t (a, b) VALUES ({a}, {b})")
+        db.execute("UPDATE t SET b=99 WHERE a=1 AND b=2")
+        rows = db.execute("SELECT b FROM t ORDER BY a ASC, b ASC")
+        # a=1,b=1 unchanged; a=1,b=2 -> 99; a=2,b=1 unchanged
+        assert [r.b for r in rows] == [1, 99, 1]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_update_no_where_updates_all():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        db.execute("INSERT INTO t (a) VALUES (1), (2), (3)")
+        db.execute("UPDATE t SET a=0")
+        rows = sorted(r.a for r in db.execute("SELECT a FROM t"))
+        assert rows == [0, 0, 0]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_update_set_unknown_column_raises():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        with pytest.raises(ExecutionError):
+            db.execute("UPDATE t SET z=1")
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_update_set_type_mismatch_raises():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        with pytest.raises(TypeError):
+            db.execute("UPDATE t SET a='x'")
+    finally:
+        os.unlink(path)
