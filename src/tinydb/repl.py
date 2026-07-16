@@ -4,6 +4,10 @@ PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
 
 
+class _ExitRepl(Exception):
+    """Internal control flow for .exit and .quit."""
+
+
 def _make_prompt(db_path: str) -> str:
     return f"{PRIMARY_PROMPT_PREFIX}> [{db_path}] "
 
@@ -34,7 +38,10 @@ def main() -> int:
             if not line.strip() and not buf:
                 continue
             if not buf and line.lstrip().startswith("."):
-                _handle_meta(line, db)
+                try:
+                    _handle_meta(line, db)
+                except _ExitRepl:
+                    return 0
                 continue
             buf += line + "\n"
             if _is_unterminated(buf):
@@ -79,6 +86,8 @@ def _handle_meta(line: str, db: Database) -> bool:
     if not stripped.startswith("."):
         return False
     command = stripped.split(maxsplit=1)[0]
+    if command in {".exit", ".quit"}:
+        raise _ExitRepl
     print(f"ERROR: unknown command: {command}", file=sys.stderr)
     return True
 

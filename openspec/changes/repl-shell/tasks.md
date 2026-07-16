@@ -25,7 +25,7 @@
 ## 4. 元命令分发
 
 - [x] 4.1 实现 `_handle_meta(line: str, db) -> bool`：行首 `.` 进入；返回 True 表示已处理（不进 SQL 路径），False 表示不是元命令
-- [ ] 4.2 实现 `.exit` / `.quit`：抛 `_ExitRepl` 内部异常让 main 退出
+- [x] 4.2 实现 `.exit` / `.quit`：抛 `_ExitRepl` 内部异常让 main 退出
 - [ ] 4.3 实现 `.help`：打印元命令清单与快捷键
 - [ ] 4.4 实现 `.tables`：遍历 `db.catalog.tables` 输出表名（一行一个）
 - [ ] 4.5 实现 `.schema <name>`：从 `db.catalog.get_table(name)` 读 schema，格式化成 `CREATE TABLE name(c1 T1, c2 T2);` 输出；未知表名报 `ERROR: no such table: <name>`
