@@ -34,6 +34,10 @@ from tinydb.repl import (
         ("SELECT 1 -- ( ignored\n", False),
         ("SELECT 1 /* unterminated", True),
         ("-- leading comment\nSELECT 1;", False),
+        ("SELECT 'foo' /* done */", False),
+        ('SELECT "a""b";', False),
+        ('SELECT "unterminated', True),
+        ("SELECT /* still in comment", True),
     ],
 )
 def test_is_unterminated_sql_aware(sql, expected):
@@ -153,6 +157,34 @@ def test_unknown_meta_command(capsys):
     with Database(":memory:") as db:
         _handle_meta(".foo", db)
     assert capsys.readouterr().err == "ERROR: unknown command: .foo\n"
+
+
+@pytest.mark.unit
+def test_handle_meta_returns_false_for_non_dot():
+    with Database(":memory:") as db:
+        assert _handle_meta("SELECT 1;", db) is False
+
+
+@pytest.mark.unit
+def test_run_file_executes_each_same_line_statement(tmp_path, capsys):
+    script = tmp_path / "seed.sql"
+    script.write_text(
+        "CREATE TABLE t(id INT); INSERT INTO t(id) VALUES (1);",
+        encoding="utf-8",
+    )
+    with Database(":memory:") as db:
+        _handle_meta(f".read {script}", db)
+    out = capsys.readouterr().out
+    assert out.count("OK") == 2
+
+
+@pytest.mark.unit
+def test_run_file_warns_on_unterminated_eof(tmp_path, capsys):
+    script = tmp_path / "broken.sql"
+    script.write_text("CREATE TABLE t(id INT", encoding="utf-8")
+    with Database(":memory:") as db:
+        _handle_meta(f".read {script}", db)
+    assert capsys.readouterr().err.startswith("ERROR: unterminated statement at EOF")
 
 
 @pytest.mark.unit
@@ -276,3 +308,165 @@ def test_main_database_expands_home_and_creates_file(monkeypatch, tmp_path):
     monkeypatch.setattr(repl, "_interactive_loop", lambda db, path: 0)
     assert repl.main(["--database", "~/persist.db"]) == 0
     assert (tmp_path / "persist.db").exists()
+
+
+# ---------------------------------------------------------------------------
+# _interactive_loop coverage (lines 43-77).
+# These tests monkeypatch tinydb.repl._read_one_statement, _setup_history, and
+# _save_history so the loop terminates deterministically and is driven through
+# every branch without modifying the source.
+# ---------------------------------------------------------------------------
+
+
+def _drive_loop(monkeypatch, responses, *, setup_returns=False, readline_module=None):
+    """Patch the REPL so _interactive_loop is driven by `responses`.
+
+    `responses` is an iterable yielding the successive return values of
+    `_read_one_statement`. When the iterable is exhausted, `None` is returned
+    (signalling EOF, same as input() raising EOFError).
+
+    `setup_returns` controls whether _setup_history returns True or False.
+    `readline_module` (optional) is injected into sys.modules so the inner
+    `import readline` inside the loop succeeds.
+    """
+    import tinydb.repl as repl
+
+    iterator = iter(responses)
+
+    def fake_reader(prompt):
+        try:
+            return next(iterator)
+        except StopIteration:
+            return None
+
+    monkeypatch.setattr(repl, "_read_one_statement", fake_reader)
+    monkeypatch.setattr(repl, "_setup_history", lambda: setup_returns)
+    monkeypatch.setattr(repl, "_save_history", lambda ok: None)
+    if readline_module is not None:
+        monkeypatch.setitem(sys.modules, "readline", readline_module)
+    return repl
+
+
+@pytest.mark.unit
+def test_interactive_loop_empty_line_then_eof(monkeypatch):
+    repl = _drive_loop(monkeypatch, ["", ""])
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+
+
+@pytest.mark.unit
+def test_interactive_loop_keyboard_interrupt_clears_buffer(monkeypatch, capsys):
+    raised = {"done": False}
+
+    def reader(prompt):
+        if not raised["done"]:
+            raised["done"] = True
+            raise KeyboardInterrupt
+        return None  # EOF afterwards
+
+    import tinydb.repl as repl
+
+    monkeypatch.setattr(repl, "_read_one_statement", reader)
+    monkeypatch.setattr(repl, "_setup_history", lambda: False)
+    monkeypatch.setattr(repl, "_save_history", lambda ok: None)
+
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+    captured = capsys.readouterr()
+    assert "(Use .exit or Ctrl-D to exit)" in captured.out
+
+
+@pytest.mark.unit
+def test_interactive_loop_exit_meta_returns_zero(monkeypatch):
+    repl = _drive_loop(monkeypatch, [".exit"])
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+
+
+@pytest.mark.unit
+def test_interactive_loop_quit_meta_returns_zero(monkeypatch):
+    repl = _drive_loop(monkeypatch, [".quit"])
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+
+
+@pytest.mark.unit
+def test_interactive_loop_help_then_eof(monkeypatch, capsys):
+    repl = _drive_loop(monkeypatch, [".help", ""])
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+    assert "Meta commands:" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_interactive_loop_continuation_until_terminated(monkeypatch, capsys):
+    responses = [
+        "INSERT INTO t(id, name) VALUES (",  # unterminated → continue
+        "",  # empty, buf non-empty → falls through, still unterminated → continue
+        "1, 'alice');",  # closes & terminates → executes
+    ]
+    repl = _drive_loop(monkeypatch, responses)
+    with Database(":memory:") as db:
+        # Need the table to exist first.
+        db.execute("CREATE TABLE t(id INT, name TEXT)")
+        assert repl._interactive_loop(db, ":memory:") == 0
+    assert "OK" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_interactive_loop_sql_execution_without_readline(monkeypatch, capsys):
+    repl = _drive_loop(monkeypatch, ["CREATE TABLE t(id INT);"], setup_returns=False)
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+    assert capsys.readouterr().out.count("OK") == 1
+
+
+@pytest.mark.unit
+def test_interactive_loop_sql_execution_with_readline_history(monkeypatch, capsys):
+    """When readline_ok is True and `readline` is importable, add_history runs."""
+    history_calls = []
+    fake_readline = SimpleNamespace(
+        add_history=lambda entry: history_calls.append(entry),
+        read_history_file=lambda path: None,
+        write_history_file=lambda path: None,
+        set_history_length=lambda length: None,
+    )
+    repl = _drive_loop(
+        monkeypatch,
+        ["SELECT 1;", ""],
+        setup_returns=True,
+        readline_module=fake_readline,
+    )
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+    assert history_calls == ["SELECT 1;"]
+
+
+@pytest.mark.unit
+def test_interactive_loop_readline_module_missing_attribute(monkeypatch, capsys):
+    """readline module present but missing add_history → AttributeError swallowed."""
+
+    class BareReadline:
+        pass
+
+    repl = _drive_loop(
+        monkeypatch,
+        ["SELECT 1;", ""],
+        setup_returns=True,
+        readline_module=BareReadline(),
+    )
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+
+
+@pytest.mark.unit
+def test_interactive_loop_executes_multiple_statements(monkeypatch, capsys):
+    responses = [
+        "CREATE TABLE t(id INT);",
+        "INSERT INTO t(id) VALUES (1);",
+        "INSERT INTO t(id) VALUES (2);",
+    ]
+    repl = _drive_loop(monkeypatch, responses)
+    with Database(":memory:") as db:
+        assert repl._interactive_loop(db, ":memory:") == 0
+    assert capsys.readouterr().out.count("OK") == 3
