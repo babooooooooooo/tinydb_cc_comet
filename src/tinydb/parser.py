@@ -378,7 +378,7 @@ class _Parser:
         where = self._parse_where()
 
         return Select(
-            table=table, columns=cols, where=where,
+            table=table, columns=tuple(cols), where=where,
             line=kw.line, col=kw.col,
         )
 
@@ -399,8 +399,12 @@ class _Parser:
 
     # --- shared WHERE clause helper ----------------------------------------
 
-    def _parse_where(self) -> Optional[tuple]:
-        """Parse `WHERE <col> <op> <literal>` if present; otherwise return None."""
+    def _parse_where(self) -> Optional[EqualsExpr]:
+        """Parse `WHERE <col> = <literal>` if present; otherwise return None.
+
+        engine-v1 returns an EqualsExpr AST node (not a tuple) so the
+        executor's eval_expr can consume it uniformly with AND/OR/NOT.
+        """
         if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
             return None
         self.advance()
@@ -421,7 +425,7 @@ class _Parser:
         lit = self.advance()
         if lit.type not in _LITERAL_TYPES:
             raise ParseError(lit.line, lit.col, "expected literal")
-        return (cname, op_tok.value, lit.value)
+        return EqualsExpr(column=cname, value=lit.value)
 
 
 # --- Public entry ------------------------------------------------------------

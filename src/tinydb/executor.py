@@ -12,7 +12,10 @@ from typing import Any, Optional, Union
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
-from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
+from tinydb.parser import (
+    CreateTable, DropTable, Insert, Select, Delete,
+    EqualsExpr, AndExpr, OrExpr, NotExpr,
+)
 from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
@@ -23,6 +26,37 @@ from tinydb.type_system import py_to_db
 # MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
 # an empty page leaves room for the slot directory entry (no overlap).
 _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
+
+
+def eval_expr(expr: Any, row: list, schema: list) -> bool:
+    """Recursive WHERE-expression evaluator; AND/OR short-circuit; strict type check.
+
+    Raises:
+        ExecutionError: unknown column.
+        TypeError: column type vs literal type mismatch (preserves MVP behavior).
+    """
+    if isinstance(expr, EqualsExpr):
+        col_idx = next(
+            (i for i, (n, _) in enumerate(schema) if n == expr.column),
+            None,
+        )
+        if col_idx is None:
+            raise ExecutionError(f"unknown column {expr.column!r}")
+        col_type = schema[col_idx][1]
+        try:
+            py_to_db(expr.value, col_type)
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+            ) from e
+        return row[col_idx] == expr.value
+    if isinstance(expr, AndExpr):
+        return eval_expr(expr.left, row, schema) and eval_expr(expr.right, row, schema)
+    if isinstance(expr, OrExpr):
+        return eval_expr(expr.left, row, schema) or eval_expr(expr.right, row, schema)
+    if isinstance(expr, NotExpr):
+        return not eval_expr(expr.operand, row, schema)
+    raise ExecutionError(f"unsupported expression: {type(expr).__name__}")
 
 
 def _python_type_to_db_type(value: object) -> str:
@@ -341,12 +375,11 @@ class Executor:
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema
-        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
 
         # Named-column projection: validate all column names up front so an
         # unknown column surfaces before we return any partial result.
         proj_idx: list[int] = []
-        if stmt.columns != ["*"]:
+        if stmt.columns != ("*",):
             name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
             for cname in stmt.columns:
                 if cname not in name_to_idx:
@@ -355,10 +388,10 @@ class Executor:
 
         results: list[list[Any]] = []
         for _sid, vals, _pid in self._scan_table(ti):
-            if col_idx is not None and vals[col_idx] != lit:
+            if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
                 continue
             # `list(vals)` copies so each row stands on its own (no shared refs).
-            if stmt.columns == ["*"]:
+            if stmt.columns == ("*",):
                 results.append(list(vals))
             else:
                 results.append([vals[i] for i in proj_idx])
@@ -380,13 +413,12 @@ class Executor:
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema
-        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
 
         # Collect (page_id, slot_id) pairs first to avoid mutating pages
         # while we are still scanning them.
         to_delete: list[tuple[int, int]] = []
         for sid, vals, pid in self._scan_table(ti):
-            if col_idx is None or vals[col_idx] == lit:
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
                 to_delete.append((pid, sid))
 
         for pid, sid in to_delete:
