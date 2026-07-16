@@ -77,3 +77,95 @@ def test_eval_expr_nested_and_or_not():
     # Row 2: a=1, b=9, c=99 — b=2 False, c=3 False, OR False, NOT True,
     # AND True AND True -> True
     assert eval_expr(expr, [1, 9, 99], SCHEMA) is True
+
+
+# --- Task 9: SELECT chain (ORDER BY + LIMIT + OFFSET) ---------------------
+
+
+import os
+import tempfile
+from tinydb.database import Database
+
+
+def _db():
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    os.unlink(path)
+    db = Database(path)
+    return db, path
+
+
+@pytest.mark.integration
+def test_executor_select_sorts_and_slices():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT, b INT)")
+        for i, v in enumerate([3, 1, 4, 1, 5, 9, 2, 6]):
+            db.execute(f"INSERT INTO t (a, b) VALUES ({v}, {i})")
+        out = db.execute("SELECT * FROM t ORDER BY a ASC LIMIT 3")
+        assert [r.a for r in out] == [1, 1, 2]
+        out = db.execute("SELECT * FROM t ORDER BY a DESC LIMIT 3")
+        assert [r.a for r in out] == [9, 6, 5]
+        out = db.execute("SELECT * FROM t ORDER BY a ASC OFFSET 5")
+        assert [r.a for r in out] == [5, 6, 9]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_select_order_by_stable_when_tied():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT, b INT)")
+        for i, k in enumerate([2, 1, 2, 1, 2]):
+            db.execute(f"INSERT INTO t (a, b) VALUES ({k}, {i})")
+        out = db.execute("SELECT b FROM t ORDER BY a ASC")
+        # b values where a=1: 1, 3; where a=2: 0, 2, 4
+        assert [r.b for r in out] == [1, 3, 0, 2, 4]
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_select_limit_zero():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        db.execute("INSERT INTO t (a) VALUES (1)")
+        assert db.execute("SELECT * FROM t LIMIT 0") == []
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_select_offset_beyond_rows():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        db.execute("INSERT INTO t (a) VALUES (1), (2)")
+        assert db.execute("SELECT * FROM t OFFSET 10") == []
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_select_offset_negative_raises():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        with pytest.raises(ExecutionError):
+            db.execute("SELECT * FROM t OFFSET -1")
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.integration
+def test_executor_select_order_by_unknown_column_raises():
+    db, path = _db()
+    try:
+        db.execute("CREATE TABLE t (a INT)")
+        db.execute("INSERT INTO t (a) VALUES (1)")
+        with pytest.raises(ExecutionError):
+            db.execute("SELECT * FROM t ORDER BY z")
+    finally:
+        os.unlink(path)

@@ -8,13 +8,14 @@ finishes SELECT projection/WHERE/DELETE tombstone on top of Task 18's
 INSERT + linear scan helper.
 """
 from typing import Any, Optional, Union
+from functools import cmp_to_key
 
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import (
-    CreateTable, DropTable, Insert, Select, Delete,
-    EqualsExpr, AndExpr, OrExpr, NotExpr,
+    CreateTable, DropTable, Insert, Select, Delete, Update,
+    EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
 )
 from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import (
@@ -321,7 +322,7 @@ class Executor:
         return results
 
     def _exec_select(self, stmt: Select) -> list[list[Any]]:
-        """Read rows from a table, applying WHERE filter and column projection.
+        """Read rows from a table, applying WHERE filter, ORDER BY, OFFSET, LIMIT, projection.
 
         Engine-v1 semantics:
           * WHERE supports the full Expr AST (EqualsExpr | AndExpr | OrExpr |
@@ -332,6 +333,9 @@ class Executor:
           * Unknown columns raise :class:`ExecutionError`.
           * ``SELECT *`` projects every schema column in schema order; a
             named-column list projects in the order given by ``stmt.columns``.
+          * Chain order: filter -> order_by -> offset -> limit -> project.
+          * ORDER BY uses Python stable sort with multi-key comparator.
+          * Negative LIMIT/OFFSET raise ExecutionError.
 
         Returns ``list[list]`` of decoded values — Task 20 wraps each row in
         a ``Row`` object; until then the raw lists are the public contract.
@@ -340,6 +344,22 @@ class Executor:
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema
+
+        # Validate LIMIT/OFFSET non-negative.
+        if stmt.offset is not None and stmt.offset < 0:
+            raise ExecutionError(f"OFFSET must be non-negative, got {stmt.offset}")
+        if stmt.limit is not None and stmt.limit < 0:
+            raise ExecutionError(f"LIMIT must be non-negative, got {stmt.limit}")
+
+        # Validate ORDER BY columns up front so an unknown column surfaces
+        # before sort (which would otherwise never check on a 1-row table).
+        if stmt.order_by:
+            name_to_idx_sort = {n: i for i, (n, _) in enumerate(schema)}
+            for it in stmt.order_by:
+                if it.column not in name_to_idx_sort:
+                    raise ExecutionError(
+                        f"unknown column {it.column!r} in ORDER BY"
+                    )
 
         # Named-column projection: validate all column names up front so an
         # unknown column surfaces before we return any partial result.
@@ -351,16 +371,68 @@ class Executor:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        results: list[list[Any]] = []
-        for _sid, vals, _pid in self._scan_table(ti):
+        # filter + collect (sid, vals, pid) for stable sort
+        rows: list[tuple[int, list[Any], int]] = []
+        for sid, vals, pid in self._scan_table(ti):
             if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
                 continue
-            # `list(vals)` copies so each row stands on its own (no shared refs).
+            rows.append((sid, vals, pid))
+
+        if stmt.order_by:
+            rows = self._stable_sort(rows, stmt.order_by, schema)
+
+        if stmt.offset:
+            rows = rows[stmt.offset:]
+        if stmt.limit is not None:
+            rows = rows[:stmt.limit]
+
+        results: list[list[Any]] = []
+        for _sid, vals, _pid in rows:
             if stmt.columns == ("*",):
                 results.append(list(vals))
             else:
                 results.append([vals[i] for i in proj_idx])
         return results
+
+    def _stable_sort(
+        self,
+        rows: list[tuple[int, list[Any], int]],
+        items: tuple,
+        schema: list[tuple[str, str]],
+    ) -> list[tuple[int, list[Any], int]]:
+        """Stable multi-key sort by OrderByItem list.
+
+        Uses ``cmp_to_key`` to support arbitrary Python types (INT, TEXT,
+        FLOAT, BOOL) and mixed ASC/DESC. Python ``sorted`` is stable, so
+        equal keys preserve insertion order (which itself is page-slot order).
+        """
+        name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+
+        def cmp(r1: tuple, r2: tuple) -> int:
+            for it in items:
+                if it.column not in name_to_idx:
+                    raise ExecutionError(
+                        f"unknown column {it.column!r} in ORDER BY"
+                    )
+                i = name_to_idx[it.column]
+                v1, v2 = r1[1][i], r2[1][i]
+                col_type = schema[i][1]
+                # py_to_db is the canonical type check; surface type errors as
+                # ExecutionError (consistent with executor error model).
+                try:
+                    py_to_db(v1, col_type)
+                    py_to_db(v2, col_type)
+                except (TypeError, ValueError) as e:
+                    raise ExecutionError(
+                        f"column {it.column!r}: {e}"
+                    ) from e
+                if v1 < v2:
+                    return -1 if not it.descending else 1
+                if v1 > v2:
+                    return 1 if not it.descending else -1
+            return 0  # all keys equal; Python sorted is stable
+
+        return sorted(rows, key=cmp_to_key(cmp))
 
     def _exec_delete(self, stmt: Delete) -> list:
         """Delete rows matching the WHERE clause (or every row if no WHERE).
