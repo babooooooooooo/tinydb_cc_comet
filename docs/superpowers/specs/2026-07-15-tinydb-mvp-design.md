@@ -2,6 +2,8 @@
 comet_change: tinydb-mvp
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-16-tinydb-mvp
+status: final
 ---
 
 # Design: tinydb-mvp — 深度技术设计

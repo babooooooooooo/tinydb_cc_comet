@@ -2,6 +2,7 @@
 change: tinydb-mvp
 design-doc: docs/superpowers/specs/2026-07-15-tinydb-mvp-design.md
 base-ref: b2641736d11bf4afb98e28aecd4f7f1b82f4c94c
+archived-with: 2026-07-16-tinydb-mvp
 ---
 
 # tinydb-mvp Implementation Plan

@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/tinydb-mvp/tasks.md",
   "openspec_delta_spec": "openspec/changes/tinydb-mvp/specs/python-api/spec.md",
   "handoff_context": "openspec/changes/tinydb-mvp/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/tinydb-mvp/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/tinydb-mvp/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-16-tinydb-mvp"
 }
