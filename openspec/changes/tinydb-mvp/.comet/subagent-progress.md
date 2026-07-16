@@ -13,13 +13,13 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 30: 最终人眼 demo 验证（tasks.md §12.4）`
-- **openspec task**: `§12.4 visual smoke test of examples/demo.py output`
-- **阶段**: `ready_to_dispatch`（Task 29 已完成勾选、pyproject.toml coverage gate `>=85%`、`wc -l` 通过（slotted_page.py 预算从 150 上调至 220 经用户决策并同步到 README/proposal/design-doc/plan）、openspec validate 通过；167 passed, 92.73% coverage）
+- **plan task**: `### Task 31: Spec Patch 回写 OpenSpec delta spec（可选）`
+- **openspec task**: `§9 patch — overflow row spans multiple pages + catalog INT-as-string requirements backport to storage-engine/spec.md`
+- **阶段**: `ready_to_dispatch`（Task 30 已完成勾选；demo 实际输出与 plan 期望逐行匹配；调整了 README + demo.py docstring 中 `python` → `python3` 以解决 PATH 中无 python 别名问题；无生产代码改动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 28 提供 demo.py
-- **范围约束**: 仅需运行 demo 并人工确认输出；无需代码改动
-- **下一步**: 主会话直接运行 demo.py，对照 plan 期望输出确认 3 段；OK 即立即勾选步骤 1-2 并提交；不行走 systematic-debugging
+- **依赖**: Task 29 已通过 openspec validate；Task 21 overflow chain spill 实施已完成；Task 11 catalog JSON INT-as-string 实施已完成
+- **范围约束**: 仅修改 `openspec/changes/tinydb-mvp/specs/storage-engine/spec.md`；追加 overflow requirement + catalog INT-as-string requirement；不修改生产代码或 plan
+- **下一步**: 主会话决定跳过/实施；推荐至少追加 overflow requirement（spec patch 已记录于 design.md §9 但 OpenSpec delta spec 未回写）；如跳过需在 progress 记录原因；如实施，遵循 `openspec-apply-change` workflow + 重新 `validate --strict`
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 

@@ -26,7 +26,7 @@ Notes on the grammar shown above:
 A runnable end-to-end example lives at [`examples/demo.py`](examples/demo.py) — it covers CREATE, INSERT, SELECT `*`, SELECT `WHERE`, DELETE, and SELECT after delete, against an in-memory database:
 
 ```bash
-python examples/demo.py
+python3 examples/demo.py
 ```
 
 ## Module map (line budgets per proposal)

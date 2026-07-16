@@ -2,7 +2,7 @@
 
 Run from the repo root:
 
-    python examples/demo.py
+    python3 examples/demo.py       # or `python` on systems where that alias is python3
 
 Demonstrates the full SQL surface (excluding DROP, which behaves the same as
 DELETE from the catalog's point of view) against an in-memory database.

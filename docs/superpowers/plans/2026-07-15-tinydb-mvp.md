@@ -3657,7 +3657,7 @@ git commit -m "chore(pytest): enable coverage gate at 85% minimum"
 
 ### Task 30: 最终人眼 demo 验证（tasks.md §12.4）
 
-- [ ] **Step 1: 跑 demo 确认输出符合预期**
+- [x] **Step 1: 跑 demo 确认输出符合预期** (Task 30)
 
 Run: `python examples/demo.py`
 Expected:
@@ -3676,9 +3676,11 @@ After deleting id=2:
  Row(id=3, name='carol', active=True)
 ```
 
+> **Task 30 调整：** 系统 PATH 中无 `python` 别名（只有 `python3`），所以 Step 2 把 demo.py docstring 与 README 的 `python examples/demo.py` 改为 `python3 examples/demo.py`（保留 `python` 兼容说明），实现跨平台一致性。
+
 若输出不符 → 回到相关 Task 修源码，不直接改 demo。
 
-- [ ] **Step 2: Commit（如有 demo 调整）**
+- [x] **Step 2: Commit（如有 demo 调整）** (Task 30)
 
 ```bash
 git add examples/demo.py
