@@ -40,7 +40,7 @@
 ## 6. 输出格式
 
 - [x] 6.1 实现 `_format_table(rows: list[Row]) -> str`：列宽 = `min(max(len(h), max(len(str(v)))), 30)`；header + `---` 分隔 + 行；超长值截断加 `…`
-- [ ] 6.2 在 `_run_sql` 中：若结果是 `list[Row]` 且非空，调用 `_format_table`；空结果显示 `(no rows)`
+- [x] 6.2 在 `_run_sql` 中：若结果是 `list[Row]` 且非空，调用 `_format_table`；空结果显示 `(no rows)`
 - [ ] 6.3 单条错误格式：`ERROR: ParseError: line 1, col 5: ...`（与现有 exception 形状对齐）
 
 ## 7. 测试

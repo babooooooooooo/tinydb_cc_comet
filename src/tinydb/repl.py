@@ -132,8 +132,7 @@ def _run_sql(db: Database, sql: str) -> None:
     elif not rows:
         print("(no rows)")
     else:
-        for row in rows:
-            print(repr(row))
+        print(_format_table(rows))
 
 
 def _run_file(db: Database, path_str: str) -> None:
