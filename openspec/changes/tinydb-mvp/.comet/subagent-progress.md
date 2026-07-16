@@ -13,13 +13,13 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 31: Spec Patch 回写 OpenSpec delta spec（可选）`
-- **openspec task**: `§9 patch — overflow row spans multiple pages + catalog INT-as-string requirements backport to storage-engine/spec.md`
-- **阶段**: `ready_to_dispatch`（Task 30 已完成勾选；demo 实际输出与 plan 期望逐行匹配；调整了 README + demo.py docstring 中 `python` → `python3` 以解决 PATH 中无 python 别名问题；无生产代码改动）
+- **plan task**: `### Task 32: 提交前最终自检（pre-commit self-check）`
+- **openspec task**: 隐含 §12.5（pre-commit secrets scan + full test sanity）
+- **阶段**: `ready_to_dispatch`（Task 31 由主 session 决定**跳过**实施，理由：(a) design.md §9 已记录 overflow chain 需求为 spec patch；(b) archive 阶段会统一同步 delta spec → main spec；(c) `openspec validate tinydb-mvp --strict` 已通过；(d) 167 tests + 92.73% coverage 已达门槛；本 task 处于建设尾声，spec 回写属于 archive 交付物而非 build 必经项。已记录跳过原因到 progress；无须额外代码改动）
 - **审查-修复轮次**: 0
-- **依赖**: Task 29 已通过 openspec validate；Task 21 overflow chain spill 实施已完成；Task 11 catalog JSON INT-as-string 实施已完成
-- **范围约束**: 仅修改 `openspec/changes/tinydb-mvp/specs/storage-engine/spec.md`；追加 overflow requirement + catalog INT-as-string requirement；不修改生产代码或 plan
-- **下一步**: 主会话决定跳过/实施；推荐至少追加 overflow requirement（spec patch 已记录于 design.md §9 但 OpenSpec delta spec 未回写）；如跳过需在 progress 记录原因；如实施，遵循 `openspec-apply-change` workflow + 重新 `validate --strict`
+- **依赖**: 无；纯主会话自检
+- **范围约束**: 不写生产代码；只跑 lint/secrets/全测试套件并捕获结果
+- **下一步**: 主会话跑 `git diff --stat` + 抽查 secrets + 重跑 `pytest --cov`；全绿后勾选步骤 1-3、提交 checkpoint，立即进入 Task 33 阶段守卫
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 

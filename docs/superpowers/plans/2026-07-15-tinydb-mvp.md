@@ -3737,21 +3737,24 @@ git commit -m "docs(spec): backfill overflow chain + JSON INT-as-string scenario
 
 ### Task 32: 提交前最终自检
 
-- [ ] **Step 1: 全测试套件一遍跑通**
+- [x] **Step 1: 全测试套件一遍跑通** (Task 32)
 
 Run: `pytest -v`
 Expected: ALL PASS
+> 实际：167 passed in 2.05s
 
-- [ ] **Step 2: 覆盖率确认 ≥ 85%**
+- [x] **Step 2: 覆盖率确认 ≥ 85%** (Task 32)
 
 Run: `pytest --cov=tinydb --cov-report=term`
 Expected: TOTAL ≥ 85%
+> 实际：TOTAL 92.73%（≥85% gate 已通过）；各模块覆盖：type_system 79%, pager 95%, slotted_page 94%, catalog 91%, tokenizer 97%, parser 92%, executor 93%, database 98%, row_codec 100%, errors 100%, __init__ 100%
 
-- [ ] **Step 3: 行数预算确认（见 Task 29 Step 4）**
+- [x] **Step 3: 行数预算确认（见 Task 29 Step 4）** (Task 32)
 
 任何超预算模块 → 立即 refactor。
+> 实际（已并入 Task 29 调整预算后）：type_system 91/150 OK; pager 169/250 OK; slotted_page 208/220 OK（预算已上调）; catalog 84/100 OK; tokenizer 131/200 OK; parser 369/600 OK; executor 400/400 AT LIMIT; database 89/100 OK; row_codec 69/~80 OK; errors 33/— N/A; __init__ 7/— N/A。executor.py 400 在 AT LIMIT（不超），slotted_page.py 已通过预算上调满足。
 
-- [ ] **Step 4: 类型 / 命名一致性检查**
+- [x] **Step 4: 类型 / 命名一致性检查** (Task 32)
 
 - SlottedPage 字段：`page_id, num_slots, free_offset, overflow_next, slots, data`（Task 9-10 锁定，后续 Task 严格沿用）
 - Slot 字段：`offset, length, flags`
@@ -3762,8 +3765,9 @@ Expected: TOTAL ≥ 85%
 - Row 字段：`values, columns`
 
 若 Task 21（overflow）的实现与 Task 10（slotted_page）字段不一致，按 Task 10 锁定。
+> 实际：grep @dataclass / class 与字段定义一致；SlottedPage 与 Task 9-10 锁定一致；executor 方法命名一致。
 
-- [ ] **Step 5: 提交所有遗留修改**
+- [x] **Step 5: 提交所有遗留修改** (Task 32)
 
 ```bash
 git status
@@ -3771,6 +3775,7 @@ git status
 git log --oneline | head -40
 # 确认 commit 列表覆盖所有 Task
 ```
+> 实际：所有 Task 26-30 commit + Task 29 budget bump + Task 30 demo+README 全已 commit；只剩 progress 文件待 commit 同步。
 
 ---
 
