@@ -332,9 +332,12 @@ class _Parser:
                 raise ParseError(tok.line, tok.col, "expected literal")
             while True:
                 v = self.advance()
-                if v.type not in _LITERAL_TYPES:
+                if v.type == "KEYWORD" and v.value == "NULL":
+                    row.append(None)
+                elif v.type in _LITERAL_TYPES:
+                    row.append(v.value)
+                else:
                     raise ParseError(v.line, v.col, "expected literal")
-                row.append(v.value)
                 if self.peek().type == "PUNCT" and self.peek().value == ",":
                     self.advance()
                     continue

@@ -58,3 +58,53 @@ def test_create_table_column_definition_all_three():
     assert cd == ColumnDefinition(
         name="id", type="INT", nullable=False, unique=True, primary_key=True
     )
+
+
+@pytest.mark.unit
+def test_insert_accepts_null_literal_when_column_nullable():
+    stmt = parse(tokenize("INSERT INTO t(x) VALUES (NULL)"))
+    ins = stmt.statements[0]
+    assert hasattr(ins, "values")
+    assert ins.values == [[None]]
+
+
+@pytest.mark.unit
+def test_insert_accepts_null_literal_mixed_with_int():
+    stmt = parse(tokenize("INSERT INTO t(x, y) VALUES (1, NULL)"))
+    assert stmt.statements[0].values == [[1, None]]
+
+
+@pytest.mark.unit
+def test_create_table_rejects_bare_null_after_type():
+    with pytest.raises(ParseError, match="bare NULL not allowed"):
+        parse(tokenize("CREATE TABLE t(x INT NULL)"))
+
+
+@pytest.mark.unit
+def test_create_table_rejects_not_without_null():
+    with pytest.raises(ParseError, match="expected NULL after NOT"):
+        parse(tokenize("CREATE TABLE t(x INT NOT)"))
+
+
+@pytest.mark.unit
+def test_create_table_rejects_primary_without_key():
+    with pytest.raises(ParseError, match="expected KEY after PRIMARY"):
+        parse(tokenize("CREATE TABLE t(x INT PRIMARY)"))
+
+
+@pytest.mark.unit
+def test_create_table_rejects_duplicate_unique_constraint():
+    with pytest.raises(ParseError, match="duplicate UNIQUE"):
+        parse(tokenize("CREATE TABLE t(x INT UNIQUE NOT NULL UNIQUE)"))
+
+
+@pytest.mark.unit
+def test_create_table_rejects_duplicate_primary_key():
+    with pytest.raises(ParseError, match="duplicate PRIMARY KEY"):
+        parse(tokenize("CREATE TABLE t(x INT PRIMARY KEY PRIMARY KEY)"))
+
+
+@pytest.mark.unit
+def test_create_table_rejects_bare_key_token():
+    with pytest.raises(ParseError, match="unexpected KEY"):
+        parse(tokenize("CREATE TABLE t(x INT KEY)"))
