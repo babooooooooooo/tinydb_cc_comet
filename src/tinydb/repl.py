@@ -99,6 +99,10 @@ def _handle_meta(line: str, db: Database) -> bool:
     if command == ".help":
         print(HELP_TEXT)
         return True
+    if command == ".tables":
+        for name in sorted(db.catalog.tables):
+            print(name)
+        return True
     print(f"ERROR: unknown command: {command}", file=sys.stderr)
     return True
 
