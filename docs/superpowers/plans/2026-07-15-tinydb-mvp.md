@@ -3224,7 +3224,7 @@ git commit -m "test(property): storage scan invariants via Python mirror, seed=2
 **Files:**
 - Create: `tests/property/test_parser_robustness.py`
 
-- [ ] **Step 1: 写属性测试（随机字符串不抛未捕获系统异常）**
+- [x] **Step 1: 写属性测试（随机字符串不抛未捕获系统异常）**
 
 ```python
 # tests/property/test_parser_robustness.py
@@ -3251,12 +3251,12 @@ def test_random_sql_only_raises_parse_or_token_errors(sql):
     # No other exception type should escape
 ```
 
-- [ ] **Step 2: 跑测试验证**
+- [x] **Step 2: 跑测试验证** (Task 23)
 
 Run: `pytest tests/property/test_parser_robustness.py -v`
 Expected: PASS（500 examples）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** (Task 23)
 
 ```bash
 git add tests/property/test_parser_robustness.py

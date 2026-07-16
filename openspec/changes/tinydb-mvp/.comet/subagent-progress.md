@@ -13,16 +13,16 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 22: Property-based Tests — Storage Invariants（tasks.md §10.3）`
-- **openspec task**: `§10.3 写 tests/property/test_storage_invariants.py — hypothesis 生成 INSERT/DELETE 序列对比 Python 镜像视图`
-- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，3 LOW non-blocking notes）
+- **plan task**: `### Task 23: Property-based Tests — Parser Robustness（tasks.md §10.4）`
+- **openspec task**: `§10.4 编写 tests/property/test_parser_robustness.py — hypothesis 生成随机字符串输入，断言 tokenizer / parser 不抛未捕获异常`
+- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，1 LOW cosmetic note）
 - **审查-修复轮次**: 0
-- **依赖**: Task 21 overflow chain 完成 + hypothesis 已配置（§1.1 pyproject dev dep）+ 117 baseline + 25 Task 20 + 4 Task 21 = 146 tests
-- **实现提交**: `4af3bf4`; **变更文件**: `tests/property/test_storage_invariants.py`（82 lines）
-- **TDD 证据**: RED 临时破坏 expected 后 focused test 失败（operations=[]，AssertionError），文件已恢复；GREEN `pytest tests/property/test_storage_invariants.py -v` → 2 passed in 36.15s（reviewer independently reran: 2 passed）
-- **审查结论**: APPROVED；Property 2 50/500 runtime deviation、显式 INSERT 列表、multiset mirror 均经 reviewer 核验可接受/必要；LOW-1 memory DB close、LOW-2 redundant health-check suppression、LOW-3 content assertion 记录为非阻塞 opportunistic notes
-- **风险信号**: 无；单测试文件、无生产代码/API 变更、diff <200 行
-- **下一步**: 勾选 plan/OpenSpec task，提交进度，然后立即派发 Task 23
+- **依赖**: Task 22 storage property tests 完成 + tokenizer/parser 已实现 + hypothesis 已配置
+- **实现提交**: `fac3489`; **变更文件**: `tests/property/test_parser_robustness.py`（63 lines）
+- **TDD 证据**: RED 非平凡性验证（monkey-patch tokenize/parse 注入 IndexError 时 Hypothesis AssertionError）；GREEN focused 1 passed / 500 examples；property suite 3 passed；reviewer full suite 149 passed
+- **审查结论**: APPROVED；seed/settings/strategy/异常白名单/marker/调用顺序均符合；LOW 仅为异常 tuple 顺序风格建议，不修复
+- **风险信号**: SQL/external input handling；无生产代码/API/数据变更，diff <200 行
+- **下一步**: 勾选 plan/OpenSpec task，提交进度，然后立即派发 Task 24
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
