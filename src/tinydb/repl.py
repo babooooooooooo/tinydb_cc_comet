@@ -127,6 +127,17 @@ def _setup_history() -> bool:
     return True
 
 
+def _save_history(readline_ok: bool) -> None:
+    if not readline_ok:
+        return
+    try:
+        import readline
+
+        readline.write_history_file(os.path.expanduser(HISTORY_PATH))
+    except (ImportError, OSError):
+        pass
+
+
 def _handle_meta(line: str, db: Database) -> bool:
     stripped = line.lstrip()
     if not stripped.startswith("."):

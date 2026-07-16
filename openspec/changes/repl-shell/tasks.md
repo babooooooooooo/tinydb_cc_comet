@@ -34,7 +34,7 @@
 ## 5. 历史持久化
 
 - [x] 5.1 实现 `_setup_history() -> None`：尝试 `import readline`；成功则 `read_history_file(os.path.expanduser('~/.tinydb_history'))`（文件不存在不报错）
-- [ ] 5.2 实现 `_save_history() -> None`：Unix 路径下 `write_history_file`，catch `OSError` 静默（磁盘满 / 权限不足）
+- [x] 5.2 实现 `_save_history() -> None`：Unix 路径下 `write_history_file`，catch `OSError` 静默（磁盘满 / 权限不足）
 - [ ] 5.3 Windows ImportError 时静默 fallback；`main()` 跳过 readline 调用，直接用内置 `input()`
 
 ## 6. 输出格式
