@@ -60,7 +60,7 @@
 
 ## 10. 行数审计与最终自检
 
-- [ ] 10.1 `wc -l src/tinydb/repl.py` ≤ 350；超出则拆 `repl/` 子包
-- [ ] 10.2 `pytest --cov=tinydb --cov-report=term-missing --cov-fail-under=85` 全绿，coverage 不退化（保持 ≥ 90%）
-- [ ] 10.3 `openspec validate repl-shell --strict` PASS
-- [ ] 10.4 `tinydb-repl data.db < smoke.sql` 与手工交互输出一致
+- [x] 10.1 `wc -l src/tinydb/repl.py` ≤ 350；超出则拆 `repl/` 子包（实测 291）
+- [x] 10.2 `pytest --cov=tinydb --cov-report=term-missing --cov-fail-under=85` 全绿，coverage 不退化（保持 ≥ 90%）（实测：233 passed；总覆盖率 94.58%；repl.py 100%）
+- [x] 10.3 `openspec validate repl-shell --strict` PASS（实测：`Change 'repl-shell' is valid`）
+- [x] 10.4 `tinydb-repl data.db < smoke.sql` 与手工交互输出一致（实测：`examples/repl_smoke.sh` 退出 0，输出 `smoke: OK`；手工管道 smoke 退出 0，stderr 空，2 个 `OK`，DB 文件存在）
