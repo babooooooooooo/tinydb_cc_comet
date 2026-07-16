@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from tinydb.database import Database
+from tinydb.database import Database, Row
 from tinydb.parser import Select, parse
 from tinydb.tokenizer import tokenize
 
@@ -12,6 +12,7 @@ PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
 HISTORY_PATH = "~/.tinydb_history"
 HISTORY_LENGTH = 1000
+MAX_COLUMN_WIDTH = 30
 HELP_TEXT = """Meta commands:
   .exit               exit the REPL
   .quit               exit the REPL
@@ -83,6 +84,34 @@ def main() -> int:
         return _interactive_loop(db, db_path)
     finally:
         db.close()
+
+
+def _format_table(rows: list[Row]) -> str:
+    if not rows:
+        return "(no rows)"
+    columns = list(rows[0].columns)
+    raw_values = [[str(value) for value in row.values] for row in rows]
+    widths = [
+        min(
+            max(len(column), *(len(values[index]) for values in raw_values)),
+            MAX_COLUMN_WIDTH,
+        )
+        for index, column in enumerate(columns)
+    ]
+
+    def truncate(value: str) -> str:
+        if len(value) <= MAX_COLUMN_WIDTH:
+            return value
+        return value[: MAX_COLUMN_WIDTH - 1] + "…"
+
+    def render(values: list[str]) -> str:
+        cells = [truncate(value).ljust(width) for value, width in zip(values, widths)]
+        return " | ".join(cells).rstrip()
+
+    header = render(columns)
+    separator = " | ".join("---" for _ in columns)
+    body = [render(values) for values in raw_values]
+    return "\n".join([header, separator, *body])
 
 
 def _run_sql(db: Database, sql: str) -> None:
