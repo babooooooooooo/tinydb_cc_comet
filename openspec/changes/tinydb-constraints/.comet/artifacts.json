@@ -1,0 +1,5 @@
+{
+  "openspec_proposal": "openspec/changes/tinydb-constraints/proposal.md",
+  "openspec_design": "openspec/changes/tinydb-constraints/design.md",
+  "openspec_tasks": "openspec/changes/tinydb-constraints/tasks.md"
+}
