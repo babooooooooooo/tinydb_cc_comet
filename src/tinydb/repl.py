@@ -2,6 +2,8 @@
 
 PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
+HISTORY_PATH = "~/.tinydb_history"
+HISTORY_LENGTH = 1000
 HELP_TEXT = """Meta commands:
   .exit               exit the REPL
   .quit               exit the REPL
@@ -60,6 +62,7 @@ def main() -> int:
         db.close()
 
 
+import os
 import sys
 from pathlib import Path
 
@@ -108,6 +111,20 @@ def _run_file(db: Database, path_str: str) -> None:
             f"ERROR: unterminated statement at EOF in {path_str}",
             file=sys.stderr,
         )
+
+
+def _setup_history() -> bool:
+    try:
+        import readline
+    except ImportError:
+        return False
+    history_file = os.path.expanduser(HISTORY_PATH)
+    try:
+        readline.read_history_file(history_file)
+    except OSError:
+        pass
+    readline.set_history_length(HISTORY_LENGTH)
+    return True
 
 
 def _handle_meta(line: str, db: Database) -> bool:
