@@ -320,53 +320,18 @@ class Executor:
             pid += 1
         return results
 
-    def _resolve_where(
-        self,
-        stmt_where: Optional[tuple[str, str, Any]],
-        schema: list[tuple[str, str]],
-    ) -> Optional[tuple[int, str, str, Any]]:
-        """Validate WHERE clause and return ``(col_idx, col_type, op, lit)``.
-
-        Returns ``(None, None, None, None)`` when ``stmt_where`` is None.
-        Raises :class:`TypeError` on literal/column type mismatch (spec
-        §REQ-PARSE-005-SCN-04 mandates TypeError, not ExecutionError).
-        Raises :class:`ExecutionError` on unknown column or unsupported op.
-        """
-        if stmt_where is None:
-            return (None, None, None, None)
-        col_name, op, lit = stmt_where
-        col_idx = next(
-            (i for i, (n, _) in enumerate(schema) if n == col_name), None,
-        )
-        if col_idx is None:
-            raise ExecutionError(f"unknown column {col_name!r}")
-        col_type = schema[col_idx][1]
-        # MVP guard: parser already restricts to '='; re-check defensively.
-        if op != "=":
-            raise ExecutionError(
-                f"operator {op!r} not supported; MVP supports only ="
-            )
-        try:
-            py_to_db(lit, col_type)
-        except (TypeError, ValueError) as e:
-            raise TypeError(
-                f"{col_type} vs {_python_type_to_db_type(lit)}: {e}"
-            ) from e
-        return (col_idx, col_type, op, lit)
-
     def _exec_select(self, stmt: Select) -> list[list[Any]]:
         """Read rows from a table, applying WHERE filter and column projection.
 
-        MVP semantics:
-          * WHERE supports only ``col = literal`` (parser already restricts
-            other operators per REQ-PARSE-005-SCN-04; this layer defensively
-            re-checks).
+        Engine-v1 semantics:
+          * WHERE supports the full Expr AST (EqualsExpr | AndExpr | OrExpr |
+            NotExpr) via ``eval_expr``. AND/OR short-circuit on the first
+            decisive branch (Python ``and``/``or``).
           * Literal type mismatches against the column's declared type raise
-            :class:`TypeError` with messages shaped like ``"INT vs TEXT: ..."``
-            (spec §REQ-PARSE-005-SCN-04).
+            :class:`TypeError` (preserves MVP behavior; spec REQ-PARSE-005-SCN-04).
+          * Unknown columns raise :class:`ExecutionError`.
           * ``SELECT *`` projects every schema column in schema order; a
             named-column list projects in the order given by ``stmt.columns``.
-          * Unknown table or column names raise :class:`ExecutionError`.
 
         Returns ``list[list]`` of decoded values — Task 20 wraps each row in
         a ``Row`` object; until then the raw lists are the public contract.
