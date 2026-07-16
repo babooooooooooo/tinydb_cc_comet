@@ -1,5 +1,13 @@
 """Interactive SQL shell for tinydb; stdlib-only and isolated from the MVP core."""
 
+import os
+import sys
+from pathlib import Path
+
+from tinydb.database import Database
+from tinydb.parser import Select, parse
+from tinydb.tokenizer import tokenize
+
 PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
 HISTORY_PATH = "~/.tinydb_history"
@@ -29,10 +37,8 @@ def _read_one_statement(prompt: str) -> str | None:
         return None
 
 
-def main() -> int:
-    """Run the tinydb REPL."""
-    db_path = ":memory:"
-    db = Database(db_path)
+def _interactive_loop(db: Database, db_path: str) -> int:
+    readline_ok = _setup_history()
     buf = ""
     try:
         while True:
@@ -56,19 +62,27 @@ def main() -> int:
             buf += line + "\n"
             if _is_unterminated(buf):
                 continue
+            if readline_ok:
+                try:
+                    import readline
+
+                    readline.add_history(buf.rstrip("\n"))
+                except (ImportError, AttributeError):
+                    pass
             _run_sql(db, buf)
             buf = ""
     finally:
+        _save_history(readline_ok)
+
+
+def main() -> int:
+    """Run the tinydb REPL."""
+    db_path = ":memory:"
+    db = Database(db_path)
+    try:
+        return _interactive_loop(db, db_path)
+    finally:
         db.close()
-
-
-import os
-import sys
-from pathlib import Path
-
-from tinydb.database import Database
-from tinydb.parser import Select, parse
-from tinydb.tokenizer import tokenize
 
 
 def _run_sql(db: Database, sql: str) -> None:
