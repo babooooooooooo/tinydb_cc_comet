@@ -124,7 +124,8 @@ def _run_sql(db: Database, sql: str) -> None:
     try:
         rows = db.execute(sql)
     except Exception as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        message = " ".join(str(exc).splitlines())
+        print(f"ERROR: {type(exc).__name__}: {message}", file=sys.stderr)
         return
 
     if not last_is_select:
