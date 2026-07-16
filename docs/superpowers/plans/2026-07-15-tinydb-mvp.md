@@ -3438,7 +3438,7 @@ git commit -m "test(integration): parser+executor+api roundtrip parametrized cas
 **Files:**
 - Create: `tests/integration/test_storage_page_chain.py`
 
-- [ ] **Step 1: 写多页管理集成测试**
+- [x] **Step 1: 写多页管理集成测试** (Task 26)
 
 ```python
 # tests/integration/test_storage_page_chain.py
@@ -3464,12 +3464,12 @@ def test_persistence_chain_across_reopen(tmp_path):
     assert len(rows) == 50 and rows[0].v == 0 and rows[49].v == 49
 ```
 
-- [ ] **Step 2: 跑测试验证 GREEN**
+- [x] **Step 2: 跑测试验证 GREEN** (Task 26)
 
 Run: `pytest tests/integration/test_storage_page_chain.py -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** (Task 26)
 
 ```bash
 git add tests/integration/test_storage_page_chain.py

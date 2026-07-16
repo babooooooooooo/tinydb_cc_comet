@@ -13,17 +13,13 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 25: Integration 套件 — parser↔executor roundtrip（tasks.md §8.2）`
-- **openspec task**: `§8.2 parser→executor→storage roundtrip integration tests`
-- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，3 LOW non-blocking notes）
+- **plan task**: `### Task 26: Integration 套件 — storage page chain（tasks.md §3 / §5）`
+- **openspec task**: `§3 / §5 storage multi-page allocation and persistence integration tests`
+- **阶段**: `checkoff`（thorough reviewer APPROVED；0 blocking / 0 high；1 MEDIUM（multi-page 测试仅断言 count, 不断言 order；plan 模板即如此，并不覆盖 plan；non-blocking）；2 LOW（marker 注册确认 / parser-contract 文档校正确认）；focused 2 passed, integration regression 60 passed；可推进 plan steps 1-3 勾选并提交 checkpoint）
 - **审查-修复轮次**: 0
-- **依赖**: parser, executor, Database API, and E2E runner complete
-- **范围约束**: 仅新增 `tests/integration/test_parser_executor_roundtrip.py`；计划模板中的裸 INSERT 改为显式列列表以匹配当前 parser 契约
-- **实现提交**: `e9368fd`; **变更文件**: `tests/integration/test_parser_executor_roundtrip.py`（95 lines）
-- **TDD 证据**: RED missing-file error；GREEN focused 3 passed；integration regression 58 passed；full regression 167 passed；reviewer static review APPROVED
-- **审查结论**: APPROVED；显式列列表为 parser 必需修正；LOW 为 AST 共享引用/只断言计数/tokenizer purity 深度增强建议，均不阻塞
-- **风险信号**: cross-module coordination + SQL/external input（fixed integration SQL）；无生产/API/schema 变更，diff <200 行
-- **下一步**: 勾选 plan task，提交进度，然后立即派发 Task 26
+- **依赖**: Pager, SlottedPage, Catalog, Executor, Database API complete
+- **范围约束**: 已确认仅新增 `tests/integration/test_storage_page_chain.py`；无生产代码改动
+- **下一步**: 派发 fresh thorough reviewer（spec compliance + code quality）；reviewer 通过后勾选 plan steps 1-3、提交 checkpoint、立即继续 Task 27
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
