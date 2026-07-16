@@ -13,13 +13,13 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 28: Documentation — README 模块导览 + demo + LIMITATIONS（tasks.md §11）`
-- **openspec task**: `§11 README module map + examples/demo.py + docs/MVP_LIMITATIONS.md`
-- **阶段**: `task-review`（implementer DONE；commit `5a35646b` 已 cherry-pick 为 `cdf0cde`；`python examples/demo.py` 输出三段，exit 0；pytest 167 passed；LIMITATIONS.md 修正了 NOT NULL 解析 inaccuracy；行预算超限（slotted_page.py 208 vs 150；executor.py 400 vs 400 borderline）由 implementer 标记但未修；无生产代码改动；等待 thorough reviewer）
+- **plan task**: `### Task 30: 最终人眼 demo 验证（tasks.md §12.4）`
+- **openspec task**: `§12.4 visual smoke test of examples/demo.py output`
+- **阶段**: `ready_to_dispatch`（Task 29 已完成勾选、pyproject.toml coverage gate `>=85%`、`wc -l` 通过（slotted_page.py 预算从 150 上调至 220 经用户决策并同步到 README/proposal/design-doc/plan）、openspec validate 通过；167 passed, 92.73% coverage）
 - **审查-修复轮次**: 0
-- **依赖**: README/示例/limitations 在 plan 阶段未指定具体大纲，已由 implementer 从 design.md + parser/executor 源码抽取
-- **范围约束**: 已确认仅修改 README.md + 新增 examples/demo.py + 新增 docs/MVP_LIMITATIONS.md
-- **下一步**: 派发 fresh thorough reviewer；reviewer 通过后勾选 plan steps 1-4、提交 checkpoint、立即继续 Task 29
+- **依赖**: Task 28 提供 demo.py
+- **范围约束**: 仅需运行 demo 并人工确认输出；无需代码改动
+- **下一步**: 主会话直接运行 demo.py，对照 plan 期望输出确认 3 段；OK 即立即勾选步骤 1-2 并提交；不行走 systematic-debugging
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 

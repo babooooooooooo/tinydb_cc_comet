@@ -35,7 +35,7 @@ python examples/demo.py
 |--------|--------|----------------|
 | `type_system.py` | 150 | INT/TEXT/FLOAT/BOOL codecs |
 | `pager.py` | 250 | 4KB pages, mmap/bytearray |
-| `slotted_page.py` | 150 | single page layout |
+| `slotted_page.py` | 220 | single page layout |
 | `catalog.py` | 100 | table metadata |
 | `tokenizer.py` | 200 | SQL lexer |
 | `parser.py` | 600 | recursive descent parser |

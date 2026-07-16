@@ -40,7 +40,7 @@
 - 模块行数预算（硬约束）：
   - `type_system.py` ≤ 150 行
   - `pager.py` ≤ 250 行
-  - `slotted_page.py` ≤ 150 行
+  - `slotted_page.py` ≤ 220 行
   - `catalog.py` ≤ 100 行
   - `tokenizer.py` ≤ 200 行
   - `parser.py` ≤ 600 行

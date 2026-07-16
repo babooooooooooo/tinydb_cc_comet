@@ -27,7 +27,7 @@ base-ref: b2641736d11bf4afb98e28aecd4f7f1b82f4c94c
 | `type_system.py` | 4 类型编解码 + 字面量 + `py_to_db`/`db_to_py`/`validate_compare` | ≤ 150 |
 | `row_codec.py` | 行级编码（null bitmap + length-prefixed values） | ≤ 80 |
 | `pager.py` | 4KB 页地址、magic header、mmap/bytearray 后端 | ≤ 250 |
-| `slotted_page.py` | 单页布局（header + slot directory + data area）、tombstone | ≤ 150 |
+| `slotted_page.py` | 单页布局（header + slot directory + data area）、tombstone | ≤ 220 |
 | `catalog.py` | 表元数据持久化（JSON 编码 page 1、INT-as-string） | ≤ 100 |
 | `tokenizer.py` | SQL 词法分析（6 类 token） | ≤ 200 |
 | `parser.py` | 5 语句 recursive descent → AST | ≤ 600 |
@@ -256,7 +256,7 @@ with tinydb.Database(":memory:") as db:
 |--------|--------|----------------|
 | `type_system.py` | 150 | INT/TEXT/FLOAT/BOOL codecs |
 | `pager.py` | 250 | 4KB pages, mmap/bytearray |
-| `slotted_page.py` | 150 | single page layout |
+| `slotted_page.py` | 220 | single page layout |
 | `catalog.py` | 100 | table metadata |
 | `tokenizer.py` | 200 | SQL lexer |
 | `parser.py` | 600 | recursive descent parser |
@@ -3601,7 +3601,7 @@ git commit -m "docs: module map + demo script + MVP limitations page"
 **Files:**
 - Modify: `pyproject.toml`（添加 coverage 配置）
 
-- [ ] **Step 1: 配 coverage 门槛**
+- [x] **Step 1: 配 coverage 门槛** (Task 29)
 
 在 `pyproject.toml` 的 `[tool.pytest.ini_options]` 添加：
 
@@ -3609,17 +3609,17 @@ git commit -m "docs: module map + demo script + MVP limitations page"
 addopts = "-ra --strict-markers --cov=tinydb --cov-report=term-missing --cov-fail-under=85"
 ```
 
-- [ ] **Step 2: 跑全套测试**
+- [x] **Step 2: 跑全套测试** (Task 29)
 
 Run: `pytest`
 Expected: 全 PASS，覆盖率 ≥ 85%
 
-- [ ] **Step 3: 若覆盖率不足，按模块行数审计**
+- [x] **Step 3: 若覆盖率不足，按模块行数审计** (Task 29)
 
 Run: `pytest --cov=tinydb --cov-report=term-missing | grep tinydb`
 针对未覆盖行加测试，回到相关 Task 补测试再 commit。
 
-- [ ] **Step 4: 行数审计**
+- [x] **Step 4: 行数审计** (Task 29)
 
 Run:
 ```bash
@@ -3631,7 +3631,7 @@ wc -l src/tinydb/*.py
 |------|------|------|
 | type_system.py | ≤ 150 | _wc -l_ |
 | pager.py | ≤ 250 | _wc -l_ |
-| slotted_page.py | ≤ 150 | _wc -l_ |
+| slotted_page.py | ≤ 220 | _wc -l_ |
 | catalog.py | ≤ 100 | _wc -l_ |
 | tokenizer.py | ≤ 200 | _wc -l_ |
 | parser.py | ≤ 600 | _wc -l_ |
@@ -3639,13 +3639,14 @@ wc -l src/tinydb/*.py
 | database.py | ≤ 100 | _wc -l_ |
 
 任何模块超预算 → 立即拆分子任务或重写（违反 MVP 教学定位）。
+> **Task 29 调整：** `slotted_page.py` 实际 208 行，超原预算 150 行。用户决策（reviewer 标记 pre-existing Task 21 overflow chain spill/merge 引入了序列化复杂度）：将 `slotted_page.py` 预算从 ≤150 上调到 ≤220（在 README.md / proposal.md / design-doc / plan 中保持同步）。executor.py 实际 400 行 = 预算上限（不超）。
 
-- [ ] **Step 5: OpenSpec 验证**
+- [x] **Step 5: OpenSpec 验证** (Task 29)
 
 Run: `openspec validate tinydb-mvp --strict`
 Expected: Validation passed
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit** (Task 29)
 
 ```bash
 git add pyproject.toml
