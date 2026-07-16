@@ -3271,6 +3271,7 @@ git commit -m "test(property): parser robustness with random SQL strings, seed=2
 
 **Files:**
 - Create: `tests/e2e/conftest.py`
+- Create: `tests/e2e/test_golden_sql.py`
 - Create: 12-15 SQL/expected 文件
 
 - [ ] **Step 1: 写 conftest helper**
@@ -3318,6 +3319,22 @@ def _format_rows(rows):
         return "(no rows)"
     return "\n".join(repr(r) for r in rows)
 ```
+
+**Test collection (required to exercise the fixture):**
+
+Create `tests/e2e/test_golden_sql.py`:
+
+```python
+import pytest
+
+
+@pytest.mark.e2e
+def test_golden_sql(golden_sql):
+    _, actual, expected = golden_sql
+    assert actual == expected
+```
+
+The original template omitted this collector module; without it, pytest does not collect a test from `conftest.py` alone. Golden INSERT statements must use explicit column lists (for example, `INSERT INTO users(id, name) VALUES ...`) because the MVP parser requires them; this corrects the template's bare-INSERT examples without changing the intended scenarios.
 
 - [ ] **Step 2: 写 golden SQL 文件（12 个示例）**
 

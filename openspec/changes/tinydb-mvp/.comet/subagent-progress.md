@@ -13,16 +13,14 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 23: Property-based Tests — Parser Robustness（tasks.md §10.4）`
-- **openspec task**: `§10.4 编写 tests/property/test_parser_robustness.py — hypothesis 生成随机字符串输入，断言 tokenizer / parser 不抛未捕获异常`
-- **阶段**: `checkoff`（implementer DONE；thorough task reviewer APPROVED，0 blocking findings，1 LOW cosmetic note）
+- **plan task**: `### Task 24: E2E Golden SQL 测试集（tasks.md §10.1-10.2）`
+- **openspec task**: `§10.1 创建 tests/e2e/sql/ golden 文件 + §10.2 实现 tests/e2e/conftest.py runner`
+- **阶段**: `ready_to_dispatch`（Task 23 已完成勾选、提交 `e9fb59b`、thorough reviewer APPROVED）
 - **审查-修复轮次**: 0
-- **依赖**: Task 22 storage property tests 完成 + tokenizer/parser 已实现 + hypothesis 已配置
-- **实现提交**: `fac3489`; **变更文件**: `tests/property/test_parser_robustness.py`（63 lines）
-- **TDD 证据**: RED 非平凡性验证（monkey-patch tokenize/parse 注入 IndexError 时 Hypothesis AssertionError）；GREEN focused 1 passed / 500 examples；property suite 3 passed；reviewer full suite 149 passed
-- **审查结论**: APPROVED；seed/settings/strategy/异常白名单/marker/调用顺序均符合；LOW 仅为异常 tuple 顺序风格建议，不修复
-- **风险信号**: SQL/external input handling；无生产代码/API/数据变更，diff <200 行
-- **下一步**: 勾选 plan/OpenSpec task，提交进度，然后立即派发 Task 24
+- **依赖**: Task 22/23 property suites complete + Database public API + parser/executor lifecycle complete
+- **范围决策**: 用户确认补充 `tests/e2e/test_golden_sql.py` collector；golden INSERT 使用显式列列表以匹配 parser 契约；plan 已记录该小范围修正
+- **允许文件**: `tests/e2e/conftest.py`、`tests/e2e/test_golden_sql.py`、`tests/e2e/sql/**/*.sql`、对应 `.expected.txt`；不得修改生产代码或 OpenSpec task
+- **下一步**: 派发 fresh implementer；严格执行 TDD RED→GREEN；覆盖 12 个 happy-path + 3 个 error-case golden scenarios
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
