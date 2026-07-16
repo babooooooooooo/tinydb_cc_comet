@@ -1,0 +1,4 @@
+CREATE TABLE t(id INT, v FLOAT);
+INSERT INTO t(id, v) VALUES (1, 1.5);
+INSERT INTO t(id, v) VALUES (2, -2.5);
+SELECT * FROM t

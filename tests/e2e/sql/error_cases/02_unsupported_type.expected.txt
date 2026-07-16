@@ -1,0 +1,1 @@
+ERROR: ParseError: line 1, col 18: type VARCHAR not supported in MVP
