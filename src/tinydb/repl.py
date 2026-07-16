@@ -13,6 +13,7 @@ CONTINUATION_PROMPT = "...> "
 HISTORY_PATH = "~/.tinydb_history"
 HISTORY_LENGTH = 1000
 MAX_COLUMN_WIDTH = 30
+USAGE = "Usage: tinydb-repl [--database PATH]"
 HELP_TEXT = """Meta commands:
   .exit               exit the REPL
   .quit               exit the REPL
@@ -76,9 +77,22 @@ def _interactive_loop(db: Database, db_path: str) -> int:
         _save_history(readline_ok)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the tinydb REPL."""
-    db_path = ":memory:"
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args in (["--help"], ["-h"]):
+        print(USAGE)
+        return 0
+    if not args:
+        db_path = ":memory:"
+    elif len(args) == 2 and args[0] == "--database":
+        db_path = os.path.expanduser(args[1])
+    else:
+        flag = args[0] if args else "--database"
+        print(f"ERROR: invalid argument: {flag}", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
+
     db = Database(db_path)
     try:
         return _interactive_loop(db, db_path)
@@ -144,9 +158,9 @@ def _run_file(db: Database, path_str: str) -> None:
         return
 
     buf = ""
-    for raw_line in text.splitlines(keepends=True):
-        buf += raw_line
-        if not _is_unterminated(buf):
+    for char in text:
+        buf += char
+        if char == ";" and not _is_unterminated(buf):
             _run_sql(db, buf)
             buf = ""
     if buf.strip():
