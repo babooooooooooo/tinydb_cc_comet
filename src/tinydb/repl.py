@@ -93,7 +93,9 @@ def _handle_meta(line: str, db: Database) -> bool:
     stripped = line.lstrip()
     if not stripped.startswith("."):
         return False
-    command = stripped.split(maxsplit=1)[0]
+    parts = stripped.split(maxsplit=1)
+    command = parts[0]
+    argument = parts[1].strip() if len(parts) == 2 else ""
     if command in {".exit", ".quit"}:
         raise _ExitRepl
     if command == ".help":
@@ -102,6 +104,14 @@ def _handle_meta(line: str, db: Database) -> bool:
     if command == ".tables":
         for name in sorted(db.catalog.tables):
             print(name)
+        return True
+    if command == ".schema":
+        table = db.catalog.get_table(argument)
+        if table is None:
+            print(f"ERROR: no such table: {argument}", file=sys.stderr)
+            return True
+        columns = ", ".join(f"{name} {type_name}" for name, type_name in table.schema)
+        print(f"CREATE TABLE {argument}({columns});")
         return True
     print(f"ERROR: unknown command: {command}", file=sys.stderr)
     return True
