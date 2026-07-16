@@ -1,0 +1,9 @@
+{
+  "openspec_proposal": "openspec/changes/repl-shell/proposal.md",
+  "openspec_design": "openspec/changes/repl-shell/design.md",
+  "openspec_tasks": "openspec/changes/repl-shell/tasks.md",
+  "openspec_delta_spec": "openspec/changes/repl-shell/specs/repl-shell/spec.md",
+  "handoff_context": "openspec/changes/repl-shell/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/repl-shell/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-16-repl-shell"
+}

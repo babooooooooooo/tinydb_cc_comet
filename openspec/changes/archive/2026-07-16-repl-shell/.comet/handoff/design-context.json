@@ -1,0 +1,14 @@
+{
+  "change": "repl-shell",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "279b656d88cfc75d421ccbee9599132675b39c5ed6527333f43d54b21eda45c3",
+  "files": [
+    { "path": "openspec/changes/repl-shell/proposal.md", "sha256": "03e44ccbf7aa6b75bb6c2924b1f9210065b71cf947b7d21952a2908743e58af7" },
+    { "path": "openspec/changes/repl-shell/design.md", "sha256": "237d8f9a3baddf32ca7662d2af9dee334c4b5e57885d0f7a2405d256277be330" },
+    { "path": "openspec/changes/repl-shell/tasks.md", "sha256": "ea922247cebdded335f4bbb68c3ad062b5c05efaf21a2f72970d53be1cf783ae" },
+    { "path": "openspec/changes/repl-shell/specs/repl-shell/spec.md", "sha256": "72c63e073c0dc9ec6eda826552412aa743c4c5842180f5fc70cd1c7cc8293114" }
+  ]
+}

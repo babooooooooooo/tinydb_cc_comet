@@ -2,6 +2,7 @@
 change: repl-shell
 design-doc: docs/superpowers/specs/2026-07-16-repl-shell-design.md
 base-ref: a14dec13620f81639857f9bb9dfbecd93c86c42f
+archived-with: 2026-07-16-repl-shell
 ---
 
 # repl-shell 实施计划
