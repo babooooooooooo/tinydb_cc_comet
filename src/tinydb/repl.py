@@ -33,6 +33,9 @@ def main() -> int:
                 return 0
             if not line.strip() and not buf:
                 continue
+            if not buf and line.lstrip().startswith("."):
+                _handle_meta(line, db)
+                continue
             buf += line + "\n"
             if _is_unterminated(buf):
                 continue
@@ -69,6 +72,15 @@ def _run_sql(db: Database, sql: str) -> None:
     else:
         for row in rows:
             print(repr(row))
+
+
+def _handle_meta(line: str, db: Database) -> bool:
+    stripped = line.lstrip()
+    if not stripped.startswith("."):
+        return False
+    command = stripped.split(maxsplit=1)[0]
+    print(f"ERROR: unknown command: {command}", file=sys.stderr)
+    return True
 
 
 def _is_unterminated(buf: str) -> bool:
