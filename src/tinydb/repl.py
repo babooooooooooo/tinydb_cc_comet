@@ -61,6 +61,7 @@ def main() -> int:
 
 
 import sys
+from pathlib import Path
 
 from tinydb.database import Database
 from tinydb.parser import Select, parse
@@ -89,6 +90,26 @@ def _run_sql(db: Database, sql: str) -> None:
             print(repr(row))
 
 
+def _run_file(db: Database, path_str: str) -> None:
+    try:
+        text = Path(path_str).read_text(encoding="utf-8")
+    except OSError:
+        print(f"ERROR: cannot read file: {path_str}", file=sys.stderr)
+        return
+
+    buf = ""
+    for raw_line in text.splitlines(keepends=True):
+        buf += raw_line
+        if not _is_unterminated(buf):
+            _run_sql(db, buf)
+            buf = ""
+    if buf.strip():
+        print(
+            f"ERROR: unterminated statement at EOF in {path_str}",
+            file=sys.stderr,
+        )
+
+
 def _handle_meta(line: str, db: Database) -> bool:
     stripped = line.lstrip()
     if not stripped.startswith("."):
@@ -112,6 +133,9 @@ def _handle_meta(line: str, db: Database) -> bool:
             return True
         columns = ", ".join(f"{name} {type_name}" for name, type_name in table.schema)
         print(f"CREATE TABLE {argument}({columns});")
+        return True
+    if command == ".read":
+        _run_file(db, argument)
         return True
     print(f"ERROR: unknown command: {command}", file=sys.stderr)
     return True

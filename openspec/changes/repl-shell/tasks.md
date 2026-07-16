@@ -29,7 +29,7 @@
 - [x] 4.3 实现 `.help`：打印元命令清单与快捷键
 - [x] 4.4 实现 `.tables`：遍历 `db.catalog.tables` 输出表名（一行一个）
 - [x] 4.5 实现 `.schema <name>`：从 `db.catalog.get_table(name)` 读 schema，格式化成 `CREATE TABLE name(c1 T1, c2 T2);` 输出；未知表名报 `ERROR: no such table: <name>`
-- [ ] 4.6 实现 `.read <path>`：读文件按 `;` 切分，逐条 `_run_sql`；文件不存在报 `ERROR: cannot read file: <path>`
+- [x] 4.6 实现 `.read <path>`：读文件按 `;` 切分，逐条 `_run_sql`；文件不存在报 `ERROR: cannot read file: <path>`
 
 ## 5. 历史持久化
 
