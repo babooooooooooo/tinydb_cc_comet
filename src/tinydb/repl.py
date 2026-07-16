@@ -2,6 +2,14 @@
 
 PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
+HELP_TEXT = """Meta commands:
+  .exit               exit the REPL
+  .quit               exit the REPL
+  .help               show this help
+  .tables             list tables
+  .schema <name>      show CREATE TABLE
+  .read <path>        execute a SQL file
+Shortcuts: Ctrl-D exits; Ctrl-C clears the current buffer."""
 
 
 class _ExitRepl(Exception):
@@ -88,6 +96,9 @@ def _handle_meta(line: str, db: Database) -> bool:
     command = stripped.split(maxsplit=1)[0]
     if command in {".exit", ".quit"}:
         raise _ExitRepl
+    if command == ".help":
+        print(HELP_TEXT)
+        return True
     print(f"ERROR: unknown command: {command}", file=sys.stderr)
     return True
 
