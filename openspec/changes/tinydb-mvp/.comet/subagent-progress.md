@@ -13,13 +13,16 @@
 
 ## 当前 Task
 
-- **plan task**: `### Task 32: 提交前最终自检（pre-commit self-check）`
-- **openspec task**: 隐含 §12.5（pre-commit secrets scan + full test sanity）
-- **阶段**: `ready_to_dispatch`（Task 31 由主 session 决定**跳过**实施，理由：(a) design.md §9 已记录 overflow chain 需求为 spec patch；(b) archive 阶段会统一同步 delta spec → main spec；(c) `openspec validate tinydb-mvp --strict` 已通过；(d) 167 tests + 92.73% coverage 已达门槛；本 task 处于建设尾声，spec 回写属于 archive 交付物而非 build 必经项。已记录跳过原因到 progress；无须额外代码改动）
-- **审查-修复轮次**: 0
-- **依赖**: 无；纯主会话自检
-- **范围约束**: 不写生产代码；只跑 lint/secrets/全测试套件并捕获结果
-- **下一步**: 主会话跑 `git diff --stat` + 抽查 secrets + 重跑 `pytest --cov`；全绿后勾选步骤 1-3、提交 checkpoint，立即进入 Task 33 阶段守卫
+- **阶段**: `verify_pending`（build 阶段已全部完成；Task 33 `comet guard tinydb-mvp build --apply` ALL CHECKS PASSED；`.comet.yaml` 已自动更新：`phase=verify`, `verify_result=pending`；`comet state next tinydb-mvp` 返回 `NEXT: auto / SKILL: comet-verify`）
+- **构建里程碑**:
+  - 167 测试通过（`pytest --cov=tinydb --cov-report=term-missing --cov-fail-under=85`）
+  - 总覆盖率 92.73% ≥ 85% gate
+  - `openspec validate tinydb-mvp --strict` PASS
+  - demo.py `python3 examples/demo.py` 输出与 plan §12.4 期望逐行匹配
+  - Tasks 22-33（含 31 跳过）全部完成
+  - 阶段出口勾选：plan 全部勾选，tasks.md §2.1 / §11 / §12 已勾选
+- **build 工作树清理**: 临时 agent worktrees 已清理（实现 commit 已 cherry-pick 到主分支）
+- **下一步**: 主会话加载 `comet-verify` skill 进入 verify 阶段；按 `verify_mode` 执行验证并处理 branch handling；verify 通过后转 archive 阶段同步 delta spec → main spec（含 Task 31 deferred spec patch）
 
 ## 累积待办（记录，Task 6 或回归时统一处理）
 
