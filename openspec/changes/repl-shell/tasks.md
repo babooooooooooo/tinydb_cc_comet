@@ -8,7 +8,7 @@
 
 - [x] 1.1 创建 `src/tinydb/repl.py`：模块级 docstring + `def main() -> int:` 入口签名（暂返回 0）
 - [x] 1.2 `pyproject.toml` 添加 `[project.scripts]`：`tinydb-repl = "tinydb.repl:main"`
-- [ ] 1.3 验证安装：`pip install -e ".[dev]"` 后 `tinydb-repl --help` 能找到入口
+- [x] 1.3 验证安装：`pip install -e ".[dev]"` 后 `tinydb-repl --help` 能找到入口
 
 ## 2. 主循环与 SQL 路径
 
