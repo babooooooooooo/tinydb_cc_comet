@@ -8,6 +8,7 @@ import pytest
 from tinydb.database import Database, Row
 from tinydb.repl import (
     HISTORY_LENGTH,
+    USAGE,
     _ExitRepl,
     _format_table,
     _handle_meta,
@@ -17,6 +18,7 @@ from tinydb.repl import (
     _run_sql,
     _save_history,
     _setup_history,
+    main,
 )
 
 
@@ -242,3 +244,35 @@ def test_save_history_ignores_write_failure(monkeypatch):
     )
     assert _save_history(True) is None
     assert _save_history(False) is None
+
+
+@pytest.mark.unit
+def test_main_help_returns_zero(capsys):
+    assert main(["--help"]) == 0
+    assert capsys.readouterr().out == USAGE + "\n"
+
+
+@pytest.mark.unit
+def test_main_unknown_argument_returns_two(capsys):
+    assert main(["data.db"]) == 2
+    assert "ERROR: invalid argument: data.db" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_main_default_memory_creates_no_file(monkeypatch, tmp_path):
+    import tinydb.repl as repl
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(repl, "_interactive_loop", lambda db, path: 0)
+    assert repl.main([]) == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.unit
+def test_main_database_expands_home_and_creates_file(monkeypatch, tmp_path):
+    import tinydb.repl as repl
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(repl, "_interactive_loop", lambda db, path: 0)
+    assert repl.main(["--database", "~/persist.db"]) == 0
+    assert (tmp_path / "persist.db").exists()

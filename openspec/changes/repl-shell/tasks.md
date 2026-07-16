@@ -51,7 +51,7 @@
 ## 8. CLI 旗标
 
 - [x] 8.1 `main(argv: list[str] | None = None)` 支持 `--database <path>` flag；默认 `:memory:`
-- [ ] 8.2 单元测试：`--database` 解析 + 路径扩展到 `Path` 校验存在性
+- [x] 8.2 单元测试：`--database` 解析 + 路径扩展到 `Path` 校验存在性
 
 ## 9. 文档
 
