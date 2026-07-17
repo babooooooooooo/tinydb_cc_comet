@@ -1262,7 +1262,7 @@ git commit -m "feat(executor): map ColumnDefinition to Column on CREATE TABLE"
 **Files:**
 - Modify: `tests/unit/test_parser.py:17-20` — `assert stmt.statements[0].columns == [(...)]` 改为 `ColumnDefinition` 形态
 
-- [ ] **Step 1: 跑现有 parser 测试看红**
+- [x] **Step 1: 跑现有 parser 测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_parser.py -v
@@ -1270,7 +1270,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 个测试失败：`assert columns == [("id", "INT"), ("name", "TEXT")]` 等。
 
-- [ ] **Step 2: 改 `test_parse_create_table_simple` 形状**
+- [x] **Step 2: 改 `test_parse_create_table_simple` 形状**
 
 ```python
 # tests/unit/test_parser.py —— 替换
@@ -1290,7 +1290,7 @@ def test_parse_create_table_simple():
     )
 ```
 
-- [ ] **Step 3: 跑测试看绿**
+- [x] **Step 3: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_parser.py -v
@@ -1298,7 +1298,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：所有 parser 测试通过。
 
-- [ ] **Step 4: 跑全量看回归**
+- [x] **Step 4: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1306,7 +1306,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：244 passed。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2061,7 +2061,7 @@ git commit -m "feat(repl): render ConstraintViolation with kind/columns/value"
 - Create: `tests/e2e/sql/constraints/07_multi_row_partial.sql` + `.expected.txt`
 - Create: `tests/e2e/sql/constraints/08_null_unique.sql` + `.expected.txt`
 
-- [ ] **Step 1: 创建 SQL + expected 配对文件**
+- [x] **Step 1: 创建 SQL + expected 配对文件**
 
 `tests/e2e/sql/constraints/01_create_with_not_null.sql`:
 
@@ -2201,7 +2201,7 @@ ERROR: ConstraintViolation(kind='unique', columns=['email'], value=('a@x',))
 3
 ```
 
-- [ ] **Step 2: 跑 e2e 测试看红**
+- [x] **Step 2: 跑 e2e 测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/e2e/test_golden_sql.py -v
@@ -2209,7 +2209,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：新增 8 个 test 失败（`.expected.txt` 不存在或 mismatch）。
 
-- [ ] **Step 3: 跑 e2e 看绿**
+- [x] **Step 3: 跑 e2e 看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/e2e/test_golden_sql.py -v -k constraints
@@ -2217,7 +2217,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：8 passed（如果 red，按错误信息调整 expected）。
 
-- [ ] **Step 4: 跑全量看回归**
+- [x] **Step 4: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -2225,7 +2225,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：272 passed。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2488,7 +2488,7 @@ node /home/lz/.agents/skills/comet/scripts/comet-state.mjs record-check tinydb-c
 **Files:**
 - Modify: `openspec/changes/tinydb-constraints/tasks.md` — 把 1.1-7.4 全部勾上 + 补充 19 项新子任务
 
-- [ ] **Step 1: 更新 tasks.md**
+- [x] **Step 1: 更新 tasks.md**
 
 按本 plan 的 26 个 task 在 `tasks.md` 加 19 个新子项并全部勾上：
 
@@ -2580,7 +2580,7 @@ node /home/lz/.agents/skills/comet/scripts/comet-state.mjs record-check tinydb-c
 - [x] 17.3 comet-guard build --apply 通过
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2595,15 +2595,15 @@ git commit -m "docs(tasks): mark all 26 build tasks complete"
 **Files:**
 - 无代码变更；调用 `superpowers:requesting-code-review` 技能
 
-- [ ] **Step 1: 加载 requesting-code-review 技能**
+- [x] **Step 1: 加载 requesting-code-review 技能**
 
 按 `superpowers:requesting-code-review` 流程对整个 diff 做轻量 review。
 
-- [ ] **Step 2: 修复 CRITICAL / IMPORTANT**
+- [x] **Step 2: 修复 CRITICAL / IMPORTANT**
 
 按 review 结果在主 agent 直接修复（小修）；中大型修复走 systematic-debugging。
 
-- [ ] **Step 3: 跑全量测试**
+- [x] **Step 3: 跑全量测试**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest --cov=tinydb --cov-report=term --cov-fail-under=85 -q
@@ -2611,7 +2611,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：所有测试通过，覆盖率 ≥ 85%。
 
-- [ ] **Step 4: Commit（如有 review 修复）**
+- [x] **Step 4: Commit（如有 review 修复）**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2626,7 +2626,7 @@ git commit -m "fix(constraints): address code review findings"
 **Files:**
 - Modify: `openspec/changes/tinydb-constraints/.comet.yaml` — 由 `comet-guard` 自动推进
 
-- [ ] **Step 1: 跑 build guard**
+- [x] **Step 1: 跑 build guard**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2635,7 +2635,7 @@ node /home/lz/.agents/skills/comet/scripts/comet-guard.mjs tinydb-constraints bu
 
 期望：`ALL CHECKS PASSED — phase advanced to verify`。
 
-- [ ] **Step 2: 验证 .comet.yaml 推进到 `phase: verify`**
+- [x] **Step 2: 验证 .comet.yaml 推进到 `phase: verify`**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2644,7 +2644,7 @@ grep -E '^phase:' openspec/changes/tinydb-constraints/.comet.yaml
 
 期望：`phase: verify`。
 
-- [ ] **Step 3: 不进入 verify 阶段**
+- [x] **Step 3: 不进入 verify 阶段**
 
 按任务边界，build 阶段到此结束。不跑 `comet-verify` 流程。
 
