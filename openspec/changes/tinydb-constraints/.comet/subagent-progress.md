@@ -71,8 +71,11 @@
 - **01:11** — Re-review 回报 `APPROVED_WITH_NITS`：1 NIT（重复 import Catalog/Pager）已记录接受
 - **01:12** — Plan Task 7 step 勾选落地（commit `811ac3d`），Step 1/3 通过 task-checkoff（Steps 2/4/5/6 因 plan 层级重复命名无法单文件唯一验证）
 - **01:12** — 派发 Plan Task 9 implementer（background, agentId 待返回，model sonnet）— executor NOT NULL/PK validation
-- **当前阶段**: implementing (Task 9)
-- **下一步**: 等待 Task 9 完成 → 跑 task-checkoff → 派发 Task 10
+- **01:21** — Task 9 implementer DONE：commit `32aa2d8` + `f930dbc`、4 测试通过、270 passed + 1 baseline 失败（parser 旧断言，属 Task 8）、零风险信号
+- **01:21** — Task 9 step 勾选 + task-checkoff（commit `747e88a`），按 review_mode: standard 直接放行
+- **01:22** — 派发 Plan Task 10 implementer（background, agentId 待返回，model sonnet）— UNIQUE/duplicate_pk + 同批次键
+- **当前阶段**: implementing (Task 10)
+- **下一步**: Task 10 → Task 11（多行 partial）→ Task 5.3（REPL）→ Task 6/7 → 最终轻量 review
 
 ## 阶段字段
 
