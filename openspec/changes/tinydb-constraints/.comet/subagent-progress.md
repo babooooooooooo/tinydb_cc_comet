@@ -68,8 +68,11 @@
 - **01:02** — 按 review_mode: standard 派 review-fix（agentId `a681db2ff8b465cd4`，model haiku）
 - **01:08** — Fix agent 回报 DONE：commit `6d97946`、GREEN 2 passed、回归 12 passed、附破坏性对照实验
 - **01:09** — 派 re-review（agentId 待返回，model haiku）— review-fix 闭环第二轮
-- **当前阶段**: task-re-review (Task 7)
-- **下一步**: re-review 通过 → task-checkoff Plan Task 7 → 派发 Plan Task 9 + 10 executor validation pipeline
+- **01:11** — Re-review 回报 `APPROVED_WITH_NITS`：1 NIT（重复 import Catalog/Pager）已记录接受
+- **01:12** — Plan Task 7 step 勾选落地（commit `811ac3d`），Step 1/3 通过 task-checkoff（Steps 2/4/5/6 因 plan 层级重复命名无法单文件唯一验证）
+- **01:12** — 派发 Plan Task 9 implementer（background, agentId 待返回，model sonnet）— executor NOT NULL/PK validation
+- **当前阶段**: implementing (Task 9)
+- **下一步**: 等待 Task 9 完成 → 跑 task-checkoff → 派发 Task 10
 
 ## 阶段字段
 
