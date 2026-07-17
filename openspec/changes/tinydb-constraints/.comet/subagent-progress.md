@@ -1,0 +1,60 @@
+# Subagent Progress — tinydb-constraints
+
+> 持久协调检查点（仅供恢复使用，不替代 plan / OpenSpec checkbox）。
+> 每次派发、回报、审查结果、修复轮次变化、task 勾选后立即更新。
+
+## 恢复上下文（2026-07-17 00:40）
+
+- **状态**：从上次中断恢复。当前 worktree `feature/20260716/tinydb-constraints`，phase=build，build_mode=subagent-driven-development，review_mode=standard，tdd_mode=tdd。
+- **5 个 prior implementer commits 未走 review_mode 验收**（Task 1.x / 2.x / 3.x / 5.1+5.2 实施）。
+- **缺失的 subagent-progress.md 已补建**。
+- **1 failing test**：`test_executor_legacy_table_insert_with_no_value_still_accepted`（Task 6.1 集成测试）— 暴露 Task 4 缺失的 `ColumnDefinition → Column` 接线。
+- **修复路径**：派发 Task 4 implementer 完成 executor 五阶段校验 + `ColumnDefinition → Column` 映射后，6.1 测试自然转绿。
+
+## Review mode 决策
+
+- `review_mode: standard` → 非风险 task 不派发 per-task reviewer，仅 implementer 自测 + 协调者 diff 复核。
+- 风险信号复检（逐 commit diff 行数）：
+  - `619280d` design doc — N/A
+  - `7fde213` ConstraintViolation — ~30 行 — no risk
+  - `71ff987` catalog Column — 87 行 — no risk
+  - `81f5618` catalog dual-format test — 114 行 — no risk
+  - `c47dee8` tokenizer keywords — 1 行 — no risk
+  - `41ae71a` parser ColumnDefinition — 102 行 — no risk
+  - `06c6c07` parser NULL literal — ~10 行 — no risk
+- 协调者 diff 复核：未命中跨模块/并发/迁移/API/安全风险。→ 已实施 task 不派发 per-task reviewer。
+
+## 任务勾选记录
+
+| Task | 实施 commit(s) | 验证证据 | 状态 |
+|------|---------------|---------|------|
+| 1.1 编写 `test_catalog_column.py::test_column_dataclass_*` 红 | 包含在 81f5618（test_catalog_constraints.py 内） | 5 个 catalog 测试通过 | ✅ 已勾选 |
+| 1.2 Column dataclass | 71ff987 | test_column_dataclass_roundtrip/test_column_defaults PASS | ✅ 已勾选 |
+| 1.3 TableInfo 升级 + 序列化 | 71ff987 | test_catalog_to_bytes_uses_new_format PASS | ✅ 已勾选 |
+| 1.4 catalog roundtrip 绿 | 81f5618 | test_catalog_loads_new_format_roundtrip PASS | ✅ 已勾选 |
+| 2.1 编写 `test_constraints_parser.py::test_create_table_primary_key_unique_not_null` 红 | 41ae71a | 12 parser 测试 PASS | ✅ 已勾选 |
+| 2.2 parser 接入约束子句 | 41ae71a | 12 parser 测试 PASS | ✅ 已勾选 |
+| 2.3 tokenizer 关键字 | c47dee8 | test_tokenizer PASS | ✅ 已勾选 |
+| 3.1 编写 `test_insert_accepts_null_literal_when_column_nullable` 红 | 06c6c07 | test_insert_accepts_null_literal_* PASS | ✅ 已勾选 |
+| 3.2 parser INSERT 识别 NULL 字面量 | 06c6c07 | test_insert_accepts_null_literal_* PASS | ✅ 已勾选 |
+| 3.3 编写 `test_insert_rejects_null_for_pk` 红 | 待 Task 4 实施时一并覆盖 | executor 行为待验证 | ⏳ 待勾选 |
+| 4.1-4.6 executor 校验流水线 | **未实施** | 测试文件 tests/unit/test_constraints_executor.py 缺失 | 📋 待派发 |
+| 5.1 编写 `test_constraint_violation_*` 红 | 部分在 test_constraint_violation.py | 6 个测试 PASS | ✅ 已勾选 |
+| 5.2 errors.ConstraintViolation | 7fde213 | 6 个测试 PASS | ✅ 已勾选 |
+| 5.3 REPL 渲染单行 ERROR | **未实施** | tests/integration/test_constraints_repl.py 缺失 | 📋 待派发 |
+| 6.1 legacy fixture + 反序列化不爆 | 部分在 test_catalog_constraints.py | **1 failing** — 暴露 Task 4 缺失 | ⏳ 部分完成 |
+| 6.2 legacy 加载 nullable_default_true | 81f5618 | test_catalog_legacy_format_nullable_default_true PASS | ✅ 已勾选 |
+| 6.3 MVP 234 测试 + engine-v1 全部继续通过 | 待最终 verify | 全套 pytest 后验证 | ⏳ 待验证 |
+| 7.1-7.4 性能 + 行数 + 覆盖率 + 文档 | **未实施** | 待 Task 4-5 完成后 | 📋 待派发 |
+
+## 当前焦点
+
+- **下一步派发**：Task 4.1（`tests/unit/test_constraints_executor.py::test_insert_rejects_null_on_not_null` 红）作为 Task 4 入口。
+- **关联交付物**：Task 4 完成后，Task 6.1 failing test 应自动转绿。
+- **顺序**：Task 4 → Task 5.3 → Task 6（除 6.1 外补全）→ Task 7 → 最终轻量 review。
+
+## 阶段字段
+
+- `current_stage`: implementing
+- `iteration`: 1
+- `pending`: Task 4 implementer dispatch
