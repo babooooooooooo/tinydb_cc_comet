@@ -1,0 +1,6 @@
+CREATE TABLE t(id INT, flag BOOL);
+INSERT INTO t(id, flag) VALUES (1, FALSE);
+INSERT INTO t(id, flag) VALUES (2, FALSE);
+INSERT INTO t(id, flag) VALUES (3, FALSE);
+UPDATE t SET flag=TRUE;
+SELECT * FROM t

@@ -1,0 +1,5 @@
+CREATE TABLE t(id INT, a INT);
+INSERT INTO t(id, a) VALUES (1, 1);
+INSERT INTO t(id, a) VALUES (2, 2);
+INSERT INTO t(id, a) VALUES (3, 1);
+SELECT * FROM t WHERE NOT (a=1)

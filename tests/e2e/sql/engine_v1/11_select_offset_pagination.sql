@@ -1,0 +1,11 @@
+CREATE TABLE t(id INT, x INT);
+INSERT INTO t(id, x) VALUES (1, 1);
+INSERT INTO t(id, x) VALUES (2, 2);
+INSERT INTO t(id, x) VALUES (3, 3);
+INSERT INTO t(id, x) VALUES (4, 4);
+INSERT INTO t(id, x) VALUES (5, 5);
+INSERT INTO t(id, x) VALUES (6, 6);
+INSERT INTO t(id, x) VALUES (7, 7);
+INSERT INTO t(id, x) VALUES (8, 8);
+INSERT INTO t(id, x) VALUES (9, 9);
+SELECT * FROM t LIMIT 3 OFFSET 6
