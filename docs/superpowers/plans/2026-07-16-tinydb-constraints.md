@@ -1700,7 +1700,7 @@ git commit -m "feat(executor): UNIQUE and duplicate_pk validation with session k
 - Modify: `src/tinydb/executor.py` — `_exec_insert` 处理省略列 → None（已由 Task 9 覆盖）；新增 multi-row partial 测试
 - Modify: `tests/unit/test_constraints_executor.py` — 增加 multi-row partial 测试
 
-- [ ] **Step 1: 写失败测试 — 多行 INSERT 部分失败保留成功行**
+- [x] **Step 1: 写失败测试 — 多行 INSERT 部分失败保留成功行**
 
 ```python
 # 追加到 tests/unit/test_constraints_executor.py
@@ -1752,7 +1752,7 @@ def test_executor_insert_multi_row_partial_failure_keeps_successful_rows(tmp_pat
     assert [r.id for r in rows] == [1, 2, 3]
 ```
 
-- [ ] **Step 2: 跑测试看红**
+- [x] **Step 2: 跑测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1760,13 +1760,13 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 failed。
 
-- [ ] **Step 3: 已有代码已支持 — 跑绿测试**
+- [x] **Step 3: 已有代码已支持 — 跑绿测试**
 
 `_exec_insert` 已具备 normalize 与 try/finally 清理能力。若测试仍红，按失败信息补 `executor.py` —— 通常是 `_validate_unique_keys` 的 `name_to_idx` 在循环外构造后未传入。
 
 修复模式：把 `name_to_idx` 提到 `_exec_insert` 顶部（与 Task 9 同步），传给 `_validate_unique_keys`。
 
-- [ ] **Step 4: 跑测试看绿**
+- [x] **Step 4: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1774,7 +1774,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：13 passed。
 
-- [ ] **Step 5: 跑全量看回归**
+- [x] **Step 5: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1782,7 +1782,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：257 passed。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
