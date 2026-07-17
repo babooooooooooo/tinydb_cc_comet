@@ -2241,7 +2241,7 @@ git commit -m "test(e2e): add 8 golden SQL scripts for constraints"
 - Create: `tests/property/test_parser_constraints.py` — 随机约束列定义不漏异常
 - Create: `tests/property/test_storage_constraints.py` — INSERT 后扫描结果与 Python 镜像一致（含 UNIQUE）
 
-- [ ] **Step 1: 写 property 测试 — 约束列定义**
+- [x] **Step 1: 写 property 测试 — 约束列定义**
 
 ```python
 # tests/property/test_parser_constraints.py
@@ -2282,7 +2282,7 @@ def test_random_constraint_clause_never_crashes(types, nullable, unique, pk):
         pass
 ```
 
-- [ ] **Step 2: 写 property 测试 — 存储约束 invariant**
+- [x] **Step 2: 写 property 测试 — 存储约束 invariant**
 
 ```python
 # tests/property/test_storage_constraints.py
@@ -2321,7 +2321,7 @@ def test_unique_constraint_mirror(rows):
     assert actual == sorted(mirror)
 ```
 
-- [ ] **Step 3: 跑 property 测试看绿**
+- [x] **Step 3: 跑 property 测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/property/test_parser_constraints.py tests/property/test_storage_constraints.py -v
@@ -2329,7 +2329,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：2 passed（hypothesis 跑完种子内的 200 + 100 个 examples 不红）。
 
-- [ ] **Step 4: 跑全量看回归**
+- [x] **Step 4: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -2337,7 +2337,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：274 passed。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints

@@ -98,8 +98,12 @@
 - **02:35** — 派发 Plan Task 13 implementer（background, agentId `afdc0cdfa5ec2ce20`，model sonnet）— parser 鲁棒性 2 测试（顺序独立 + 复合 PK）
 - **02:38** — Task 13 implementer 回报 DONE：commit `e607801`、14 targeted + 294 full passed、单文件改动、零风险
 - **02:39** — Plan Task 13 step 勾选落地（commit `e607801` 后）— 顺序独立 + 复合 PK 测试已合入，36 个 task 中已闭环 13/15/12/11/10/9/8/7/14/12/15/8/13
-- **当前阶段**: implementing → Task 14/8/15/12/13 closed
-- **下一步**: Task 16（property fuzz）→ Task 17（perf n=1000）→ Task 18/19/20/21/22/23（协调者级）
+- **02:42** — 派发 Plan Task 16 implementer（background, agentId `a6be5a1bd44d0ccd3`，model sonnet）— 2 property 测试（hypothesis 约束子句鲁棒性 + UNIQUE 镜像 invariant）
+- **02:46** — Task 16 implementer 回报 DONE：commit `3add64a`、2 property + 296 full passed、单 commit 两新文件、零风险
+- **02:46** — Plan Task 16 step 勾选落地（5 step 全闭环）
+- **02:46** — 派发 Plan Task 17 implementer（background, agentId 待返回，model sonnet）— perf test n=1000 UNIQUE 全表扫描 < 100ms
+- **当前阶段**: implementing → Task 14/8/15/12/13/16 closed
+- **下一步**: Task 17 → Task 18 行数审计 → Task 19 docs → Task 20 覆盖率 → Task 21 checklist → Task 22 review → Task 23 finalize
 
 ## 阶段字段
 
