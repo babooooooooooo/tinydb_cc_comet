@@ -1322,7 +1322,7 @@ git commit -m "test(parser): migrate to ColumnDefinition AST shape"
 - Modify: `src/tinydb/executor.py:133-161` — 重写 `_exec_insert` 五阶段流水线
 - Create: `tests/unit/test_constraints_executor.py` — 4 个 NOT NULL / PK 测试
 
-- [ ] **Step 1: 写失败测试 — NOT NULL 与 PK 拒绝 None**
+- [x] **Step 1: 写失败测试 — NOT NULL 与 PK 拒绝 None**
 
 ```python
 # tests/unit/test_constraints_executor.py
@@ -1373,7 +1373,7 @@ def test_executor_insert_failed_null_does_not_write_row(tmp_path):
     assert rows == []
 ```
 
-- [ ] **Step 2: 跑测试看红**
+- [x] **Step 2: 跑测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1381,7 +1381,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 failed（旧 `_exec_insert` 不做 NOT NULL 校验）。
 
-- [ ] **Step 3: 改 `_exec_insert` 引入 normalize + NOT NULL 阶段**
+- [x] **Step 3: 改 `_exec_insert` 引入 normalize + NOT NULL 阶段**
 
 ```python
 # src/tinydb/executor.py —— 修改 _exec_insert
@@ -1456,7 +1456,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
         return []
 ```
 
-- [ ] **Step 4: 跑测试看绿**
+- [x] **Step 4: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1464,7 +1464,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 passed。
 
-- [ ] **Step 5: 跑全量看回归**
+- [x] **Step 5: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1472,7 +1472,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：248 passed。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
