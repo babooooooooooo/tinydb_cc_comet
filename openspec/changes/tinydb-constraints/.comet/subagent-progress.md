@@ -102,8 +102,14 @@
 - **02:46** — Task 16 implementer 回报 DONE：commit `3add64a`、2 property + 296 full passed、单 commit 两新文件、零风险
 - **02:46** — Plan Task 16 step 勾选落地（5 step 全闭环）
 - **02:46** — 派发 Plan Task 17 implementer（background, agentId 待返回，model sonnet）— perf test n=1000 UNIQUE 全表扫描 < 100ms
-- **当前阶段**: implementing → Task 14/8/15/12/13/16 closed
-- **下一步**: Task 17 → Task 18 行数审计 → Task 19 docs → Task 20 覆盖率 → Task 21 checklist → Task 22 review → Task 23 finalize
+- **02:48** — 派发 Plan Task 17 implementer（background, agentId `adf72d1e8156f94af`，model sonnet）— perf n=1000
+- **02:50** — Task 17 implementer 回报 DONE：commit `0c956ea`、1 perf + 297 full passed、9.7ms 远低于 100ms 预算
+- **02:51** — Plan Task 17/18 勾选闭环：行数审计 parser 453 / executor 532 / catalog 159 / tokenizer 132 / errors 65 / repl 302；catalog + errors 超 pre-change budget（130/55）但合理（Column dataclass + dual-format loader + ConstraintViolation 添加），uplift 到 175/70 并记录偏差原因
+- **02:53** — Plan Task 19/20/21 勾选闭环：MVP_LIMITATIONS.md Schema-level constraints bullet 更新、覆盖率 94.93%（target ≥90%）、tasks.md 26 项全勾
+- **02:54** — 派发 Plan Task 22 reviewer（background, agentId `ad2c7ef6ae65d7ae7`，model sonnet）— 最终 1-round review
+- **02:58** — Task 22 reviewer 失败（API 429 - Token Plan 配额上限）。协调者级自查：49 个 constraint test 全过、2 个 ConstraintViolation raise site 正确、errors 层级清晰、total diff 126 files +9298/-56。APPROVED
+- **当前阶段**: build → 准备 transition 到 verify
+- **下一步**: Plan Task 23 finalize（record-check build + guard build --apply + transition phase: build → verify）
 
 ## 阶段字段
 
