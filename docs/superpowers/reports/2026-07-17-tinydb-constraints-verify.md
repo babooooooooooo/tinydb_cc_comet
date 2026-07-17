@@ -135,6 +135,63 @@ Archive phase will decide whether to merge these into the main spec or leave the
 - **WARNING**: none
 - **SUGGESTION**: none
 
+---
+
+## Fresh Verify Round 2 — Test Infrastructure Patch (2026-07-17 22:50)
+
+> Round 1 of this report claimed "297 passed". Fresh re-verification under
+> the user's current shell (a `claude-code` session invoked from
+> `tinydb_comet` working tree) revealed 16 REPL integration tests failing
+> because the test harness assumed `shutil.which("tinydb-repl")` would
+> resolve the entry-point script. Under WSL2 + `.venv/bin/python -m pytest`
+> the venv bin is not on `PATH`, so `which()` returned `None` and all
+> `tests/integration/test_repl_process.py` + `test_constraints_repl.py`
+> tests short-circuited on the `assert REPL is not None` guard.
+
+### Round 2 Findings
+
+- **Failures**: 16 (`test_repl_process.py` × 12 + `test_constraints_repl.py` × 4)
+- **Root cause**: environmental, not logic. `tinydb-repl` is correctly
+  installed at `.venv/bin/tinydb-repl` (entry point registered in
+  `pyproject.toml [project.scripts]`), but `shutil.which()` cannot find it
+  because `PATH` lacks `.venv/bin/` under the current invocation pattern.
+- **Fix**: added `_resolve_repl()` helper in both test modules that falls
+  back to `os.path.join(os.path.dirname(sys.executable), "tinydb-repl")`.
+  This is portable across all invocation patterns (active venv, direct
+  `.venv/bin/python -m pytest`, `.venv/bin/pytest`).
+
+### Round 2 Fresh Evidence
+
+```
+$ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
+$ .venv/bin/python -m pytest --cov=tinydb --cov-fail-under=85 -q
+297 passed in 57.74s
+TOTAL: 95% coverage (94.93%)
+Required test coverage of 85% reached.
+```
+
+Round 1 claim of "297 passed" is **reproduced**, but only after the test
+infrastructure patch above. The Round 1 evidence was collected in a shell
+where `.venv/bin` happened to be on `PATH` (e.g., via `source
+.venv/bin/activate` or interactive shell); the user's current shell does
+not have that, so without the patch the test suite reports 16 failures.
+
+### Issues by Priority (Round 2)
+
+- **CRITICAL**: none
+- **IMPORTANT**: none (test infra issue resolved)
+- **WARNING**: 1 — `CoverageWarning: module-not-measured` for `tinydb`
+  (pre-existing; coverage still measured 94.93% so non-blocking)
+- **SUGGESTION**: Document in README that integration tests require either
+  an activated venv OR `.venv/bin/pytest` invocation (current patch makes
+  both work)
+
+### Final Assessment (post Round 2)
+
+All 7 verification items PASS. Test suite fully green (297/297). Coverage
+94.93%. Branch handling complete (merge `1d2a9ec`). **Ready for archive**.
+
+>>>>>>> feature/20260716/tinydb-constraints
 ## Final Assessment
 
 **All 7 verification items PASS (2 gracefully degraded per design R8)**.
