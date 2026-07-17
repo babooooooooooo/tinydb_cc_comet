@@ -1152,7 +1152,7 @@ git commit -m "feat(parser): accept NULL literal in INSERT and constraint errors
 **Files:**
 - Modify: `src/tinydb/executor.py:84-112` — `_exec_create_table` 接受 `ColumnDefinition` 元组并显式映射到 `catalog.Column`
 
-- [ ] **Step 1: 写失败测试 — 端到端 CREATE 走新 AST 路径**
+- [x] **Step 1: 写失败测试 — 端到端 CREATE 走新 AST 路径**
 
 ```python
 # tests/integration/test_executor.py —— 在文件末尾新增
@@ -1176,7 +1176,7 @@ def test_create_table_with_unique_persists_constraint(tmp_path):
     assert ti.columns[1].unique is True
 ```
 
-- [ ] **Step 2: 跑测试看红**
+- [x] **Step 2: 跑测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/integration/test_executor.py::test_create_table_with_not_null_persists_constraint -v
@@ -1184,7 +1184,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：TypeError — `_exec_create_table` 期望 `list[tuple[str, str]]`，新 AST 是 `tuple[ColumnDefinition, ...]`。
 
-- [ ] **Step 3: 改 `_exec_create_table` 显式映射**
+- [x] **Step 3: 改 `_exec_create_table` 显式映射**
 
 ```python
 # src/tinydb/executor.py —— 修改 _exec_create_table
@@ -1231,7 +1231,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
         return []
 ```
 
-- [ ] **Step 4: 跑测试看绿**
+- [x] **Step 4: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/integration/test_executor.py -v
@@ -1239,7 +1239,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：所有 executor 测试通过。
 
-- [ ] **Step 5: 跑全量看回归**
+- [x] **Step 5: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1247,7 +1247,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：234 + 8 + 2 = 244 passed。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
