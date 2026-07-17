@@ -2,7 +2,7 @@
 change: tinydb-constraints
 design-doc: docs/superpowers/specs/2026-07-16-tinydb-constraints-design.md
 base-ref: 619280da9fbea9335795dbd725ebbb8962ae2261
-archived-with: tinydb-constraints
+archived-with: 2026-07-17-tinydb-constraints
 ---
 
 # tinydb-constraints Implementation Plan

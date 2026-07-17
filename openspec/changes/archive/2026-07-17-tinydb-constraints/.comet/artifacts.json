@@ -3,5 +3,6 @@
   "openspec_design": "openspec/changes/tinydb-constraints/design.md",
   "openspec_tasks": "openspec/changes/tinydb-constraints/tasks.md",
   "handoff_context": "openspec/changes/tinydb-constraints/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/tinydb-constraints/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/tinydb-constraints/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-17-tinydb-constraints"
 }

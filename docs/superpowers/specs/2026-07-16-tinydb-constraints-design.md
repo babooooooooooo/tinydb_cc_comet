@@ -2,6 +2,8 @@
 comet_change: tinydb-constraints
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-17-tinydb-constraints
+status: final
 ---
 
 # Design: tinydb-constraints

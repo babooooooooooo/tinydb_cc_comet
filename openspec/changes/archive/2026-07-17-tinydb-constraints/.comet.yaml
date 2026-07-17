@@ -18,8 +18,8 @@ verification_report: docs/superpowers/reports/2026-07-17-tinydb-constraints-veri
 branch_status: handled
 created_at: 2026-07-16
 verified_at: 2026-07-17
-archive_confirmation: pending
-archived: false
+archive_confirmation: confirmed
+archived: true
 direct_override: null
 handoff_context: openspec/changes/tinydb-constraints/.comet/handoff/design-context.json
 handoff_hash: 099a0719c5c7b13b3cf721198808245f4160c0ea7df40620c2259a5fe7df5033
