@@ -2,6 +2,7 @@
 change: tinydb-engine-v1
 design-doc: docs/superpowers/specs/2026-07-16-tinydb-engine-v1-design.md
 base-ref: b14f031aede3ad32a14a7402957c54b1fea31bcf
+archived-with: 2026-07-17-tinydb-engine-v1
 ---
 
 # tinydb-engine-v1 Implementation Plan

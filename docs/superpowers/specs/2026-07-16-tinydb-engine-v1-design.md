@@ -2,6 +2,8 @@
 comet_change: tinydb-engine-v1
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-17-tinydb-engine-v1
+status: final
 ---
 
 # Design Doc: tinydb-engine-v1
