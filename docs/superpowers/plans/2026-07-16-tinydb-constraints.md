@@ -1488,7 +1488,7 @@ git commit -m "feat(executor): INSERT NOT NULL and PK null validation"
 - Modify: `src/tinydb/executor.py` — 在 `_exec_insert` 第 7 阶段插入 `_validate_unique_keys`
 - Modify: `tests/unit/test_constraints_executor.py` — 增加 5 个 unique 测试
 
-- [ ] **Step 1: 写失败测试 — UNIQUE / duplicate_pk**
+- [x] **Step 1: 写失败测试 — UNIQUE / duplicate_pk**
 
 ```python
 # 追加到 tests/unit/test_constraints_executor.py
@@ -1553,7 +1553,7 @@ def test_executor_insert_composite_pk_rejected(tmp_path):
     assert exc_info.value.kind == "duplicate_pk"
 ```
 
-- [ ] **Step 2: 跑测试看红**
+- [x] **Step 2: 跑测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1561,7 +1561,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：5 failed。
 
-- [ ] **Step 3: 在 `_exec_insert` 接入 `_validate_unique_keys`**
+- [x] **Step 3: 在 `_exec_insert` 接入 `_validate_unique_keys`**
 
 ```python
 # src/tinydb/executor.py —— 在 _exec_insert 内 normalize 之后、encode 之前
@@ -1668,7 +1668,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
         return seen
 ```
 
-- [ ] **Step 4: 跑测试看绿**
+- [x] **Step 4: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_executor.py -v
@@ -1676,7 +1676,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：9 passed。
 
-- [ ] **Step 5: 跑全量看回归**
+- [x] **Step 5: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1684,7 +1684,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：253 passed。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
