@@ -61,8 +61,11 @@
 - **00:43** — 13 个 OpenSpec task 勾选验证全 PASS（commit `57e0805`）
 - **00:43** — Plan Tasks 1-6 共 38 个 step 批量勾选
 - **00:44** — 派发 Plan Task 7 implementer（background, agentId aebd27e90b375fa5b，model sonnet）
-- **当前阶段**: implementing (Task 7)
-- **下一步**: 等待 Task 7 完成 → 跑 task-checkoff → 派发 Task 9 + Task 10 executor validation pipeline
+- **01:00** — Task 7 implementer 回报 `DONE_WITH_CONCERNS`：commit `7955622`、GREEN 12 passed、3 个未过测试已诊断为越界（REPL PATH / parser 旧断言 / Task 9+10 缺失）
+- **01:00** — 风险信号自报命中：跨模块协调 + SQL 路径 → 按 `review_mode: standard` 必须派 per-task reviewer
+- **01:01** — 派发 Plan Task 7 reviewer（background, agentId aaaa8e3819d41a8da，model sonnet）
+- **当前阶段**: task-review (Task 7)
+- **下一步**: 等待 reviewer 回报 → CRITICAL/IMPORTANT 进入一轮 review-fix，否则 checkoff → 派发 Task 9 + Task 10
 
 ## 阶段字段
 
