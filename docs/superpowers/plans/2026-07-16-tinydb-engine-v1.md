@@ -6,6 +6,8 @@ base-ref: b14f031aede3ad32a14a7402957c54b1fea31bcf
 
 # tinydb-engine-v1 Implementation Plan
 
+> **说明（中文概要）**：本计划实现 `tinydb-engine-v1` change。在 parser 与 executor 中引入 UPDATE 语句、复合 WHERE 表达式（AND / OR / NOT）、SELECT 末尾链（ORDER BY / LIMIT / OFFSET）。模块行数预算：`parser.py ≤ 750`、`executor.py ≤ 580`（已从 520 上调）、`tokenizer.py ≤ 200`。不改存储层、不引入索引、不引入事务。覆盖目标 ≥ 90%。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extend `tinydb-mvp` parser/executor with UPDATE statements, compound WHERE (AND/OR/NOT), and SELECT ORDER BY/LIMIT/OFFSET chain — without changing storage layer.
