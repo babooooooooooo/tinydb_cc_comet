@@ -53,6 +53,17 @@
 - **关联交付物**：Task 4 完成后，Task 6.1 failing test 应自动转绿。
 - **顺序**：Task 4 → Task 5.3 → Task 6（除 6.1 外补全）→ Task 7 → 最终轻量 review。
 
+## 2026-07-17 恢复执行日志
+
+- **00:42** — 创建 `subagent-progress.md`（恢复协议要求）
+- **00:42** — 验证现有 5 个 commit + 38 个 step 全部 PASS（除 1 failing 已知问题）
+- **00:42** — 根因定位：Plan Task 7 接线缺失，`_exec_create_table` 未做 `ColumnDefinition → Column` 映射
+- **00:43** — 13 个 OpenSpec task 勾选验证全 PASS（commit `57e0805`）
+- **00:43** — Plan Tasks 1-6 共 38 个 step 批量勾选
+- **00:44** — 派发 Plan Task 7 implementer（background, agentId aebd27e90b375fa5b，model sonnet）
+- **当前阶段**: implementing (Task 7)
+- **下一步**: 等待 Task 7 完成 → 跑 task-checkoff → 派发 Task 9 + Task 10 executor validation pipeline
+
 ## 阶段字段
 
 - `current_stage`: implementing
