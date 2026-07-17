@@ -65,9 +65,11 @@
 - **01:00** — 风险信号自报命中：跨模块协调 + SQL 路径 → 按 `review_mode: standard` 必须派 per-task reviewer
 - **01:01** — 派发 Plan Task 7 reviewer（background, agentId aaaa8e3819d41a8da，model sonnet）
 - **01:02** — Reviewer 回报 1 个 Important issue：测试未验证 page 1 落盘（假阳性风险）
-- **01:02** — 按 review_mode: standard 派 review-fix（agentId 待 fix 返回）
-- **当前阶段**: task-review-fix (Task 7)
-- **下一步**: fix 完成 → 派 re-review（同 reviewer 复查）→ 通过则 checkoff Task 7 → 派发 Task 9+10
+- **01:02** — 按 review_mode: standard 派 review-fix（agentId `a681db2ff8b465cd4`，model haiku）
+- **01:08** — Fix agent 回报 DONE：commit `6d97946`、GREEN 2 passed、回归 12 passed、附破坏性对照实验
+- **01:09** — 派 re-review（agentId 待返回，model haiku）— review-fix 闭环第二轮
+- **当前阶段**: task-re-review (Task 7)
+- **下一步**: re-review 通过 → task-checkoff Plan Task 7 → 派发 Plan Task 9 + 10 executor validation pipeline
 
 ## 阶段字段
 
