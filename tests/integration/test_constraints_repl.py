@@ -1,11 +1,22 @@
 """Process-level tests for REPL rendering of ConstraintViolation (Plan Task 14)."""
+import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
 
-REPL = shutil.which("tinydb-repl")
+def _resolve_repl() -> "str | None":
+    """Locate the tinydb-repl console script (see test_repl_process.py)."""
+    found = shutil.which("tinydb-repl")
+    if found:
+        return found
+    candidate = os.path.join(os.path.dirname(sys.executable), "tinydb-repl")
+    return candidate if os.path.isfile(candidate) else None
+
+
+REPL = _resolve_repl()
 
 
 def run_repl(commands: str, *args: str) -> subprocess.CompletedProcess[str]:

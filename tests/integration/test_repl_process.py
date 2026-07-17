@@ -1,11 +1,29 @@
 """Process-level tests for the installed tinydb-repl console script."""
+import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
 
-REPL = shutil.which("tinydb-repl")
+def _resolve_repl() -> "str | None":
+    """Locate the tinydb-repl console script.
+
+    shutil.which() depends on PATH; under `.venv/bin/python -m pytest`
+    invocations on some platforms (notably WSL2) the venv bin is NOT
+    prepended to PATH, so which() returns None even though the script
+    exists at `<venv>/bin/tinydb-repl`. Fall back to the directory of
+    sys.executable, which equals the venv bin when running under a venv.
+    """
+    found = shutil.which("tinydb-repl")
+    if found:
+        return found
+    candidate = os.path.join(os.path.dirname(sys.executable), "tinydb-repl")
+    return candidate if os.path.isfile(candidate) else None
+
+
+REPL = _resolve_repl()
 
 
 def run_repl(commands: str, *args: str) -> subprocess.CompletedProcess[str]:
