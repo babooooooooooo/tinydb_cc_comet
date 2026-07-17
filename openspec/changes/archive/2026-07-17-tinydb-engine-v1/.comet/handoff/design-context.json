@@ -1,0 +1,13 @@
+{
+  "change": "tinydb-engine-v1",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "c1c368a0ad60f98d644da03385ea1c493da4298d286321305202d86458576a09",
+  "files": [
+    { "path": "openspec/changes/tinydb-engine-v1/proposal.md", "sha256": "a9046dd23bdf1ace226b595b71464e48508878fff933911ab4d33469f7c501ce" },
+    { "path": "openspec/changes/tinydb-engine-v1/design.md", "sha256": "2ee731ff24287105a27397c293bcaf3a5a76ee46c78f2b0cc66844e29a0d4b37" },
+    { "path": "openspec/changes/tinydb-engine-v1/tasks.md", "sha256": "a947401166bea887c987ddf0584f976bab6052632bbbce5556ab1e3703e86a0e" }
+  ]
+}
