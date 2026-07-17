@@ -79,9 +79,20 @@
 - **01:32** — 派发 Plan Task 11 implementer（background, agentId 待返回，model sonnet）— 多行 partial 失败 + 边界场景
 - **01:34** — Task 11 implementer DONE：commit `c545574`、13 测试通过、279 passed + 1 baseline 失败、零风险、仅测试代码改动
 - **01:34** — Task 11 step 勾选 + commit `1575996`
-- **01:35** — 派发 Plan Task 14 implementer（background, agentId 待返回，model sonnet）— REPL `_format_exception` ConstraintViolation 单行渲染
-- **当前阶段**: implementing (Task 14)
-- **下一步**: Task 14 → Task 15（e2e golden SQL）→ Task 6/7 → 最终轻量 review
+- **01:35** — 派发 Plan Task 14 implementer（background, agentId `ae5fab3bc7ae48046`，model sonnet）— REPL `_format_exception` ConstraintViolation 单行渲染
+- **01:54** — Task 14 implementer 回报 `DONE_WITH_CONCERNS`：commit `ddc445c`、4+13+283 passed、1 NIT 偏差
+- **01:54** — CONCERN 解读：executor.py:199 缺 `value=` kwarg 导致 plan Step 1 的 `value=None` 断言失败；implementer 按 task scope 没碰 executor。Plan Task 15 4 个 expected 文件 + Task 14 Step 1 都依赖 `value=` 字段 → 不能带偏差闭环
+- **01:55** — 派发 Plan Task 14 follow-up fix-implementer（background, agentId `aae91ed5ecaf06d29`，model sonnet）— 1 行 executor patch（加 `value=normalized_tuple[i]`）+ 同步 test_constraints_repl.py 断言改回 spec 形式
+- **01:55** — 派发 Plan Task 14 follow-up fix-implementer（background, agentId `aae91ed5ecaf06d29`，model sonnet）— 1 行 executor patch（加 `value=normalized_tuple[i]`）+ 同步 test_constraints_repl.py 断言改回 spec 形式
+- **02:00** — Fix-implementer 回报 DONE：commit `862f6cd` on top of `ddc445c`、17 passed（4 integration + 13 executor unit）、回归 283 passed + 1 baseline、`2 files changed, 2 insertions(+), 5 deletions(-)`、完全 scope 内
+- **02:01** — 验证最终行：executor.py:199 = `raise ConstraintViolation(kind="null", column=c.name, value=normalized_tuple[i])`、test_constraints_repl.py:37-40 = `assert "ERROR: ConstraintViolation(kind='null', column='id', value=None)" in result.stderr`（NB comment 已删）
+- **02:01** — Plan Task 14 所有 6 个 step 勾选（RED + GREEN + REGRESSION + COMMIT 全闭环）
+- **02:04** — 派发 Plan Task 8 implementer（background, agentId `aed1f727e1708f682`，model sonnet）— 迁移 `tests/unit/test_parser.py::test_parse_create_table_simple` 到 ColumnDefinition AST 清 baseline failure
+- **02:09** — Task 8 implementer 回报 DONE：commit `3327668`、284 passed + 0 failed（baseline 清零）、单文件改动 `tests/unit/test_parser.py`、零风险
+- **02:10** — 按 review_mode: standard 直接放行 + Plan Task 14 + Plan Task 8 勾选落地
+- **02:12** — 派发 Plan Task 15 implementer（background, agentId 待返回，model sonnet）— 8 条 e2e golden SQL/expected + conftest `_run_one` 同步 REPL `_format_exception` 行为（plan 期望单 prefix 渲染）
+- **当前阶段**: implementing → Task 14/8 closed, 准备派 Task 15
+- **下一步**: Task 15 → Task 12/13/16/17/18/19/20/21/22/23（性能 / 行数 / 覆盖率 / 文档 / checklist / 最终 review / comet finalize）
 
 ## 阶段字段
 

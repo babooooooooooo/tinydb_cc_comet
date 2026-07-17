@@ -1908,7 +1908,7 @@ git commit -m "test(parser): constraint order independence and composite PK merg
 **Files:**
 - Modify: `src/tinydb/repl.py:130-149` — `_run_sql` 调用替换为 `_format_exception`
 
-- [ ] **Step 1: 写失败测试 — 进程级 REPL 错误输出**
+- [x] **Step 1: 写失败测试 — 进程级 REPL 错误输出**
 
 ```python
 # tests/integration/test_constraints_repl.py
@@ -1989,7 +1989,7 @@ def test_repl_loop_continues_after_constraint_violation():
     assert "ERROR: ConstraintViolation" in result.stderr
 ```
 
-- [ ] **Step 2: 跑测试看红**
+- [x] **Step 2: 跑测试看红**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/integration/test_constraints_repl.py -v
@@ -1997,7 +1997,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 failed（旧 REPL 渲染 `ERROR: ExecutionError: ...` 而非 `ERROR: ConstraintViolation(...)`）。
 
-- [ ] **Step 3: 加 `_format_exception` 并改 `_run_sql`**
+- [x] **Step 3: 加 `_format_exception` 并改 `_run_sql`**
 
 ```python
 # src/tinydb/repl.py —— 在 _format_table 后插入
@@ -2023,7 +2023,7 @@ def _format_exception(exc: Exception) -> str:
         return
 ```
 
-- [ ] **Step 4: 跑测试看绿**
+- [x] **Step 4: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/integration/test_constraints_repl.py -v
@@ -2031,7 +2031,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：4 passed。
 
-- [ ] **Step 5: 跑全量看回归**
+- [x] **Step 5: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -2039,7 +2039,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：264 passed。**注意**：`test_repl_execution_error_is_single_line_and_loop_continues` 仍要求 `ERROR: ExecutionError:` 风格，必须保留旧路径；`test_repl_error_is_single_line_and_loop_continues` 同理。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
