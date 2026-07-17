@@ -1,0 +1,8 @@
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+ERROR: ConstraintViolation(kind='unique', columns=['email'], value=('a@x',))
+Row(id=1)
+Row(id=2)
+Row(id=3)

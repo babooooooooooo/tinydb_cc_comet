@@ -1,0 +1,4 @@
+(no rows)
+ERROR: ConstraintViolation(kind='duplicate_pk', columns=['id'], value=(1,))
+Row(id=1, name='a')
+Row(id=2, name='b')

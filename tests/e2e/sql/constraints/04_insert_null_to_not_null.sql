@@ -1,0 +1,2 @@
+CREATE TABLE u(id INT NOT NULL, name TEXT);
+INSERT INTO u(id, name) VALUES (NULL, 'a');
