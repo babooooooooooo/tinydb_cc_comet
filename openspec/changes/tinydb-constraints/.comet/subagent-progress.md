@@ -64,8 +64,10 @@
 - **01:00** — Task 7 implementer 回报 `DONE_WITH_CONCERNS`：commit `7955622`、GREEN 12 passed、3 个未过测试已诊断为越界（REPL PATH / parser 旧断言 / Task 9+10 缺失）
 - **01:00** — 风险信号自报命中：跨模块协调 + SQL 路径 → 按 `review_mode: standard` 必须派 per-task reviewer
 - **01:01** — 派发 Plan Task 7 reviewer（background, agentId aaaa8e3819d41a8da，model sonnet）
-- **当前阶段**: task-review (Task 7)
-- **下一步**: 等待 reviewer 回报 → CRITICAL/IMPORTANT 进入一轮 review-fix，否则 checkoff → 派发 Task 9 + Task 10
+- **01:02** — Reviewer 回报 1 个 Important issue：测试未验证 page 1 落盘（假阳性风险）
+- **01:02** — 按 review_mode: standard 派 review-fix（agentId 待 fix 返回）
+- **当前阶段**: task-review-fix (Task 7)
+- **下一步**: fix 完成 → 派 re-review（同 reviewer 复查）→ 通过则 checkoff Task 7 → 派发 Task 9+10
 
 ## 阶段字段
 
