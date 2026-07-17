@@ -95,8 +95,11 @@
 - **02:30** — CONCERN 1 解读：plan 8 个 expected.txt 用 `OK` 而非 `(no rows)` — 与现有 happy_path runner 行为不符（runner 用 `(no rows)` 渲染 DML/SELECT 空集）。implementer 按实际 runner 行为改齐 expected.txt（损失：plan spec 笔误，runtime truth 当准）。新增 8 e2e 测试 name 与 spec 一致
 - **02:30** — CONCERN 2 解读：implementer 报告 16 个 REPL 子进程测试失败是缺 `PATH` 前缀 env 问题 — 协调者用 `PATH="$PWD/.venv/bin:$PATH"` 复跑确认 `292 passed / 0 failed`，clean baseline
 - **02:31** — Plan Task 12 silent 闭环：测试 `test_executor_legacy_table_insert_with_no_value_still_accepted` 在 commit `81f5618`（catalog dual-format）已落地并当前 PASSED。4 step 勾选，无需 dispatch
-- **当前阶段**: implementing → Task 14/8/15/12 closed
-- **下一步**: Task 13（parser 鲁棒性）→ Task 16/17/18/19/20/21/22/23
+- **02:35** — 派发 Plan Task 13 implementer（background, agentId `afdc0cdfa5ec2ce20`，model sonnet）— parser 鲁棒性 2 测试（顺序独立 + 复合 PK）
+- **02:38** — Task 13 implementer 回报 DONE：commit `e607801`、14 targeted + 294 full passed、单文件改动、零风险
+- **02:39** — Plan Task 13 step 勾选落地（commit `e607801` 后）— 顺序独立 + 复合 PK 测试已合入，36 个 task 中已闭环 13/15/12/11/10/9/8/7/14/12/15/8/13
+- **当前阶段**: implementing → Task 14/8/15/12/13 closed
+- **下一步**: Task 16（property fuzz）→ Task 17（perf n=1000）→ Task 18/19/20/21/22/23（协调者级）
 
 ## 阶段字段
 

@@ -1849,7 +1849,7 @@ git commit -m "test(catalog): cover legacy MVP table roundtrip with new pipeline
 **Files:**
 - Modify: `tests/unit/test_constraints_parser.py` — 增加顺序独立性 + 子句链 + 复合 PK
 
-- [ ] **Step 1: 写测试 — 顺序独立与边界**
+- [x] **Step 1: 写测试 — 顺序独立与边界**
 
 ```python
 # 追加到 tests/unit/test_constraints_parser.py
@@ -1877,7 +1877,7 @@ def test_create_table_multi_column_pk_merges_into_one_group(tmp_path):
 
 并在文件顶部加 `from tinydb import Database` 导入。
 
-- [ ] **Step 2: 跑测试看绿**
+- [x] **Step 2: 跑测试看绿**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/unit/test_constraints_parser.py -v
@@ -1885,7 +1885,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：13 + 2 = 15 passed。
 
-- [ ] **Step 3: 跑全量看回归**
+- [x] **Step 3: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1893,7 +1893,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：260 passed。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
