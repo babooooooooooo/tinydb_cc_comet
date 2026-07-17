@@ -77,8 +77,11 @@
 - **01:31** — Task 10 implementer DONE：commit `cc1c7ba`、9 测试通过、275 passed + 1 baseline 失败、零风险信号、173 行 diff < 200
 - **01:32** — Task 10 step 勾选 + commit `e503fe8`
 - **01:32** — 派发 Plan Task 11 implementer（background, agentId 待返回，model sonnet）— 多行 partial 失败 + 边界场景
-- **当前阶段**: implementing (Task 11)
-- **下一步**: Task 11 → Task 5.3（REPL 渲染）→ Task 6/7 → 最终轻量 review
+- **01:34** — Task 11 implementer DONE：commit `c545574`、13 测试通过、279 passed + 1 baseline 失败、零风险、仅测试代码改动
+- **01:34** — Task 11 step 勾选 + commit `1575996`
+- **01:35** — 派发 Plan Task 14 implementer（background, agentId 待返回，model sonnet）— REPL `_format_exception` ConstraintViolation 单行渲染
+- **当前阶段**: implementing (Task 14)
+- **下一步**: Task 14 → Task 15（e2e golden SQL）→ Task 6/7 → 最终轻量 review
 
 ## 阶段字段
 
