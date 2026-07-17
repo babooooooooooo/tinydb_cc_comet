@@ -144,32 +144,72 @@ class Executor:
     # --- DML: INSERT / SELECT / DELETE -------------------------------------
 
     def _exec_insert(self, stmt: Insert) -> list:
-        """Insert row(s) into a table.
+        """Insert row(s) into a table with the constraints pipeline.
 
-        MVP behavior: ``stmt.columns`` is ignored — values are inserted in
-        schema order. Type validation runs through ``type_system.py_to_db``
-        so invalid Python types surface as :class:`ExecutionError`. Each
-        row walks the data-page chain until it lands on a page with free
-        space (or allocates a new one) and is encoded via
-        :func:`row_codec.encode_row`.
+        Pipeline (Task 7 裁决 3 方案 A — per-row validation, no tx):
+          1. table exists (raises ExecutionError)
+          2. column list is non-empty, unique, all known (parser guarantees;
+             executor defensively re-checks)
+          3. row value count == explicit column count
+          4. normalize row into schema order (omitted -> None)
+          5. NOT NULL + PK NULL rejection (ConstraintViolation kind='null')
+          6. type validation on non-NULL values (existing path)
+          7. UNIQUE / PK duplicate scan (Task 10)
+          8. encode + insert
         """
+        from tinydb.errors import ConstraintViolation
+
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
-        schema = ti.schema
+        if not stmt.columns:
+            raise ExecutionError("INSERT column list must be non-empty")
+
+        cols = ti.columns
+        name_to_idx = {c.name: i for i, c in enumerate(cols)}
+
+        # Defensive executor-side validation; parser also enforces these.
+        seen: set = set()
+        for cname in stmt.columns:
+            if cname not in name_to_idx:
+                raise ExecutionError(f"unknown column {cname!r}")
+            if cname in seen:
+                raise ExecutionError(f"duplicate column {cname!r}")
+            seen.add(cname)
 
         for row_vals in stmt.values:
-            validated: list[Any] = []
-            for (_name, col_type), v in zip(schema, row_vals):
-                # py_to_db returns the encoded bytes for valid types and
-                # raises TypeError/ValueError for invalid ones — we only
-                # need the side effect, so the return value is discarded.
+            if len(row_vals) != len(stmt.columns):
+                raise ExecutionError(
+                    f"value count mismatch: got {len(row_vals)}, expected {len(stmt.columns)}"
+                )
+
+            # 4. Normalize to schema order, omitted columns -> None.
+            normalized: list = [None] * len(cols)
+            for cname, val in zip(stmt.columns, row_vals):
+                normalized[name_to_idx[cname]] = val
+            normalized_tuple = tuple(normalized)
+
+            # 5. NOT NULL + PK NULL rejection.
+            for i, c in enumerate(cols):
+                if normalized_tuple[i] is None and (not c.nullable or c.primary_key):
+                    raise ConstraintViolation(
+                        kind="null", column=c.name, value=None,
+                    )
+
+            # 6. Type validation (existing path: only non-None values).
+            validated: list = []
+            for c, v in zip(cols, normalized_tuple):
+                if v is None:
+                    validated.append(None)
+                    continue
                 try:
-                    py_to_db(v, col_type)
+                    py_to_db(v, c.type)
                 except (TypeError, ValueError) as e:
-                    raise ExecutionError(f"column {_name}: {e}") from e
+                    raise ExecutionError(f"column {c.name}: {e}") from e
                 validated.append(v)
-            row_bytes = encode_row(validated, schema)
+
+            # 8. Encode + insert (Task 10 inserts unique check between 7 and 8).
+            row_bytes = encode_row(validated, ti.schema)
             self._insert_row_into_chain(ti, row_bytes)
         return []
 
