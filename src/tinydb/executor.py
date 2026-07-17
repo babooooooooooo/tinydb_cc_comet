@@ -196,7 +196,7 @@ class Executor:
                 # 5. NOT NULL + PK NULL rejection.
                 for i, c in enumerate(cols):
                     if normalized_tuple[i] is None and (not c.nullable or c.primary_key):
-                        raise ConstraintViolation(kind="null", column=c.name)
+                        raise ConstraintViolation(kind="null", column=c.name, value=normalized_tuple[i])
 
                 # 6. Type validation (existing path: only non-None values).
                 validated: list = []

@@ -34,10 +34,7 @@ def test_repl_constraint_violation_renders_kind_null():
         ".exit\n"
     )
     assert result.returncode == 0
-    # NB: executor raises ConstraintViolation(kind="null", column=c.name) without
-    # value=... today, so the rendered form omits value=... (Plan Task 14 scope
-    # is REPL rendering only; executor changes belong to Task 9 follow-up).
-    assert "ERROR: ConstraintViolation(kind='null', column='id')" in result.stderr
+    assert "ERROR: ConstraintViolation(kind='null', column='id', value=None)" in result.stderr
 
 
 @pytest.mark.integration
