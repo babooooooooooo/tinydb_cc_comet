@@ -48,3 +48,11 @@
 - [x] 7.2 模块行数回归：`parser.py ≤ 750`、`executor.py ≤ 620`、`catalog.py ≤ 175`（uplift；新约束字段 dataclass + dual-format loader）、`tokenizer.py ≤ 210`、`errors.py ≤ 70`（uplift；ConstraintViolation）、`repl.py ≤ 310`
 - [x] 7.3 覆盖率 ≥ 90% across project；新代码 100%
 - [x] 7.4 `docs/MVP_LIMITATIONS.md` 增补：本 change 交付后 O(n) UNIQUE 校验仍生效；索引化留 `tinydb-engine-v2`
+
+## 8. Verify 阶段测试基础设施修复（post-archive 发现，2026-07-17 22:50）
+
+- [x] 8.1 **Fresh verify 发现 16 REPL integration test fail**（`test_repl_process.py` × 12 + `test_constraints_repl.py` × 4）
+- [x] 8.2 **根因**：`shutil.which("tinydb-repl")` 在 WSL2 + `.venv/bin/python -m pytest` 调用模式下因 venv bin 不在 PATH 而返回 `None`；test 入口处 `assert REPL is not None` 短路
+- [x] 8.3 **修复**：在两个测试模块添加 `_resolve_repl()` 辅助函数，先试 `shutil.which`，fallback 到 `os.path.join(os.path.dirname(sys.executable), "tinydb-repl")`
+- [x] 8.4 **Fresh 验证**：`.venv/bin/python -m pytest --cov=tinydb --cov-fail-under=85 -q` → 297 passed in 57.74s，94.93% coverage
+- [x] 8.5 **报告更新**：`docs/superpowers/reports/2026-07-17-tinydb-constraints-verify.md` 增加 "Fresh Verify Round 2" 章节记录发现 + 修复 + fresh evidence
