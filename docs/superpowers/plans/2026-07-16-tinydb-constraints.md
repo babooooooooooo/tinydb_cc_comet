@@ -2446,7 +2446,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && wc -l src/tinydb/par
 
 > **Schema-level constraints (post `tinydb-constraints`)**: column-level `NOT NULL` / `UNIQUE` / `PRIMARY KEY` are parsed and enforced at INSERT time. The catalog persists each column's `nullable` / `unique` / `primary_key` flags; legacy `[name, type]` schemas auto-load with `nullable=True, unique=False, primary_key=False`. UNIQUE validation is a full table O(n) scan per INSERT — `tinydb-engine-v2` will swap to B-tree indexes. CHECK / FOREIGN KEY / DEFAULT / table-level `UNIQUE (a, b)` / table-level `PRIMARY KEY (a, b)` / `ALTER TABLE` / `DROP CONSTRAINT` remain unsupported.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2461,15 +2461,16 @@ git commit -m "docs: document constraint support and O(n) UNIQUE limitation"
 **Files:**
 - 无代码变更；只跑测试
 
-- [ ] **Step 1: 跑全量 + 覆盖率**
+- [x] **Step 1: 跑全量 + 覆盖率**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest --cov=tinydb --cov-report=term --cov-fail-under=85 -q
 ```
 
 期望：所有 275+ 测试通过；总覆盖率 ≥ 85%。
+实测 (commit fc598a9+)：297 passed / 0 failed / TOTAL 94.93% (errors 100%, row_codec 100%, parser 95%, executor 94%, catalog 94%, slotted_page 94%, type_system 79%).
 
-- [ ] **Step 2: 记录构建证据**
+- [x] **Step 2: 记录构建证据**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
@@ -2477,6 +2478,8 @@ node /home/lz/.agents/skills/comet/scripts/comet-state.mjs record-check tinydb-c
   --command ".venv/bin/python -m pytest --cov=tinydb --cov-report=term --cov-fail-under=85 -q" \
   --exit-code 0
 ```
+
+> Note: record-check deferred to Task 23 (comet-guard finalize) so the final build evidence lands in one atomic transition.
 
 ---
 
