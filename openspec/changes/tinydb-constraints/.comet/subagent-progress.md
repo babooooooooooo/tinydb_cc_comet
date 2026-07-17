@@ -90,9 +90,13 @@
 - **02:04** — 派发 Plan Task 8 implementer（background, agentId `aed1f727e1708f682`，model sonnet）— 迁移 `tests/unit/test_parser.py::test_parse_create_table_simple` 到 ColumnDefinition AST 清 baseline failure
 - **02:09** — Task 8 implementer 回报 DONE：commit `3327668`、284 passed + 0 failed（baseline 清零）、单文件改动 `tests/unit/test_parser.py`、零风险
 - **02:10** — 按 review_mode: standard 直接放行 + Plan Task 14 + Plan Task 8 勾选落地
-- **02:12** — 派发 Plan Task 15 implementer（background, agentId 待返回，model sonnet）— 8 条 e2e golden SQL/expected + conftest `_run_one` 同步 REPL `_format_exception` 行为（plan 期望单 prefix 渲染）
-- **当前阶段**: implementing → Task 14/8 closed, 准备派 Task 15
-- **下一步**: Task 15 → Task 12/13/16/17/18/19/20/21/22/23（性能 / 行数 / 覆盖率 / 文档 / checklist / 最终 review / comet finalize）
+- **02:12** — 派发 Plan Task 15 implementer（background, agentId `adceb5b124c0de98c`，model sonnet）— 8 条 e2e golden SQL/expected + conftest `_run_one` 同步 REPL `_format_exception` 行为（plan 期望单 prefix 渲染）
+- **02:30** — Task 15 implementer 回报 DONE_WITH_CONCERNS：commit `9f22797`、8 e2e constraints PASS、15 legacy e2e PASS、conftest patch 干净
+- **02:30** — CONCERN 1 解读：plan 8 个 expected.txt 用 `OK` 而非 `(no rows)` — 与现有 happy_path runner 行为不符（runner 用 `(no rows)` 渲染 DML/SELECT 空集）。implementer 按实际 runner 行为改齐 expected.txt（损失：plan spec 笔误，runtime truth 当准）。新增 8 e2e 测试 name 与 spec 一致
+- **02:30** — CONCERN 2 解读：implementer 报告 16 个 REPL 子进程测试失败是缺 `PATH` 前缀 env 问题 — 协调者用 `PATH="$PWD/.venv/bin:$PATH"` 复跑确认 `292 passed / 0 failed`，clean baseline
+- **02:31** — Plan Task 12 silent 闭环：测试 `test_executor_legacy_table_insert_with_no_value_still_accepted` 在 commit `81f5618`（catalog dual-format）已落地并当前 PASSED。4 step 勾选，无需 dispatch
+- **当前阶段**: implementing → Task 14/8/15/12 closed
+- **下一步**: Task 13（parser 鲁棒性）→ Task 16/17/18/19/20/21/22/23
 
 ## 阶段字段
 

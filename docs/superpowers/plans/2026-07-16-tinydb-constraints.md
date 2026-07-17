@@ -1797,7 +1797,7 @@ git commit -m "feat(executor): INSERT column normalization and multi-row partial
 **Files:**
 - Modify: `tests/integration/test_catalog_constraints.py` — 增补"旧表省略 INSERT 列 → None"端到端测试
 
-- [ ] **Step 1: 写失败测试 — 旧表走新路径**
+- [x] **Step 1: 写失败测试 — 旧表走新路径**
 
 ```python
 # 追加到 tests/integration/test_catalog_constraints.py
@@ -1818,7 +1818,7 @@ def test_executor_legacy_table_insert_with_no_value_still_accepted(tmp_path):
     assert rows[0].name is None
 ```
 
-- [ ] **Step 2: 跑测试看绿（功能已支持）**
+- [x] **Step 2: 跑测试看绿（功能已支持）**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests/integration/test_catalog_constraints.py::test_executor_legacy_table_insert_with_no_value_still_accepted -v
@@ -1826,7 +1826,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：1 passed（Task 11 已实现）。
 
-- [ ] **Step 3: 跑全量看回归**
+- [x] **Step 3: 跑全量看回归**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest -q
@@ -1834,7 +1834,7 @@ cd /home/lz/projects/tinydb-worktrees/tinydb-constraints && PATH="$PWD/.venv/bin
 
 期望：258 passed。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-constraints
