@@ -108,8 +108,13 @@
 - **02:53** — Plan Task 19/20/21 勾选闭环：MVP_LIMITATIONS.md Schema-level constraints bullet 更新、覆盖率 94.93%（target ≥90%）、tasks.md 26 项全勾
 - **02:54** — 派发 Plan Task 22 reviewer（background, agentId `ad2c7ef6ae65d7ae7`，model sonnet）— 最终 1-round review
 - **02:58** — Task 22 reviewer 失败（API 429 - Token Plan 配额上限）。协调者级自查：49 个 constraint test 全过、2 个 ConstraintViolation raise site 正确、errors 层级清晰、total diff 126 files +9298/-56。APPROVED
-- **当前阶段**: build → 准备 transition 到 verify
-- **下一步**: Plan Task 23 finalize（record-check build + guard build --apply + transition phase: build → verify）
+- **03:35** — record-check build evidence 写入（command: pytest --cov=tinydb --cov-fail-under=85 -q, exit=0）
+- **03:36** — guard build --apply 首次运行被 19 个 plan step boxes 阻塞（Task 8/15/21/22/23 已执行未勾）
+- **03:38** — 19 plan step boxes 勾选落地（commit `04141cf`）
+- **03:39** — guard build --apply 重跑 12/12 PASS、phase=verify、verify_result=pending、ALL CHECKS PASSED — ready for next phase
+- **03:40** — .comet.yaml 已推进到 phase=verify
+- **当前阶段**: build COMPLETE → verify 待用户选择
+- **下一步**: 按 Comet 协议需用户确认进入 verify 阶段；当前 Task 26 闭环，本 change 的 build 阶段正式结束
 
 ## 阶段字段
 
