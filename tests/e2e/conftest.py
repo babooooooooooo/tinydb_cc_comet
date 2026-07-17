@@ -19,6 +19,7 @@ without touching production code.
 import pathlib
 import pytest
 import tinydb
+from tinydb.errors import ConstraintViolation
 
 SQL_DIR = pathlib.Path(__file__).parent / "sql"
 
@@ -94,6 +95,16 @@ def _is_reopen_directive(segment: str) -> bool:
 def _run_one(db: "tinydb.Database", stmt: str) -> str:
     try:
         rows = db.execute(stmt)
+    except ConstraintViolation as exc:
+        # ConstraintViolation renders via its own ``__str__``, which
+        # uses the ``ConstraintViolation(kind=..., column=..., value=...)``
+        # form. The single-prefix line matches the REPL
+        # ``_format_exception`` rendering so golden files stay human
+        # readable. Other exception classes keep the legacy
+        # ``ERROR: <TypeName>: <message>`` shape so existing
+        # ``error_cases/`` golden files (ParseError / ExecutionError)
+        # are untouched.
+        return f"ERROR: {exc}"
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
     return _format_rows(rows)

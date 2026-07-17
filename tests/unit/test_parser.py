@@ -8,7 +8,7 @@ Task 16 covers INSERT / SELECT / DELETE / StatementList + parser purity per
 REQ-PARSE-004/005/006/007/008.
 """
 import pytest
-from tinydb.parser import parse, CreateTable, Insert
+from tinydb.parser import parse, CreateTable, Insert, ColumnDefinition
 from tinydb.tokenizer import tokenize, Token
 from tinydb.errors import ParseError
 
@@ -18,7 +18,10 @@ from tinydb.errors import ParseError
 def test_parse_create_table_simple():
     stmt = parse(tokenize("CREATE TABLE users (id INT, name TEXT)"))
     assert stmt.statements[0].name == "users"
-    assert stmt.statements[0].columns == [("id", "INT"), ("name", "TEXT")]
+    assert stmt.statements[0].columns == (
+        ColumnDefinition(name="id", type="INT", nullable=True, unique=False, primary_key=False),
+        ColumnDefinition(name="name", type="TEXT", nullable=True, unique=False, primary_key=False),
+    )
 
 
 @pytest.mark.unit

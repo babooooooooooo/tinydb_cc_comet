@@ -188,3 +188,47 @@ def test_select_empty_table_returns_empty_list(tmp_path):
         assert _select(p, "SELECT id FROM t") == []
     finally:
         p.close()
+
+
+@pytest.mark.integration
+def test_create_table_with_not_null_persists_constraint(tmp_path):
+    from tinydb import Database
+    from tinydb.catalog import Catalog
+    from tinydb.pager import Pager
+
+    path = str(tmp_path / "nn.db")
+    with Database(path) as db:
+        db.execute("CREATE TABLE t(id INT NOT NULL, name TEXT)")
+    # Reopen from disk: verify the NOT NULL constraint survives the
+    # page 1 round-trip rather than only living in the in-memory catalog.
+    pager = Pager(path)
+    try:
+        cat = Catalog.from_bytes(pager.read_page(1))
+    finally:
+        pager.close()
+    ti = cat.get_table("t")
+    assert ti is not None
+    assert ti.columns[0].nullable is False
+    assert ti.columns[1].nullable is True
+
+
+@pytest.mark.integration
+def test_create_table_with_unique_persists_constraint(tmp_path):
+    from tinydb import Database
+    from tinydb.catalog import Catalog
+    from tinydb.pager import Pager
+
+    path = str(tmp_path / "uq.db")
+    with Database(path) as db:
+        db.execute("CREATE TABLE t(id INT PRIMARY KEY, email TEXT UNIQUE)")
+    # Reopen from disk: verify PRIMARY KEY / UNIQUE constraints survive
+    # the page 1 round-trip rather than only living in the in-memory catalog.
+    pager = Pager(path)
+    try:
+        cat = Catalog.from_bytes(pager.read_page(1))
+    finally:
+        pager.close()
+    ti = cat.get_table("t")
+    assert ti is not None
+    assert ti.columns[0].primary_key is True
+    assert ti.columns[1].unique is True

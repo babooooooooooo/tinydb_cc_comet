@@ -7,10 +7,11 @@ fully implemented; DML (INSERT/SELECT/DELETE) is wired in and Task 19
 finishes SELECT projection/WHERE/DELETE tombstone on top of Task 18's
 INSERT + linear scan helper.
 """
+from collections import defaultdict
 from typing import Any, Optional, Union
 
 from tinydb.catalog import Catalog, TableInfo
-from tinydb.errors import ExecutionError, PageFull
+from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
 from tinydb.row_codec import decode_row, encode_row
@@ -85,29 +86,41 @@ class Executor:
     def _exec_create_table(self, stmt: CreateTable) -> list:
         """Create an empty table and persist the catalog entry.
 
-        Allocates one fresh page for the table's root (data) page,
-        initializes it as an empty ``SlottedPage``, registers the table in
-        the catalog, then writes page 1 back to disk. Duplicate table
-        names raise ``ExecutionError`` (the user-facing error mapping).
+        Maps ``stmt.columns`` (parser AST: ``tuple[ColumnDefinition, ...]``)
+        into a ``tuple[catalog.Column, ...]`` before calling
+        ``catalog.create_table``. The explicit bridge is the R1 裁决:
+        the parser does NOT import ``catalog``, the catalog does NOT
+        import the parser.
         """
+        from tinydb.catalog import Column  # local import avoids cycle noise
+
         if self.catalog.get_table(stmt.name) is not None:
             raise ExecutionError(f"table {stmt.name!r} already exists")
 
-        # Allocate a root page for the table's data and initialize it as
-        # an empty slotted page. Order matters: alloc_page -> empty ->
-        # write -> catalog.register -> catalog flush.
+        cols: list[Column] = []
+        seen: set = set()
+        for cd in stmt.columns:
+            if cd.name in seen:
+                raise ExecutionError(f"duplicate column {cd.name}")
+            seen.add(cd.name)
+            cols.append(Column(
+                name=cd.name,
+                type=cd.type,
+                nullable=cd.nullable,
+                unique=cd.unique,
+                primary_key=cd.primary_key,
+            ))
+
         root_id = self.pager.alloc_page()
         page = SlottedPage.empty(root_id)
         self.pager.write_page(root_id, page.to_bytes())
 
-        # MVP: next_page_id == root_page_id (no overflow yet). Task 21
-        # will teach the catalog to advance next_page_id on page split.
+        # MVP: next_page_id == root_page_id.
         self.catalog.create_table(
-            stmt.name, stmt.columns,
+            stmt.name, tuple(cols),
             root_page_id=root_id, next_page_id=root_id,
         )
 
-        # Persist catalog change to page 1 and flush mmap to disk.
         self.pager.write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
@@ -132,34 +145,153 @@ class Executor:
     # --- DML: INSERT / SELECT / DELETE -------------------------------------
 
     def _exec_insert(self, stmt: Insert) -> list:
-        """Insert row(s) into a table.
+        """Insert row(s) into a table with the constraints pipeline.
 
-        MVP behavior: ``stmt.columns`` is ignored — values are inserted in
-        schema order. Type validation runs through ``type_system.py_to_db``
-        so invalid Python types surface as :class:`ExecutionError`. Each
-        row walks the data-page chain until it lands on a page with free
-        space (or allocates a new one) and is encoded via
-        :func:`row_codec.encode_row`.
+        Pipeline (Task 7 裁决 3 方案 A — per-row validation, no tx):
+          1. table exists (raises ExecutionError)
+          2. column list is non-empty, unique, all known (parser guarantees;
+             executor defensively re-checks)
+          3. row value count == explicit column count
+          4. normalize row into schema order (omitted -> None)
+          5. NOT NULL + PK NULL rejection (ConstraintViolation kind='null')
+          6. type validation on non-NULL values (existing path)
+          7. UNIQUE / PK duplicate scan (Task 10)
+          8. encode + insert
         """
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
-        schema = ti.schema
+        if not stmt.columns:
+            raise ExecutionError("INSERT column list must be non-empty")
 
-        for row_vals in stmt.values:
-            validated: list[Any] = []
-            for (_name, col_type), v in zip(schema, row_vals):
-                # py_to_db returns the encoded bytes for valid types and
-                # raises TypeError/ValueError for invalid ones — we only
-                # need the side effect, so the return value is discarded.
-                try:
-                    py_to_db(v, col_type)
-                except (TypeError, ValueError) as e:
-                    raise ExecutionError(f"column {_name}: {e}") from e
-                validated.append(v)
-            row_bytes = encode_row(validated, schema)
-            self._insert_row_into_chain(ti, row_bytes)
+        cols = ti.columns
+        name_to_idx: dict[str, int] = {c.name: i for i, c in enumerate(cols)}
+
+        # Defensive executor-side validation; parser also enforces these.
+        seen: set[str] = set()
+        for cname in stmt.columns:
+            if cname not in name_to_idx:
+                raise ExecutionError(f"unknown column {cname!r}")
+            if cname in seen:
+                raise ExecutionError(f"duplicate column {cname!r}")
+            seen.add(cname)
+
+        # Per-batch UNIQUE dedup state (Task 10). Keyed by UniqueGroup
+        # so multiple distinct UNIQUE columns are tracked independently
+        # within the same INSERT statement.
+        session_keys: dict = defaultdict(set)
+        try:
+            for row_vals in stmt.values:
+                if len(row_vals) != len(stmt.columns):
+                    raise ExecutionError(
+                        f"value count mismatch: got {len(row_vals)}, expected {len(stmt.columns)}"
+                    )
+
+                # 4. Normalize to schema order, omitted columns -> None.
+                normalized: list = [None] * len(cols)
+                for cname, val in zip(stmt.columns, row_vals):
+                    normalized[name_to_idx[cname]] = val
+                normalized_tuple = tuple(normalized)
+
+                # 5. NOT NULL + PK NULL rejection.
+                for i, c in enumerate(cols):
+                    if normalized_tuple[i] is None and (not c.nullable or c.primary_key):
+                        raise ConstraintViolation(kind="null", column=c.name, value=normalized_tuple[i])
+
+                # 6. Type validation (existing path: only non-None values).
+                validated: list = []
+                for c, v in zip(cols, normalized_tuple):
+                    if v is None:
+                        validated.append(None)
+                        continue
+                    try:
+                        py_to_db(v, c.type)
+                    except (TypeError, ValueError) as e:
+                        raise ExecutionError(f"column {c.name}: {e}") from e
+                    validated.append(v)
+
+                # 7. UNIQUE / PK duplicate check (Task 10). The session_keys
+                #    dict is keyed by the unique-group identity so a single
+                #    INSERT statement can have multiple distinct UNIQUE columns
+                #    tracked independently.
+                self._validate_unique_keys(
+                    normalized_tuple, ti, name_to_idx, session_keys,
+                )
+
+                # 8. Encode + insert.
+                row_bytes = encode_row(validated, ti.schema)
+                self._insert_row_into_chain(ti, row_bytes)
+        finally:
+            session_keys.clear()
         return []
+
+    # --- UNIQUE / duplicate_pk validation helpers (Task 10) -----------------
+
+    def _validate_unique_keys(
+        self,
+        row: tuple,
+        ti: TableInfo,
+        name_to_idx: dict,
+        session_keys: dict,
+    ) -> None:
+        """Reject duplicate UNIQUE / PRIMARY KEY values for ``row``.
+
+        Each INSERT statement maintains a per-call session set of accepted
+        keys via ``session_keys`` so same-batch duplicates
+        (``INSERT INTO t VALUES (1,'a'), (2,'a')``) are caught before
+        any row hits disk. NULL members skip the check (R9 裁决 9 — SQL
+        standard semantics that treats NULL as unknown, not equal to
+        anything, including itself).
+        """
+        for group in self._unique_groups(ti):
+            key_value = tuple(row[name_to_idx[c]] for c in group.columns)
+            if any(v is None for v in key_value):
+                continue
+            seen_in_table = self._scan_unique_keys(ti, group.columns)
+            if key_value in session_keys[group] or key_value in seen_in_table:
+                raise ConstraintViolation(
+                    kind=group.kind,
+                    columns=group.columns,
+                    value=key_value,
+                )
+            session_keys[group].add(key_value)
+
+    def _unique_groups(self, ti: TableInfo) -> list:
+        """Compute the set of unique-key groups for ``ti``.
+
+        R4 裁决 4: PRIMARY KEY groups (single or composite) take priority
+        over any same-column UNIQUE groups; a single PRIMARY KEY column
+        is never also reported as a UNIQUE column. Single-column UNIQUE
+        clauses each form their own group. Multi-column ``UNIQUE (a, b)``
+        is not yet supported in this change.
+        """
+        from collections import namedtuple
+        UniqueGroup = namedtuple("UniqueGroup", ["columns", "kind"])
+        groups: list = []
+        pk_cols = tuple(c.name for c in ti.columns if c.primary_key)
+        if pk_cols:
+            groups.append(UniqueGroup(columns=pk_cols, kind="duplicate_pk"))
+        for c in ti.columns:
+            if c.unique and c.name not in pk_cols:
+                groups.append(UniqueGroup(columns=(c.name,), kind="unique"))
+        return groups
+
+    def _scan_unique_keys(self, ti: TableInfo, columns: tuple) -> set:
+        """Linear-scan the table and return the set of existing key tuples.
+
+        Walks the on-disk data pages via :meth:`_scan_table`, projects
+        only the requested ``columns`` into a tuple, and drops any tuple
+        containing a NULL member (per R9 裁决 9).
+        """
+        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        col_idxs = tuple(name_to_idx[c] for c in columns)
+        seen: set = set()
+        for _sid, vals, _pid in self._scan_table(ti):
+            key = tuple(vals[i] for i in col_idxs)
+            if any(v is None for v in key):
+                continue
+            seen.add(key)
+        return seen
 
     def _insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> int:
         """Dispatch to spill path or inline path.

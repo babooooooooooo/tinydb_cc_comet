@@ -128,6 +128,17 @@ def _format_table(rows: list[Row]) -> str:
     return "\n".join([header, separator, *body])
 
 
+def _format_exception(exc: Exception) -> str:
+    """Single-line exception formatter. ConstraintViolation is rendered
+    using its own ``__str__`` (kind/column/columns/value) so the REPL
+    user sees the precise violation context. Other exceptions fall back
+    to the MVP ``<TypeName>: <message>`` form (single line)."""
+    from tinydb.errors import ConstraintViolation  # local import keeps REPL stdlib-only-fallback path
+    if isinstance(exc, ConstraintViolation):
+        return f"ERROR: {exc}"
+    return f"ERROR: {type(exc).__name__}: {exc}"
+
+
 def _run_sql(db: Database, sql: str) -> None:
     try:
         statements = parse(tokenize(sql)).statements
@@ -138,8 +149,8 @@ def _run_sql(db: Database, sql: str) -> None:
     try:
         rows = db.execute(sql)
     except Exception as exc:
-        message = " ".join(str(exc).splitlines())
-        print(f"ERROR: {type(exc).__name__}: {message}", file=sys.stderr)
+        message = _format_exception(exc)
+        print(message, file=sys.stderr)
         return
 
     if not last_is_select:

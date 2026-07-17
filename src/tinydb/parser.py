@@ -23,14 +23,30 @@ class StatementList:
     col: int = 1
 
 
-@dataclass
+@dataclass(frozen=True)
+class ColumnDefinition:
+    """CREATE TABLE column definition: name, type, and column-level constraints.
+
+    Pure data — the parser does NOT consult the catalog; the executor maps
+    a list of ``ColumnDefinition`` into a list of ``catalog.Column`` at
+    CREATE TABLE time (Task 7)."""
+
+    name: str
+    type: str
+    nullable: bool = True
+    unique: bool = False
+    primary_key: bool = False
+
+
+@dataclass(frozen=True)
 class CreateTable:
     """CREATE TABLE <name> (<col> <type>, ...) statement."""
 
     name: str
-    columns: list  # list[tuple[str, str]]  (column_name, type_name)
-    line: int
-    col: int
+    columns: tuple[ColumnDefinition, ...]
+    if_not_exists: bool = False
+    line: int = 0
+    col: int = 0
 
 
 @dataclass
@@ -162,7 +178,7 @@ class _Parser:
 
         self.expect("PUNCT", "(")
 
-        cols: list = []
+        cols: list[ColumnDefinition] = []
         seen: set = set()
 
         # Empty column list: `CREATE TABLE t ()` is invalid.
@@ -193,7 +209,69 @@ class _Parser:
                     f"type {value_repr} not supported in MVP",
                 )
             ctype = self.advance().value
-            cols.append((cname, ctype))
+
+            # Parse optional constraint clauses: NOT NULL / UNIQUE / PRIMARY KEY.
+            # Order-independent; multiple clauses allowed on one column.
+            nullable = True
+            unique = False
+            primary_key = False
+            saw_unique = False
+            saw_pk = False
+            saw_not_null = False
+            while self.peek().type == "KEYWORD" and self.peek().value in {
+                "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE",
+            }:
+                kw_tok = self.advance()
+                if kw_tok.value == "NOT":
+                    nxt = self.peek()
+                    if not (nxt.type == "KEYWORD" and nxt.value == "NULL"):
+                        raise ParseError(
+                            nxt.line, nxt.col, "expected NULL after NOT"
+                        )
+                    self.advance()
+                    if saw_not_null:
+                        raise ParseError(
+                            kw_tok.line, kw_tok.col, "duplicate NOT NULL constraint"
+                        )
+                    saw_not_null = True
+                    nullable = False
+                elif kw_tok.value == "NULL":
+                    # Bare NULL (without leading NOT) is rejected (R2 裁决 2).
+                    raise ParseError(
+                        kw_tok.line, kw_tok.col,
+                        "bare NULL not allowed; use NOT NULL or omit",
+                    )
+                elif kw_tok.value == "PRIMARY":
+                    nxt = self.peek()
+                    if not (nxt.type == "KEYWORD" and nxt.value == "KEY"):
+                        raise ParseError(
+                            nxt.line, nxt.col, "expected KEY after PRIMARY"
+                        )
+                    self.advance()
+                    if saw_pk:
+                        raise ParseError(
+                            kw_tok.line, kw_tok.col, "duplicate PRIMARY KEY"
+                        )
+                    saw_pk = True
+                    primary_key = True
+                elif kw_tok.value == "KEY":
+                    # Bare KEY without PRIMARY is rejected.
+                    raise ParseError(
+                        kw_tok.line, kw_tok.col,
+                        "unexpected KEY; use PRIMARY KEY",
+                    )
+                elif kw_tok.value == "UNIQUE":
+                    if saw_unique:
+                        raise ParseError(
+                            kw_tok.line, kw_tok.col, "duplicate UNIQUE constraint"
+                        )
+                    saw_unique = True
+                    unique = True
+
+            cols.append(ColumnDefinition(
+                name=cname, type=ctype,
+                nullable=nullable, unique=unique, primary_key=primary_key,
+            ))
 
             if self.peek().type == "PUNCT" and self.peek().value == ",":
                 self.advance()
@@ -201,7 +279,10 @@ class _Parser:
             break
 
         self.expect("PUNCT", ")")
-        return CreateTable(name=name, columns=cols, line=kw.line, col=kw.col)
+        return CreateTable(
+            name=name, columns=tuple(cols),
+            line=kw.line, col=kw.col,
+        )
 
     # --- DROP TABLE ---------------------------------------------------------
 
@@ -251,9 +332,12 @@ class _Parser:
                 raise ParseError(tok.line, tok.col, "expected literal")
             while True:
                 v = self.advance()
-                if v.type not in _LITERAL_TYPES:
+                if v.type == "KEYWORD" and v.value == "NULL":
+                    row.append(None)
+                elif v.type in _LITERAL_TYPES:
+                    row.append(v.value)
+                else:
                     raise ParseError(v.line, v.col, "expected literal")
-                row.append(v.value)
                 if self.peek().type == "PUNCT" and self.peek().value == ",":
                     self.advance()
                     continue

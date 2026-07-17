@@ -1,0 +1,13 @@
+{
+  "change": "tinydb-constraints",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "099a0719c5c7b13b3cf721198808245f4160c0ea7df40620c2259a5fe7df5033",
+  "files": [
+    { "path": "openspec/changes/tinydb-constraints/proposal.md", "sha256": "c9f557b277849aaeac0180994ab4c99ca03ab1c3c94757826d3d4e677b0f17b1" },
+    { "path": "openspec/changes/tinydb-constraints/design.md", "sha256": "c97bdc4938a047ffed2f7d92ab96046c9c3ee2b85620ec4d8eba8cdbfd59ee05" },
+    { "path": "openspec/changes/tinydb-constraints/tasks.md", "sha256": "f7bb0a9c62edb602ad2e77b31a7f2d9805dcb3b4352cde3de4c314b866ad5ba5" }
+  ]
+}
