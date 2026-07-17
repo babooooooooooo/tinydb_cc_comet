@@ -71,7 +71,7 @@ class Database:
         if isinstance(last, Select) and results:
             ti = self.catalog.get_table(last.table)
             if ti is not None:
-                cols = tuple(n for n, _ in ti.schema) if last.columns == ["*"] else tuple(last.columns)
+                cols = tuple(n for n, _ in ti.schema) if last.columns == ("*",) else tuple(last.columns)
                 results = [Row(values=tuple(r), columns=cols) for r in results]
         return results
 

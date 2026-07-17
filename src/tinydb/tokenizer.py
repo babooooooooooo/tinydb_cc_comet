@@ -13,7 +13,14 @@ from tinydb.type_system import (
 KEYWORDS = {
     "CREATE", "TABLE", "DROP", "INSERT", "INTO", "VALUES", "SELECT",
     "FROM", "WHERE", "DELETE", "INT", "TEXT", "FLOAT", "BOOL",
-    "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE",  # Task 4
+    # --- tinydb-constraints ---
+    "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE",
+    # --- tinydb-engine-v1 ---
+    "UPDATE", "SET",
+    "AND", "OR", "NOT",
+    "ORDER", "BY",
+    "ASC", "DESC",
+    "LIMIT", "OFFSET",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 

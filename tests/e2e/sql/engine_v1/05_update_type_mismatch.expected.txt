@@ -1,0 +1,4 @@
+(no rows)
+(no rows)
+ERROR: TypeError: INT vs TEXT: expected int for INT, got str
+Row(x=1, y=1)

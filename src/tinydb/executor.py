@@ -9,11 +9,15 @@ INSERT + linear scan helper.
 """
 from collections import defaultdict
 from typing import Any, Optional, Union
+from functools import cmp_to_key
 
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
 from tinydb.pager import Pager
-from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
+from tinydb.parser import (
+    CreateTable, DropTable, Insert, Select, Delete, Update,
+    EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
+)
 from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
@@ -24,6 +28,37 @@ from tinydb.type_system import py_to_db
 # MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
 # an empty page leaves room for the slot directory entry (no overlap).
 _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
+
+
+def eval_expr(expr: Any, row: list, schema: list) -> bool:
+    """Recursive WHERE-expression evaluator; AND/OR short-circuit; strict type check.
+
+    Raises:
+        ExecutionError: unknown column.
+        TypeError: column type vs literal type mismatch (preserves MVP behavior).
+    """
+    if isinstance(expr, EqualsExpr):
+        col_idx = next(
+            (i for i, (n, _) in enumerate(schema) if n == expr.column),
+            None,
+        )
+        if col_idx is None:
+            raise ExecutionError(f"unknown column {expr.column!r}")
+        col_type = schema[col_idx][1]
+        try:
+            py_to_db(expr.value, col_type)
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+            ) from e
+        return row[col_idx] == expr.value
+    if isinstance(expr, AndExpr):
+        return eval_expr(expr.left, row, schema) and eval_expr(expr.right, row, schema)
+    if isinstance(expr, OrExpr):
+        return eval_expr(expr.left, row, schema) or eval_expr(expr.right, row, schema)
+    if isinstance(expr, NotExpr):
+        return not eval_expr(expr.operand, row, schema)
+    raise ExecutionError(f"unsupported expression: {type(expr).__name__}")
 
 
 def _python_type_to_db_type(value: object) -> str:
@@ -62,7 +97,7 @@ class Executor:
     # --- public dispatch ----------------------------------------------------
 
     def execute(
-        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete],
+        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete, Update],
     ) -> Union[list, list[list[Any]]]:
         """Dispatch ``stmt`` to its ``_exec_*`` handler.
 
@@ -75,6 +110,7 @@ class Executor:
             Insert:      self._exec_insert,
             Select:      self._exec_select,
             Delete:      self._exec_delete,
+            Update:      self._exec_update,
         }
         handler = dispatch.get(type(stmt))
         if handler is None:
@@ -418,53 +454,21 @@ class Executor:
             pid += 1
         return results
 
-    def _resolve_where(
-        self,
-        stmt_where: Optional[tuple[str, str, Any]],
-        schema: list[tuple[str, str]],
-    ) -> Optional[tuple[int, str, str, Any]]:
-        """Validate WHERE clause and return ``(col_idx, col_type, op, lit)``.
-
-        Returns ``(None, None, None, None)`` when ``stmt_where`` is None.
-        Raises :class:`TypeError` on literal/column type mismatch (spec
-        §REQ-PARSE-005-SCN-04 mandates TypeError, not ExecutionError).
-        Raises :class:`ExecutionError` on unknown column or unsupported op.
-        """
-        if stmt_where is None:
-            return (None, None, None, None)
-        col_name, op, lit = stmt_where
-        col_idx = next(
-            (i for i, (n, _) in enumerate(schema) if n == col_name), None,
-        )
-        if col_idx is None:
-            raise ExecutionError(f"unknown column {col_name!r}")
-        col_type = schema[col_idx][1]
-        # MVP guard: parser already restricts to '='; re-check defensively.
-        if op != "=":
-            raise ExecutionError(
-                f"operator {op!r} not supported; MVP supports only ="
-            )
-        try:
-            py_to_db(lit, col_type)
-        except (TypeError, ValueError) as e:
-            raise TypeError(
-                f"{col_type} vs {_python_type_to_db_type(lit)}: {e}"
-            ) from e
-        return (col_idx, col_type, op, lit)
-
     def _exec_select(self, stmt: Select) -> list[list[Any]]:
-        """Read rows from a table, applying WHERE filter and column projection.
+        """Read rows from a table, applying WHERE filter, ORDER BY, OFFSET, LIMIT, projection.
 
-        MVP semantics:
-          * WHERE supports only ``col = literal`` (parser already restricts
-            other operators per REQ-PARSE-005-SCN-04; this layer defensively
-            re-checks).
+        Engine-v1 semantics:
+          * WHERE supports the full Expr AST (EqualsExpr | AndExpr | OrExpr |
+            NotExpr) via ``eval_expr``. AND/OR short-circuit on the first
+            decisive branch (Python ``and``/``or``).
           * Literal type mismatches against the column's declared type raise
-            :class:`TypeError` with messages shaped like ``"INT vs TEXT: ..."``
-            (spec §REQ-PARSE-005-SCN-04).
+            :class:`TypeError` (preserves MVP behavior; spec REQ-PARSE-005-SCN-04).
+          * Unknown columns raise :class:`ExecutionError`.
           * ``SELECT *`` projects every schema column in schema order; a
             named-column list projects in the order given by ``stmt.columns``.
-          * Unknown table or column names raise :class:`ExecutionError`.
+          * Chain order: filter -> order_by -> offset -> limit -> project.
+          * ORDER BY uses Python stable sort with multi-key comparator.
+          * Negative LIMIT/OFFSET raise ExecutionError.
 
         Returns ``list[list]`` of decoded values — Task 20 wraps each row in
         a ``Row`` object; until then the raw lists are the public contract.
@@ -473,28 +477,95 @@ class Executor:
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema
-        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
+
+        # Validate LIMIT/OFFSET non-negative.
+        if stmt.offset is not None and stmt.offset < 0:
+            raise ExecutionError(f"OFFSET must be non-negative, got {stmt.offset}")
+        if stmt.limit is not None and stmt.limit < 0:
+            raise ExecutionError(f"LIMIT must be non-negative, got {stmt.limit}")
+
+        # Validate ORDER BY columns up front so an unknown column surfaces
+        # before sort (which would otherwise never check on a 1-row table).
+        if stmt.order_by:
+            name_to_idx_sort = {n: i for i, (n, _) in enumerate(schema)}
+            for it in stmt.order_by:
+                if it.column not in name_to_idx_sort:
+                    raise ExecutionError(
+                        f"unknown column {it.column!r} in ORDER BY"
+                    )
 
         # Named-column projection: validate all column names up front so an
         # unknown column surfaces before we return any partial result.
         proj_idx: list[int] = []
-        if stmt.columns != ["*"]:
+        if stmt.columns != ("*",):
             name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
             for cname in stmt.columns:
                 if cname not in name_to_idx:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        results: list[list[Any]] = []
-        for _sid, vals, _pid in self._scan_table(ti):
-            if col_idx is not None and vals[col_idx] != lit:
+        # filter + collect (sid, vals, pid) for stable sort
+        rows: list[tuple[int, list[Any], int]] = []
+        for sid, vals, pid in self._scan_table(ti):
+            if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
                 continue
-            # `list(vals)` copies so each row stands on its own (no shared refs).
-            if stmt.columns == ["*"]:
+            rows.append((sid, vals, pid))
+
+        if stmt.order_by:
+            rows = self._stable_sort(rows, stmt.order_by, schema)
+
+        if stmt.offset:
+            rows = rows[stmt.offset:]
+        if stmt.limit is not None:
+            rows = rows[:stmt.limit]
+
+        results: list[list[Any]] = []
+        for _sid, vals, _pid in rows:
+            if stmt.columns == ("*",):
                 results.append(list(vals))
             else:
                 results.append([vals[i] for i in proj_idx])
         return results
+
+    def _stable_sort(
+        self,
+        rows: list[tuple[int, list[Any], int]],
+        items: tuple,
+        schema: list[tuple[str, str]],
+    ) -> list[tuple[int, list[Any], int]]:
+        """Stable multi-key sort by OrderByItem list.
+
+        Uses ``cmp_to_key`` to support arbitrary Python types (INT, TEXT,
+        FLOAT, BOOL) and mixed ASC/DESC. Python ``sorted`` is stable, so
+        equal keys preserve insertion order (which itself is page-slot order).
+        """
+        name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+
+        def cmp(r1: tuple, r2: tuple) -> int:
+            for it in items:
+                if it.column not in name_to_idx:
+                    raise ExecutionError(
+                        f"unknown column {it.column!r} in ORDER BY"
+                    )
+                i = name_to_idx[it.column]
+                v1, v2 = r1[1][i], r2[1][i]
+                col_type = schema[i][1]
+                # py_to_db is the canonical type check; surface type errors as
+                # ExecutionError (consistent with executor error model).
+                try:
+                    py_to_db(v1, col_type)
+                    py_to_db(v2, col_type)
+                except (TypeError, ValueError) as e:
+                    raise ExecutionError(
+                        f"column {it.column!r}: {e}"
+                    ) from e
+                if v1 < v2:
+                    return -1 if not it.descending else 1
+                if v1 > v2:
+                    return 1 if not it.descending else -1
+            return 0  # all keys equal; Python sorted is stable
+
+        return sorted(rows, key=cmp_to_key(cmp))
 
     def _exec_delete(self, stmt: Delete) -> list:
         """Delete rows matching the WHERE clause (or every row if no WHERE).
@@ -512,13 +583,12 @@ class Executor:
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema
-        col_idx, _col_type, _op, lit = self._resolve_where(stmt.where, schema)
 
         # Collect (page_id, slot_id) pairs first to avoid mutating pages
         # while we are still scanning them.
         to_delete: list[tuple[int, int]] = []
         for sid, vals, pid in self._scan_table(ti):
-            if col_idx is None or vals[col_idx] == lit:
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
                 to_delete.append((pid, sid))
 
         for pid, sid in to_delete:
@@ -530,4 +600,85 @@ class Executor:
             self.pager.write_page(pid, page.to_bytes())
         if to_delete:
             self.pager.flush()
+        return []
+
+    def _exec_update(self, stmt: Update) -> list:
+        """UPDATE <table> SET <col=lit>[, ...] [WHERE <expr>]. Returns [].
+
+        Algorithm:
+          1. Validate SET columns and literal types against the schema.
+          2. Scan matching (sid, vals, pid) rows via eval_expr.
+          3. Group matches by page id; process each page independently.
+          4. For each match: build new row bytes, try in-place update on the
+             same slot; if grew, free the overflow chain (if any), delete
+             the slot, then re-insert in the same page (PageFull triggers a
+             queue to chain-insert after page flush).
+          5. Flush page, then drain pending chain inserts.
+
+        Returns ``[]`` (DML protocol).
+        """
+        ti = self.catalog.get_table(stmt.table)
+        if ti is None:
+            raise ExecutionError(f"table {stmt.table!r} does not exist")
+        schema = ti.schema
+
+        # 1) Validate SET columns + literal types
+        col_name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+        for col_name, expr in stmt.sets:
+            if col_name not in col_name_to_idx:
+                raise ExecutionError(f"unknown column {col_name!r}")
+            if not isinstance(expr, EqualsExpr):
+                raise ExecutionError("SET right-hand side must be a literal")
+            col_type = schema[col_name_to_idx[col_name]][1]
+            try:
+                py_to_db(expr.value, col_type)
+            except (TypeError, ValueError) as e:
+                raise TypeError(
+                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+                ) from e
+
+        # 2) Collect matches
+        matches: list[tuple[int, int, list[Any]]] = []
+        for sid, vals, pid in self._scan_table(ti):
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
+                matches.append((pid, sid, vals))
+
+        # 3) Group by page
+        by_page: dict[int, list[tuple[int, list[Any]]]] = {}
+        for pid, sid, vals in matches:
+            by_page.setdefault(pid, []).append((sid, vals))
+
+        # 4) Per-page in-place update + fallback
+        for pid, sid_vals_list in by_page.items():
+            page = SlottedPage.from_bytes(pid, self.pager.read_page(pid))
+            pending_chain_inserts: list[bytes] = []
+            for sid, vals in sid_vals_list:
+                new_vals = list(vals)
+                for col_name, expr in stmt.sets:
+                    new_vals[col_name_to_idx[col_name]] = expr.value
+                new_bytes = encode_row(new_vals, schema)
+
+                old_slot = page.slots[sid]
+                grew = len(new_bytes) > old_slot.length
+                if not grew:
+                    try:
+                        page.update(sid, new_bytes)
+                        continue
+                    except PageFull:
+                        grew = True
+                # Fallback: grew == True → delete + insert (or chain)
+                if old_slot.flags & FLAG_SPILL_START:
+                    self._free_overflow_chain(pid)
+                page.delete(sid)
+                try:
+                    page.insert(new_bytes)
+                except PageFull:
+                    pending_chain_inserts.append(new_bytes)
+
+            # Flush this page before chain inserts (may advance next_page_id).
+            self.pager.write_page(pid, page.to_bytes())
+            for new_bytes in pending_chain_inserts:
+                self._insert_row_into_chain(ti, new_bytes)
+
+        self.pager.flush()
         return []

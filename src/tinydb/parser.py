@@ -1,4 +1,4 @@
-"""Recursive descent SQL parser -> AST (CREATE/DROP/INSERT/SELECT/DELETE). <= 600 lines."""
+"""Recursive descent SQL parser -> AST (CREATE/DROP/INSERT/SELECT/DELETE/UPDATE). <= 750 lines."""
 
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -69,25 +69,91 @@ class Insert:
     col: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Select:
-    """SELECT <cols> FROM <table> [WHERE <col> <op> <val>] statement."""
+    """SELECT <cols> FROM <table> [WHERE <expr>] [ORDER BY ...] [LIMIT N] [OFFSET N].
+
+    Engine-v1 upgrade: columns is tuple, where holds Expr, order_by/limit/offset
+    default to empty/None for backward compatibility with MVP instances.
+    """
 
     table: str
-    columns: list  # list[str]  ("*" or column names)
-    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
-    line: int
-    col: int
+    columns: tuple  # tuple[str, ...]  ("*" or column names)
+    where: Optional[Any] = None      # Expr (EqualsExpr | AndExpr | OrExpr | NotExpr)
+    order_by: tuple = ()              # tuple[OrderByItem, ...]
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+    line: int = 0
+    col: int = 0
 
 
-@dataclass
+@dataclass(frozen=True)
 class Delete:
-    """DELETE FROM <table> [WHERE <col> <op> <val>] statement."""
+    """DELETE FROM <table> [WHERE <expr>] statement."""
 
     table: str
-    where: Optional[tuple]  # Optional[tuple[str, str, Any]]  (column, op, value)
-    line: int
-    col: int
+    where: Optional[Any] = None  # Expr | None
+    line: int = 0
+    col: int = 0
+
+
+# --- engine-v1 expression AST ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EqualsExpr:
+    """MVP-compatible: ``col = literal`` comparison."""
+
+    column: str
+    value: Any
+
+
+@dataclass(frozen=True)
+class AndExpr:
+    """Short-circuit AND: ``left AND right``."""
+
+    left: Any
+    right: Any
+
+
+@dataclass(frozen=True)
+class OrExpr:
+    """Short-circuit OR: ``left OR right``."""
+
+    left: Any
+    right: Any
+
+
+@dataclass(frozen=True)
+class NotExpr:
+    """Unary NOT: ``NOT operand``."""
+
+    operand: Any
+
+
+# --- engine-v1 SELECT sub-clauses -------------------------------------------
+
+
+@dataclass(frozen=True)
+class OrderByItem:
+    """ORDER BY item: column + ASC/DESC."""
+
+    column: str
+    descending: bool = False
+
+
+# --- engine-v1 UPDATE statement ----------------------------------------------
+
+
+@dataclass(frozen=True)
+class Update:
+    """UPDATE <table> SET <col=lit>[, ...] [WHERE <expr>] statement."""
+
+    table: str
+    sets: tuple                       # tuple[tuple[str, Expr], ...]
+    where: Optional[Any] = None       # Expr | None
+    line: int = 0
+    col: int = 0
 
 
 # --- Parser ------------------------------------------------------------------
@@ -156,7 +222,9 @@ class _Parser:
             return self._parse_select()
         if kw == "DELETE":
             return self._parse_delete()
-        # All five supported statement keywords are dispatched above.
+        if kw == "UPDATE":
+            return self._parse_update()
+        # All six supported statement keywords are dispatched above.
         # Reaching here means a KEYWORD (e.g. TABLE / INTO / VALUES / FROM /
         # WHERE / INT / TEXT / FLOAT / BOOL) appeared where a statement was
         # expected — that is a genuine syntax error, not an "unsupported"
@@ -394,11 +462,63 @@ class _Parser:
         table = self.advance().value
 
         where = self._parse_where()
+        order_by = self._parse_order_by()
+        limit = self._parse_limit()
+        offset = self._parse_offset()
 
         return Select(
-            table=table, columns=cols, where=where,
+            table=table, columns=tuple(cols), where=where,
+            order_by=order_by, limit=limit, offset=offset,
             line=kw.line, col=kw.col,
         )
+
+    # --- ORDER BY / LIMIT / OFFSET ---------------------------------------
+
+    def _parse_order_by(self) -> tuple:
+        if not self._peek_kw("ORDER"):
+            return ()
+        self.advance()
+        self.expect_keyword("BY")
+        items: list = []
+        while True:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column in ORDER BY")
+            col = self.advance().value
+            desc = False
+            if self._peek_kw("ASC"):
+                self.advance()
+            elif self._peek_kw("DESC"):
+                self.advance()
+                desc = True
+            items.append(OrderByItem(column=col, descending=desc))
+            if self._peek_punct(","):
+                self.advance()
+                continue
+            break
+        return tuple(items)
+
+    def _parse_limit(self) -> Optional[int]:
+        if not self._peek_kw("LIMIT"):
+            return None
+        self.advance()
+        t = self.advance()
+        if t.type != "INT":
+            raise ParseError(
+                t.line, t.col, "LIMIT must be a non-negative integer",
+            )
+        return int(t.value)
+
+    def _parse_offset(self) -> Optional[int]:
+        if not self._peek_kw("OFFSET"):
+            return None
+        self.advance()
+        t = self.advance()
+        if t.type != "INT":
+            raise ParseError(
+                t.line, t.col, "OFFSET must be a non-negative integer",
+            )
+        return int(t.value)
 
     # --- DELETE FROM <table> [WHERE ...] -----------------------------------
 
@@ -415,19 +535,108 @@ class _Parser:
 
         return Delete(table=table, where=where, line=kw.line, col=kw.col)
 
+    # --- UPDATE <table> SET <col>=<lit>[, ...] [WHERE <expr>] ---------------
+
+    def _parse_update(self) -> Update:
+        kw = self.expect_keyword("UPDATE")
+        tt = self.peek()
+        if tt.type != "IDENT":
+            raise ParseError(tt.line, tt.col, "expected table name")
+        table = self.advance().value
+        self.expect_keyword("SET")
+
+        sets: list = []
+        while True:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column name in SET")
+            col = self.advance().value
+            self.expect("PUNCT", "=")
+            lit_tok = self.advance()
+            if lit_tok.type not in _LITERAL_TYPES:
+                raise ParseError(
+                    lit_tok.line, lit_tok.col,
+                    "SET right-hand side must be a literal",
+                )
+            sets.append((col, EqualsExpr(column=col, value=lit_tok.value)))
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+
+        if not sets:
+            raise ParseError(
+                kw.line, kw.col,
+                "UPDATE requires at least one SET assignment",
+            )
+
+        where = self._parse_where()
+        return Update(
+            table=table, sets=tuple(sets), where=where,
+            line=kw.line, col=kw.col,
+        )
+
     # --- shared WHERE clause helper ----------------------------------------
 
-    def _parse_where(self) -> Optional[tuple]:
-        """Parse `WHERE <col> <op> <literal>` if present; otherwise return None."""
+    def _parse_where(self) -> Optional[Any]:
+        """Parse `WHERE <expr>` if present; otherwise return None.
+
+        Engine-v1 returns an Expr AST (EqualsExpr / AndExpr / OrExpr /
+        NotExpr); the executor's eval_expr handles all four uniformly.
+        """
         if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
             return None
         self.advance()
+        return self._parse_expr()
 
+    # --- expression precedence chain (OR < AND < NOT < primary) ----------
+
+    def _peek_kw(self, kw: str) -> bool:
+        t = self.peek()
+        return t.type == "KEYWORD" and t.value == kw
+
+    def _peek_punct(self, p: str) -> bool:
+        t = self.peek()
+        return t.type == "PUNCT" and t.value == p
+
+    def _parse_expr(self) -> Any:
+        return self._parse_or_expr()
+
+    def _parse_or_expr(self) -> Any:
+        left = self._parse_and_expr()
+        while self._peek_kw("OR"):
+            self.advance()
+            right = self._parse_and_expr()
+            left = OrExpr(left=left, right=right)
+        return left
+
+    def _parse_and_expr(self) -> Any:
+        left = self._parse_not_expr()
+        while self._peek_kw("AND"):
+            self.advance()
+            right = self._parse_not_expr()
+            left = AndExpr(left=left, right=right)
+        return left
+
+    def _parse_not_expr(self) -> Any:
+        if self._peek_kw("NOT"):
+            self.advance()
+            return NotExpr(operand=self._parse_not_expr())
+        return self._parse_primary()
+
+    def _parse_primary(self) -> Any:
+        if self._peek_punct("("):
+            self.advance()
+            inner = self._parse_expr()
+            self.expect("PUNCT", ")")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self) -> EqualsExpr:
         ct = self.peek()
         if ct.type != "IDENT":
             raise ParseError(ct.line, ct.col, "expected column in WHERE")
         cname = self.advance().value
-
         op_tok = self.advance()
         if op_tok.type != "PUNCT" or op_tok.value not in SUPPORTED_OPS:
             op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
@@ -435,11 +644,10 @@ class _Parser:
                 op_tok.line, op_tok.col,
                 f"operator {op_repr} not supported; MVP supports only =",
             )
-
         lit = self.advance()
         if lit.type not in _LITERAL_TYPES:
             raise ParseError(lit.line, lit.col, "expected literal")
-        return (cname, op_tok.value, lit.value)
+        return EqualsExpr(column=cname, value=lit.value)
 
 
 # --- Public entry ------------------------------------------------------------

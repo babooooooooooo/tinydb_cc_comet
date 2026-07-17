@@ -1,0 +1,6 @@
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+Row(id=5, a=1, b='x')
+Row(id=6, a=200, b='keep')

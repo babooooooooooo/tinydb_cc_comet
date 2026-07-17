@@ -6,9 +6,12 @@ REQ-PARSE-002 SCN-01/02/03 + REQ-PARSE-003 SCN-01/02.
 
 Task 16 covers INSERT / SELECT / DELETE / StatementList + parser purity per
 REQ-PARSE-004/005/006/007/008.
+
+Engine-v1 migration: WHERE tuple assertions (Task 3) were rewritten to
+EqualsExpr structural equality, and ``columns == ["*"]`` to ``columns == ("*",)``.
 """
 import pytest
-from tinydb.parser import parse, CreateTable, Insert, ColumnDefinition
+from tinydb.parser import parse, CreateTable, Insert, ColumnDefinition, EqualsExpr
 from tinydb.tokenizer import tokenize, Token
 from tinydb.errors import ParseError
 
@@ -87,7 +90,7 @@ def test_parse_insert_count_mismatch_raises():
 def test_parse_select_star():
     stmt = parse(tokenize("SELECT * FROM users"))
     s = stmt.statements[0]
-    assert s.columns == ["*"]
+    assert s.columns == ("*",)
     assert s.table == "users"
     assert s.where is None
 
@@ -97,7 +100,7 @@ def test_parse_select_star():
 def test_parse_select_with_where():
     stmt = parse(tokenize("SELECT * FROM users WHERE id = 1"))
     s = stmt.statements[0]
-    assert s.where == ("id", "=", 1)
+    assert s.where == EqualsExpr(column="id", value=1)
 
 
 @pytest.mark.unit
@@ -133,7 +136,7 @@ def test_parse_delete_all():
 @pytest.mark.spec_id("REQ-PARSE-006-SCN-02")
 def test_parse_delete_with_where():
     stmt = parse(tokenize("DELETE FROM users WHERE id = 1"))
-    assert stmt.statements[0].where == ("id", "=", 1)
+    assert stmt.statements[0].where == EqualsExpr(column="id", value=1)
 
 
 # --- Task 16: StatementList + purity ---------------------------------------

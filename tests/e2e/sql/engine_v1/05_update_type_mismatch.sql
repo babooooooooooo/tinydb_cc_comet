@@ -1,0 +1,4 @@
+CREATE TABLE t(x INT, y INT);
+INSERT INTO t(x, y) VALUES (1, 1);
+UPDATE t SET x='oops' WHERE y=1;
+SELECT * FROM t
