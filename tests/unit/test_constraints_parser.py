@@ -14,6 +14,7 @@ Coverage:
 
 import pytest
 
+from tinydb import Database
 from tinydb.parser import parse, CreateTable, ColumnDefinition
 from tinydb.tokenizer import tokenize
 from tinydb.errors import ParseError
@@ -108,3 +109,23 @@ def test_create_table_rejects_duplicate_primary_key():
 def test_create_table_rejects_bare_key_token():
     with pytest.raises(ParseError, match="unexpected KEY"):
         parse(tokenize("CREATE TABLE t(x INT KEY)"))
+
+
+@pytest.mark.unit
+def test_create_table_constraint_order_independent():
+    stmt = parse(tokenize("CREATE TABLE t(x INT PRIMARY KEY NOT NULL UNIQUE)"))
+    cd = stmt.statements[0].columns[0]
+    assert cd == ColumnDefinition(
+        name="x", type="INT", nullable=False, unique=True, primary_key=True
+    )
+
+
+@pytest.mark.unit
+def test_create_table_multi_column_pk_merges_into_one_group(tmp_path):
+    # Two single-column PK declarations land on different columns;
+    # the executor builds a single composite key group (R4 裁决).
+    with Database(str(tmp_path / "mcpk.db")) as db:
+        db.execute("CREATE TABLE t(a INT PRIMARY KEY, b INT PRIMARY KEY)")
+        ti = db.catalog.get_table("t")
+    assert ti.columns[0].primary_key is True
+    assert ti.columns[1].primary_key is True
