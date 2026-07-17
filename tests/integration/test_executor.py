@@ -188,3 +188,23 @@ def test_select_empty_table_returns_empty_list(tmp_path):
         assert _select(p, "SELECT id FROM t") == []
     finally:
         p.close()
+
+
+@pytest.mark.integration
+def test_create_table_with_not_null_persists_constraint(tmp_path):
+    from tinydb import Database
+    with Database(str(tmp_path / "nn.db")) as db:
+        db.execute("CREATE TABLE t(id INT NOT NULL, name TEXT)")
+        ti = db.catalog.get_table("t")
+    assert ti.columns[0].nullable is False
+    assert ti.columns[1].nullable is True
+
+
+@pytest.mark.integration
+def test_create_table_with_unique_persists_constraint(tmp_path):
+    from tinydb import Database
+    with Database(str(tmp_path / "uq.db")) as db:
+        db.execute("CREATE TABLE t(id INT PRIMARY KEY, email TEXT UNIQUE)")
+        ti = db.catalog.get_table("t")
+    assert ti.columns[0].primary_key is True
+    assert ti.columns[1].unique is True

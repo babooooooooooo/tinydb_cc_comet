@@ -85,29 +85,41 @@ class Executor:
     def _exec_create_table(self, stmt: CreateTable) -> list:
         """Create an empty table and persist the catalog entry.
 
-        Allocates one fresh page for the table's root (data) page,
-        initializes it as an empty ``SlottedPage``, registers the table in
-        the catalog, then writes page 1 back to disk. Duplicate table
-        names raise ``ExecutionError`` (the user-facing error mapping).
+        Maps ``stmt.columns`` (parser AST: ``tuple[ColumnDefinition, ...]``)
+        into a ``tuple[catalog.Column, ...]`` before calling
+        ``catalog.create_table``. The explicit bridge is the R1 裁决:
+        the parser does NOT import ``catalog``, the catalog does NOT
+        import the parser.
         """
+        from tinydb.catalog import Column  # local import avoids cycle noise
+
         if self.catalog.get_table(stmt.name) is not None:
             raise ExecutionError(f"table {stmt.name!r} already exists")
 
-        # Allocate a root page for the table's data and initialize it as
-        # an empty slotted page. Order matters: alloc_page -> empty ->
-        # write -> catalog.register -> catalog flush.
+        cols: list[Column] = []
+        seen: set = set()
+        for cd in stmt.columns:
+            if cd.name in seen:
+                raise ExecutionError(f"duplicate column {cd.name}")
+            seen.add(cd.name)
+            cols.append(Column(
+                name=cd.name,
+                type=cd.type,
+                nullable=cd.nullable,
+                unique=cd.unique,
+                primary_key=cd.primary_key,
+            ))
+
         root_id = self.pager.alloc_page()
         page = SlottedPage.empty(root_id)
         self.pager.write_page(root_id, page.to_bytes())
 
-        # MVP: next_page_id == root_page_id (no overflow yet). Task 21
-        # will teach the catalog to advance next_page_id on page split.
+        # MVP: next_page_id == root_page_id.
         self.catalog.create_table(
-            stmt.name, stmt.columns,
+            stmt.name, tuple(cols),
             root_page_id=root_id, next_page_id=root_id,
         )
 
-        # Persist catalog change to page 1 and flush mmap to disk.
         self.pager.write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
