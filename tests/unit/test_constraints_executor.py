@@ -102,3 +102,49 @@ def test_executor_insert_composite_pk_rejected(tmp_path):
         with pytest.raises(ConstraintViolation) as exc_info:
             db.execute("INSERT INTO t(a, b) VALUES (1, 3)")
     assert exc_info.value.kind == "duplicate_pk"
+
+
+@pytest.mark.integration
+def test_executor_insert_omitted_column_becomes_none(tmp_path):
+    with Database(str(tmp_path / "om.db")) as db:
+        db.execute("CREATE TABLE t(id INT NOT NULL, name TEXT)")
+        db.execute("INSERT INTO t(id) VALUES (1)")
+        rows = db.execute("SELECT * FROM t")
+    assert rows[0].name is None
+    assert rows[0].id == 1
+
+
+@pytest.mark.integration
+def test_executor_insert_unknown_column_rejected(tmp_path):
+    with Database(str(tmp_path / "uc.db")) as db:
+        db.execute("CREATE TABLE t(id INT)")
+        with pytest.raises(Exception) as exc_info:
+            db.execute("INSERT INTO t(missing) VALUES (1)")
+    # parser also catches this; executor is the second line of defense.
+    assert "unknown column" in str(exc_info.value) or "missing" in str(exc_info.value)
+
+
+@pytest.mark.integration
+def test_executor_insert_duplicate_column_rejected(tmp_path):
+    with Database(str(tmp_path / "dc.db")) as db:
+        db.execute("CREATE TABLE t(id INT, name TEXT)")
+        with pytest.raises(Exception) as exc_info:
+            db.execute("INSERT INTO t(id, id) VALUES (1, 2)")
+    assert "duplicate" in str(exc_info.value)
+
+
+@pytest.mark.integration
+def test_executor_insert_multi_row_partial_failure_keeps_successful_rows(tmp_path):
+    with Database(str(tmp_path / "mr.db")) as db:
+        db.execute("CREATE TABLE t(id INT PRIMARY KEY, name TEXT)")
+        db.execute(
+            "INSERT INTO t(id, name) VALUES (1, 'a'), (2, 'b')"
+        )
+        # Third row collides on PK; first two must remain.
+        with pytest.raises(ConstraintViolation) as exc_info:
+            db.execute(
+                "INSERT INTO t(id, name) VALUES (3, 'c'), (1, 'd'), (4, 'e')"
+            )
+        assert exc_info.value.kind == "duplicate_pk"
+        rows = db.execute("SELECT * FROM t")
+    assert sorted(r.id for r in rows) == [1, 2, 3]
