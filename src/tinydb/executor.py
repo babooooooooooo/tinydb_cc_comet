@@ -10,7 +10,7 @@ INSERT + linear scan helper.
 from typing import Any, Optional, Union
 
 from tinydb.catalog import Catalog, TableInfo
-from tinydb.errors import ExecutionError, PageFull
+from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
 from tinydb.pager import Pager
 from tinydb.parser import CreateTable, DropTable, Insert, Select, Delete
 from tinydb.row_codec import decode_row, encode_row
@@ -157,8 +157,6 @@ class Executor:
           7. UNIQUE / PK duplicate scan (Task 10)
           8. encode + insert
         """
-        from tinydb.errors import ConstraintViolation
-
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
@@ -166,10 +164,10 @@ class Executor:
             raise ExecutionError("INSERT column list must be non-empty")
 
         cols = ti.columns
-        name_to_idx = {c.name: i for i, c in enumerate(cols)}
+        name_to_idx: dict[str, int] = {c.name: i for i, c in enumerate(cols)}
 
         # Defensive executor-side validation; parser also enforces these.
-        seen: set = set()
+        seen: set[str] = set()
         for cname in stmt.columns:
             if cname not in name_to_idx:
                 raise ExecutionError(f"unknown column {cname!r}")
@@ -192,9 +190,7 @@ class Executor:
             # 5. NOT NULL + PK NULL rejection.
             for i, c in enumerate(cols):
                 if normalized_tuple[i] is None and (not c.nullable or c.primary_key):
-                    raise ConstraintViolation(
-                        kind="null", column=c.name, value=None,
-                    )
+                    raise ConstraintViolation(kind="null", column=c.name)
 
             # 6. Type validation (existing path: only non-None values).
             validated: list = []
