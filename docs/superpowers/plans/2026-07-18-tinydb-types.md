@@ -2383,7 +2383,7 @@ git commit -m "fix(types): update existing tests for FLOAT 4-byte single precisi
 
 ### Task 20: REPL integration tests
 
-- [ ] **Task 20: REPL integration tests**
+- [x] **Task 20: REPL integration tests**
 
 **Files:**
 - Modify: `tests/integration/test_types_repl.py` (new)

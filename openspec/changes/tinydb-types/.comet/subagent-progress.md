@@ -46,18 +46,33 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | done | — | 0 |
 | 18 | WHERE clause strict same-type comparison | (covered) | done | — | 0 |
 | 19 | FLOAT 4-byte regression cleanup | 10.1 | done | — | 0 |
-| 20 | REPL integration tests | (covered) | pending | — | — |
+| 20 | REPL integration tests | (covered) | done | — | 0 |
 | 21 | Coverage + final verification | 10.1-10.3 | pending | — | — |
 
 ## Current Task
 
-**Task 20**: REPL integration tests
-- **Stage**: task-implement
+**Task 21**: Coverage + final verification
+- **Stage**: task-verify
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: subprocess REPL 测试 + .sql golden 文件维护
+- **Risk signals**: 2 pre-existing failures (test_column_dataclass_roundtrip, test_golden_sql[error_cases/02_unsupported_type.sql]) + module line budget audit + 覆盖率 ≥ 90%
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 20 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `e070eb6 test(repl): REPL integration tests for 15 types`
+- TDD deviation: implementer probed REPL first (GREEN-only) — REPL already renders all 15 types via executor → row_codec → str(value) path
+- 14 new tests pass; full suite **573 passed**, **2 pre-existing failures** (unchanged)
+- File scope: only `tests/integration/test_types_repl.py` added — repl.py NOT touched (RED proved unnecessary)
+- REPL CLI pattern adaptation: `-c` flag doesn't exist; used stdin-driven Popen pattern from test_repl_process.py
+- Backward compat: all 16 pre-existing REPL tests still pass (test_repl_process.py + test_constraints_repl.py)
+- Key findings documented:
+  1. DOUBLE PRECISION alias unreachable via SQL (parser tokenizes as 2 identifiers) — pre-existing
+  2. CHAR(5) padding trimmed by REPL `.rstrip()` display — pre-existing
+  3. `repl._handle_meta` uses `.schema` not `.schema_v2` — pre-existing parser limitation
+- No per-task reviewer (decisive completion; TDD deviation justified by GREEN-first probe)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 19 implementer (sonnet, background)
 - Implementer status: DONE
