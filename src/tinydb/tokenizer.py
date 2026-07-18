@@ -23,6 +23,8 @@ KEYWORDS = {
     "LIMIT", "OFFSET",
     # --- tinydb-types ---
     "DATE", "TIME", "TIMESTAMP",
+    # --- tinydb-types (Task 14: DECIMAL literal prefix) ---
+    "DECIMAL",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 

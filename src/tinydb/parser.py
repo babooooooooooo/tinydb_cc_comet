@@ -525,6 +525,8 @@ class _Parser:
                     row.append(None)
                 elif v.type == "KEYWORD" and v.value in _DATETIME_KEYWORDS:
                     row.append(self._parse_datetime_literal())
+                elif v.type == "KEYWORD" and v.value == "DECIMAL":
+                    row.append(self._parse_decimal_literal())
                 else:
                     tok = self.advance()
                     if tok.type in _LITERAL_TYPES:
@@ -680,6 +682,9 @@ class _Parser:
             if (self.peek().type == "KEYWORD"
                     and self.peek().value in _DATETIME_KEYWORDS):
                 val = self._parse_datetime_literal()
+            elif (self.peek().type == "KEYWORD"
+                    and self.peek().value == "DECIMAL"):
+                val = self._parse_decimal_literal()
             else:
                 lit_tok = self.advance()
                 if lit_tok.type not in _LITERAL_TYPES:
@@ -777,6 +782,9 @@ class _Parser:
         if (self.peek().type == "KEYWORD"
                 and self.peek().value in _DATETIME_KEYWORDS):
             lit_val = self._parse_datetime_literal()
+        elif (self.peek().type == "KEYWORD"
+                and self.peek().value == "DECIMAL"):
+            lit_val = self._parse_decimal_literal()
         else:
             lit = self.advance()
             if lit.type not in _LITERAL_TYPES:
@@ -815,6 +823,31 @@ class _Parser:
             ) from e
         # Unreachable: expect_keyword guarantees one of the three above.
         raise ParseError(kw.line, kw.col, f"unknown datetime literal {kw.value}")
+
+    # --- DECIMAL literal prefix ---------------------------------------------
+
+    def _parse_decimal_literal(self):
+        """Parse DECIMAL 'literal' and return a Python float.
+
+        Mirrors the DATE/TIME/TIMESTAMP literal contract: the quoted text is
+        validated via ``float()`` and surfaced as a Python float. The codec
+        applies the DECIMAL(p, s) rounding/encode at write time.
+        """
+        kw = self.expect_keyword("DECIMAL")
+        text_tok = self.advance()
+        if text_tok.type != "TEXT":
+            raise ParseError(
+                text_tok.line, text_tok.col,
+                f"{kw.value} literal requires quoted string",
+            )
+        text = text_tok.value
+        try:
+            return float(text)
+        except ValueError as e:
+            raise ParseError(
+                kw.line, kw.col,
+                f"{kw.value} literal invalid: {text!r} ({e})",
+            ) from e
 
 
 # --- Public entry ------------------------------------------------------------
