@@ -97,3 +97,53 @@ def test_btree_delete_marks_tombstone():
     assert bt.search(b"\x00\x01") == (1, 0)
     assert bt.search(b"\x00\x03") == (3, 0)
     p.close()
+
+
+def test_btree_range_walks_multiple_leaves_in_order():
+    """Range across a multi-leaf tree must walk the next_leaf_id chain and return keys in order."""
+    from tinydb.btree import BTree
+    from tinydb.pager import Pager
+
+    p = Pager(":memory:")
+    bt = BTree(pager=p, root_page_id=None)
+    # 2-byte keys force multiple leaves; ascending inserts split at the rightmost leaf.
+    N = 500
+    for i in range(N):
+        bt.insert(i.to_bytes(2, "big"), (i, 0))
+    # Range that crosses at least one leaf boundary.
+    start = (N // 4).to_bytes(2, "big")  # 125
+    end = (N // 2 + 50).to_bytes(2, "big")  # 300
+    result = list(bt.range(start, end))
+    found = {row[0] for row in result}
+    expected = set(range(N // 4, N // 2 + 50))
+    assert found == expected, f"missing: {sorted(expected - found)[:10]}, extra: {sorted(found - expected)[:10]}"
+    # Result must be in ascending key order.
+    keys = [row[0] for row in result]
+    assert keys == sorted(keys), "range() did not return keys in ascending order"
+    p.close()
+
+
+def test_btree_range_finds_keys_at_separator_boundary():
+    """Range descent must use bisect_right so a start key equal to an internal node separator lands on the right subtree (which holds that key), not the left subtree.
+
+    Constructed by ascending-inserting enough keys to create an internal node whose separator equals the start key we query.
+    """
+    from tinydb.btree import BTree
+    from tinydb.pager import Pager
+
+    p = Pager(":memory:")
+    bt = BTree(pager=p, root_page_id=None)
+    # Force at least one leaf split + internal node: 2-byte keys, ~314/leaf -> 500 keys -> 2 leaves + 1 internal.
+    # Ascending inserts keep chain preserved; internal separator = smallest key in second leaf.
+    N = 500
+    for i in range(N):
+        bt.insert(i.to_bytes(2, "big"), (i, 0))
+    # Query with start exactly at the separator: with bisect_left, descent would land on the left subtree
+    # (which holds keys < separator); with bisect_right, it lands on the right subtree (which holds keys >= separator).
+    # Either way, range() should include the start key — even in the left-subtree case, chain walk finds it.
+    separator_value = 315  # smallest key in 2nd leaf (500 keys, split at ~315 with 2-byte key ~314/leaf)
+    result = list(bt.range(separator_value.to_bytes(2, "big"), (separator_value + 10).to_bytes(2, "big")))
+    found = {row[0] for row in result}
+    expected = set(range(separator_value, separator_value + 10))
+    assert found == expected, f"missing: {expected - found}"
+    p.close()

@@ -266,12 +266,16 @@ class BTree:
         """Return all non-tombstone values in [start, end), in key order."""
         if self.root_page_id is None:
             return []
-        # Descend to start leaf
+        # Descend to start leaf. Same convention as _descend_to_leaf:
+        # keys[i] = smallest key in children[i+1]; bisect_right picks the
+        # right subtree when start equals a separator (so we don't miss
+        # the start key by going to the left subtree that holds only
+        # strictly smaller keys).
         leaf_pid = self.root_page_id
         page = self.pager.read_page(leaf_pid)
         while page[0] == NODE_TYPE_INTERNAL:
             node = InternalNode.deserialize(page)
-            i = self._bisect_left(node.keys, start)
+            i = self._bisect_right(node.keys, start)
             leaf_pid = node.children[i]
             page = self.pager.read_page(leaf_pid)
         # Walk leaves
