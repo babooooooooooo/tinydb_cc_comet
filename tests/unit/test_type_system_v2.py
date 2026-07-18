@@ -221,3 +221,11 @@ def test_real_alias_resolves_to_float_4byte():
     codec = lookup("REAL")
     assert codec.name == "FLOAT"
     assert codec.width == 4
+
+
+def test_boolean_alias_resolves_to_bool():
+    codec = lookup("BOOLEAN")
+    assert codec.name == "BOOL"
+    # verify it encodes/decodes correctly
+    assert codec.decode_bytes(codec.encode_py(True), 0)[0] is True
+    assert codec.decode_bytes(codec.encode_py(False), 0)[0] is False
