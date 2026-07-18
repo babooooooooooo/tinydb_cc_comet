@@ -30,7 +30,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 1 | TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding | 1.1-1.2 | done | sonnet | 1 |
 | 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | 1.3 | done | sonnet | 1 |
 | 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | done | sonnet | 0 |
-| 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | pending | — | — |
+| 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | done | sonnet | 0 |
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | pending | — | — |
 | 6 | BOOLEAN alias for BOOL | 3.5 | pending | — | — |
 | 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | pending | — | — |
@@ -51,13 +51,24 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 4**: BIGINT (IntCodec with width=8)
+**Task 5**: DOUBLE (FloatCodec with width=8)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 无显著风险（纯加法：BIGINT 实例 + INTEGER alias）
+- **Risk signals**: 无显著风险（纯加法：DOUBLE 实例 + DOUBLE PRECISION alias）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 4 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `5a54735 feat(types): add BIGINT codec (IntCodec with width=8) + INTEGER alias`
+- RED: 3 failed with KeyError: 'BIGINT'
+- GREEN: 57 tests passed (4 new + 53 existing)
+- File scope: ONLY type_system.py + test_type_system_v2.py
+- Module line count: 350 (at budget limit)
+- INTEGER alias via `REGISTRY["INT"].aliases = ("INTEGER",)` declarative approach (cleaner than manual _ALIAS_MAP)
+- No per-task reviewer (no risk signals hit)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 3 implementer (sonnet, background)
 - Implementer status: DONE_WITH_CONCERNS

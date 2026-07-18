@@ -632,7 +632,7 @@ git commit -m "feat(types): add SMALLINT codec (IntCodec with width=2)"
 
 ### Task 4: BIGINT (IntCodec with width=8)
 
-- [ ] **Task 4: BIGINT (IntCodec with width=8)**
+- [x] **Task 4: BIGINT (IntCodec with width=8)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
