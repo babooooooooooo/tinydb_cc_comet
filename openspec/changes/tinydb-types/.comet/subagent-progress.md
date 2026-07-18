@@ -35,7 +35,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 6 | BOOLEAN alias for BOOL | 3.5 | done | sonnet | 0 |
 | 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | done | sonnet | 0 |
 | 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | done | sonnet | 0 |
-| 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | pending | — | — |
+| 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | done (manual) | sonnet | 0 |
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | pending | — | — |
 | 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | pending | — | — |
 | 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | pending | — | — |
@@ -51,13 +51,25 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 9**: DECIMAL (scaled int64 with precision/scale)
+**Task 10**: DATE / TIME / TIMESTAMP UTC
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 公共 API 契约变更（第三个 parametric codec）+ 行数预算压力（DECIMAL 比 VARCHAR/CHAR 复杂 — 可能需要净增 lines）
+- **Risk signals**: 行数预算压力（3 个 codec class 同时添加，可能 ~25-40 net lines）+ 新模块 `_dt` import 处理
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 9 implementer (sonnet, background) — manually salvaged
+- Implementer status: completed work; agent terminated by API 429 before commit/report
+- Commit `17008ef feat(types): add DECIMAL(p,s) codec with scaled int64 encoding` (manually made after recovery)
+- RED→GREEN: 7 DECIMAL tests passed (all plan-spec cases)
+- Full type_system suite: 114 passed, 1 scaffold-aligned RED (`test_registry_has_15_core_types` requires DATE/TIME/TIMESTAMP from Task 10)
+- File scope: ONLY type_system.py + test_type_system_v2.py
+- **Module line count: 386 lines** (+12 from 374 → cumulative 36 lines over §F6 budget of 350)
+- Implementation quality: **Compact** — uses single-line method bodies, `self._factor` cached in __init__, inline validation
+- Coordinator recovered: implementation was correct and complete; only commit + checkoff missing
+- No per-task reviewer (decisive completion + low risk)
+- Coordinator decision: APPROVE — proceed to checkoff; cumulative overrun will require Task 21 refactor or interim budget-refactor task
 
 ### 2026-07-18 — Task 8 implementer (sonnet, background)
 - Implementer status: DONE_WITH_CONCERNS

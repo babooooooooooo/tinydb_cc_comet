@@ -1098,7 +1098,7 @@ git commit -m "feat(types): add CHAR(N) codec with PAD SPACE semantics"
 
 ### Task 9: DECIMAL (scaled int64 with precision/scale)
 
-- [ ] **Task 9: DECIMAL (scaled int64 with precision/scale)**
+- [x] **Task 9: DECIMAL (scaled int64 with precision/scale)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
