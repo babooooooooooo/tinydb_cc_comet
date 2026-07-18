@@ -2089,7 +2089,7 @@ git commit -m "feat(types): row_codec.encode/decode uses codec_for(typ, params) 
 
 ### Task 17: Executor — wire 15 types into INSERT / SELECT / WHERE
 
-- [ ] **Task 17: Executor — wire 15 types into INSERT / SELECT / WHERE**
+- [x] **Task 17: Executor — wire 15 types into INSERT / SELECT / WHERE**
 
 **Files:**
 - Modify: `src/tinydb/executor.py`

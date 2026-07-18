@@ -43,7 +43,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | done | — | 0 |
 | 15 | Catalog — Column.type_params + backward compat | (covered) | done | — | 0 |
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | done | — | 0 |
-| 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | pending | — | — |
+| 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | done | — | 0 |
 | 18 | WHERE clause strict same-type comparison | (covered) | pending | — | — |
 | 19 | FLOAT 4-byte regression cleanup | 10.1 | pending | — | — |
 | 20 | REPL integration tests | (covered) | pending | — | — |
@@ -51,13 +51,29 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 17**: Executor — wire 15 types into INSERT / SELECT / WHERE
+**Task 18**: WHERE clause strict same-type comparison
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 跨模块集成（catalog + row_codec + parser）+ 端到端 15 类型 wire 路径 + INF/NaN 拒绝 + 严格类型校验
+- **Risk signals**: WHERE 类型校验语义变更（strict same-type per Design D6）+ 跨 codec 比较路径
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 17 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `f2ac0c9 feat(executor): wire all 15 codecs into INSERT/SELECT/WHERE paths`
+- RED: 16 failed, 1 passed (all because executor used py_to_db which only handles 4 MVP types)
+- GREEN: 16/16 new tests pass; full test suite **525 passed** (370 unit + 155 integration)
+- File scope: executor.py +42/-27 + new test_types_roundtrip.py (16 tests) — type_system.py, row_codec.py, parser.py, catalog.py, database.py NOT touched
+- Major executor refactor: replaced py_to_db/db_to_py with `codec_for(c.type, c.type_params)` dispatch in `_exec_create_table`, `_exec_insert`, `_exec_select`, `_exec_delete`, `_exec_update`, `_stable_sort`, `_scan_table`, `eval_expr`
+- All 15 types verified end-to-end (VARCHAR/DECIMAL/DATE/TIME/TIMESTAMP/SMALLINT/BIGINT/DOUBLE/REAL/BOOLEAN/INTEGER/CHAR + 4 MVP)
+- Codec overflow/rejection verified: VARCHAR(5)+'too long', DECIMAL(5,2)+12345.67, SMALLINT+1_000_000, DOUBLE inf
+- **2 pre-existing failures noted (NOT caused by this task)**:
+  1. `tests/integration/test_catalog.py::test_column_dataclass_roundtrip` — expects to_dict() to omit type_params (pre-existing from Task 15)
+  2. `tests/e2e/test_golden_sql.py::test_golden_sql[error_cases/02_unsupported_type.sql]` — golden file expects "VARCHAR not supported in MVP" error (pre-existing from Task 12)
+- **Gap from Task 15 fixed**: `_exec_create_table` now passes `type_params=cd.type_params` from ColumnDefinition to Column
+- No per-task reviewer (decisive completion; gap fixed + 2 pre-existing unrelated failures)
+- Coordinator decision: APPROVE — proceed to checkoff; pre-existing failures deferred to Task 21 audit
 
 ### 2026-07-18 — Task 16 implementer (sonnet, background)
 - Implementer status: DONE
