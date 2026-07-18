@@ -37,8 +37,10 @@ def test_parse_create_table_rejects_duplicate_column():
 @pytest.mark.unit
 @pytest.mark.spec_id("REQ-PARSE-002-SCN-03")
 def test_parse_create_table_rejects_unsupported_type():
-    with pytest.raises(ParseError, match="VARCHAR not supported"):
-        parse(tokenize("CREATE TABLE t(id VARCHAR(10))"))
+    # BLOB is not a registered type — must be rejected. (VARCHAR was the
+    # previous fixture but is now a supported parametric type per Task 12.)
+    with pytest.raises(ParseError, match="BLOB not supported"):
+        parse(tokenize("CREATE TABLE t(id BLOB)"))
 
 
 @pytest.mark.unit

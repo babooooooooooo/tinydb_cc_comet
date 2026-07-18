@@ -64,7 +64,7 @@ def test_catalog_encodes_int_fields_as_json_strings():
 def test_column_dataclass_roundtrip():
     col = Column(name="id", type="INT", nullable=False, unique=False, primary_key=True)
     d = col.to_dict()
-    assert d == {"name": "id", "type": "INT", "nullable": False, "unique": False, "primary_key": True}
+    assert d == {"name": "id", "type": "INT", "type_params": [], "nullable": False, "unique": False, "primary_key": True}
     col2 = Column.from_dict(d)
     assert col2 == col
 

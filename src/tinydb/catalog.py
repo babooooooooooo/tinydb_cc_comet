@@ -21,6 +21,7 @@ class Column:
 
     name: str
     type: str
+    type_params: tuple = ()
     nullable: bool = True
     unique: bool = False
     primary_key: bool = False
@@ -29,6 +30,7 @@ class Column:
         return {
             "name": self.name,
             "type": self.type,
+            "type_params": list(self.type_params),
             "nullable": self.nullable,
             "unique": self.unique,
             "primary_key": self.primary_key,
@@ -39,6 +41,7 @@ class Column:
         return cls(
             name=d["name"],
             type=d["type"],
+            type_params=tuple(d.get("type_params", ())),
             nullable=d.get("nullable", True),
             unique=d.get("unique", False),
             primary_key=d.get("primary_key", False),
@@ -58,6 +61,13 @@ class TableInfo:
         legacy consumers (database.Row, REPL ``.schema``). New code should
         read ``self.columns`` directly."""
         return [(c.name, c.type) for c in self.columns]
+
+    @property
+    def schema_v2(self) -> list[tuple[str, str, tuple]]:
+        """Canonical ``[(name, type, type_params)]`` projection for row_codec
+        v2 and other code paths that need parametric type info (VARCHAR(N),
+        CHAR(N), DECIMAL(p, s))."""
+        return [(c.name, c.type, c.type_params) for c in self.columns]
 
 
 def _enc_int(v: int) -> str:

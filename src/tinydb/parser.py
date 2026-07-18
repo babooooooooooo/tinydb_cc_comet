@@ -6,9 +6,33 @@ from typing import Any, Optional
 from tinydb.errors import ParseError
 from tinydb.tokenizer import Token
 
-SUPPORTED_TYPES = {"INT", "TEXT", "FLOAT", "BOOL"}
+SUPPORTED_TYPES = {
+    # MVP
+    "INT", "TEXT", "FLOAT", "BOOL",
+    # tinydb-types: integer widths
+    "SMALLINT", "BIGINT",
+    # tinydb-types: float widths
+    "DOUBLE", "REAL",
+    # tinydb-types: parametric string types
+    "VARCHAR", "CHAR",
+    # tinydb-types: parametric decimal
+    "DECIMAL",
+    # tinydb-types: date/time
+    "DATE", "TIME", "TIMESTAMP",
+    # tinydb-types: aliases (resolved at codec lookup time)
+    "INTEGER", "BOOLEAN",
+}
 SUPPORTED_OPS = {"="}
 _LITERAL_TYPES = ("INT", "FLOAT", "TEXT", "BOOL")
+_DATETIME_KEYWORDS = ("DATE", "TIME", "TIMESTAMP")
+
+# Parametric types require an explicit parameter list at parse time.
+# Maps type name -> expected arity (number of required int params).
+_PARAMETRIC_TYPES = {
+    "VARCHAR": 1,
+    "CHAR": 1,
+    "DECIMAL": 2,
+}
 
 
 # --- AST nodes ---------------------------------------------------------------
@@ -29,10 +53,15 @@ class ColumnDefinition:
 
     Pure data — the parser does NOT consult the catalog; the executor maps
     a list of ``ColumnDefinition`` into a list of ``catalog.Column`` at
-    CREATE TABLE time (Task 7)."""
+    CREATE TABLE time (Task 7).
+
+    tinydb-types (Task 12): ``type_params`` carries parametric type info
+    (e.g. ``(10,)`` for VARCHAR(10), ``(10, 2)`` for DECIMAL(10, 2)).
+    Empty tuple for non-parametric types."""
 
     name: str
     type: str
+    type_params: tuple = ()
     nullable: bool = True
     unique: bool = False
     primary_key: bool = False
@@ -264,19 +293,23 @@ class _Parser:
             seen.add(cname)
 
             type_tok = self.peek()
-            if (
-                type_tok.type != "KEYWORD"
-                or type_tok.value not in SUPPORTED_TYPES
-            ):
-                # Includes IDENTs like VARCHAR, KEYWORDs like BIGINT, etc.
+            if type_tok.type not in ("KEYWORD", "IDENT"):
                 value_repr = (
                     type_tok.value if type_tok.type != "EOF" else "EOF"
                 )
                 raise ParseError(
                     type_tok.line, type_tok.col,
-                    f"type {value_repr} not supported in MVP",
+                    f"expected type name, got {type_tok.type} {value_repr!r}",
                 )
-            ctype = self.advance().value
+            type_name = type_tok.value.upper()
+            if type_name not in SUPPORTED_TYPES:
+                raise ParseError(
+                    type_tok.line, type_tok.col,
+                    f"type {type_name} not supported",
+                )
+            self.advance()  # consume the type name token
+
+            type_params = self._parse_type_params(type_name, type_tok)
 
             # Parse optional constraint clauses: NOT NULL / UNIQUE / PRIMARY KEY.
             # Order-independent; multiple clauses allowed on one column.
@@ -337,7 +370,7 @@ class _Parser:
                     unique = True
 
             cols.append(ColumnDefinition(
-                name=cname, type=ctype,
+                name=cname, type=type_name, type_params=type_params,
                 nullable=nullable, unique=unique, primary_key=primary_key,
             ))
 
@@ -351,6 +384,93 @@ class _Parser:
             name=name, columns=tuple(cols),
             line=kw.line, col=kw.col,
         )
+
+    # --- type parameter parsing (Task 12) -----------------------------------
+
+    def _parse_type_params(self, type_name: str, name_tok: Token) -> tuple:
+        """Parse the optional ``(N)`` / ``(p, s)`` parameter list for a type.
+
+        Returns an empty tuple for non-parametric types. Raises ``ParseError``
+        for:
+        - parametric types missing the parameter list (e.g. ``VARCHAR`` alone)
+        - parametric types with the wrong arity (e.g. ``DECIMAL(10)``)
+        - non-parametric types given a parameter list (e.g. ``INT(10)``)
+        - non-integer param values (e.g. ``VARCHAR(3.5)``)
+        - parametric types whose params violate per-type value ranges
+          (e.g. ``VARCHAR(0)``, ``DECIMAL(20, 2)``, ``DECIMAL(5, 5)``)
+        """
+        has_paren = self.peek().type == "PUNCT" and self.peek().value == "("
+        is_parametric = type_name in _PARAMETRIC_TYPES
+
+        if not has_paren:
+            if is_parametric:
+                # Missing parameter list for a parametric type — explicit error.
+                if type_name == "DECIMAL":
+                    msg = "DECIMAL requires (p, s)"
+                else:
+                    msg = f"{type_name} requires (N)"
+                raise ParseError(name_tok.line, name_tok.col, msg)
+            return ()
+
+        # Consume the opening "(".
+        self.advance()
+
+        # Parse first int arg (mandatory when "(" is present).
+        first_tok = self.peek()
+        if first_tok.type != "INT":
+            raise ParseError(
+                first_tok.line, first_tok.col,
+                "expected integer in type params",
+            )
+        params: list = [self.advance().value]
+
+        # Optional second int arg.
+        if self.peek().type == "PUNCT" and self.peek().value == ",":
+            self.advance()
+            second_tok = self.peek()
+            if second_tok.type != "INT":
+                raise ParseError(
+                    second_tok.line, second_tok.col,
+                    "expected integer after ','",
+                )
+            params.append(self.advance().value)
+
+        self.expect("PUNCT", ")")
+
+        # Non-parametric types must NOT accept params at all.
+        if not is_parametric:
+            raise ParseError(
+                name_tok.line, name_tok.col,
+                f"{type_name} does not accept type parameters",
+            )
+
+        # Arity validation.
+        expected_arity = _PARAMETRIC_TYPES[type_name]
+        if len(params) != expected_arity:
+            if type_name == "DECIMAL":
+                raise ParseError(
+                    name_tok.line, name_tok.col,
+                    "DECIMAL requires (p, s)",
+                )
+            raise ParseError(
+                name_tok.line, name_tok.col,
+                f"{type_name} requires (N)",
+            )
+
+        # Per-type value-range validation. Re-raise codec_for's ValueError as a
+        # ParseError so the user gets a parser-context message. type_system
+        # already validates: VARCHAR N>=1, DECIMAL 1<=p<=18 and 0<=s<p.
+        from tinydb.type_system import codec_for  # lazy import avoids cycles
+
+        try:
+            codec_for(type_name, tuple(params))
+        except ValueError as e:
+            raise ParseError(
+                name_tok.line, name_tok.col,
+                f"{type_name}({', '.join(str(p) for p in params)}) invalid: {e}",
+            ) from e
+
+        return tuple(params)
 
     # --- DROP TABLE ---------------------------------------------------------
 
@@ -399,13 +519,20 @@ class _Parser:
                 tok = self.peek()
                 raise ParseError(tok.line, tok.col, "expected literal")
             while True:
-                v = self.advance()
+                v = self.peek()
                 if v.type == "KEYWORD" and v.value == "NULL":
+                    self.advance()
                     row.append(None)
-                elif v.type in _LITERAL_TYPES:
-                    row.append(v.value)
+                elif v.type == "KEYWORD" and v.value in _DATETIME_KEYWORDS:
+                    row.append(self._parse_datetime_literal())
+                elif v.type == "KEYWORD" and v.value == "DECIMAL":
+                    row.append(self._parse_decimal_literal())
                 else:
-                    raise ParseError(v.line, v.col, "expected literal")
+                    tok = self.advance()
+                    if tok.type in _LITERAL_TYPES:
+                        row.append(tok.value)
+                    else:
+                        raise ParseError(tok.line, tok.col, "expected literal")
                 if self.peek().type == "PUNCT" and self.peek().value == ",":
                     self.advance()
                     continue
@@ -552,13 +679,21 @@ class _Parser:
                 raise ParseError(ct.line, ct.col, "expected column name in SET")
             col = self.advance().value
             self.expect("PUNCT", "=")
-            lit_tok = self.advance()
-            if lit_tok.type not in _LITERAL_TYPES:
-                raise ParseError(
-                    lit_tok.line, lit_tok.col,
-                    "SET right-hand side must be a literal",
-                )
-            sets.append((col, EqualsExpr(column=col, value=lit_tok.value)))
+            if (self.peek().type == "KEYWORD"
+                    and self.peek().value in _DATETIME_KEYWORDS):
+                val = self._parse_datetime_literal()
+            elif (self.peek().type == "KEYWORD"
+                    and self.peek().value == "DECIMAL"):
+                val = self._parse_decimal_literal()
+            else:
+                lit_tok = self.advance()
+                if lit_tok.type not in _LITERAL_TYPES:
+                    raise ParseError(
+                        lit_tok.line, lit_tok.col,
+                        "SET right-hand side must be a literal",
+                    )
+                val = lit_tok.value
+            sets.append((col, EqualsExpr(column=col, value=val)))
             if self.peek().type == "PUNCT" and self.peek().value == ",":
                 self.advance()
                 continue
@@ -644,10 +779,75 @@ class _Parser:
                 op_tok.line, op_tok.col,
                 f"operator {op_repr} not supported; MVP supports only =",
             )
-        lit = self.advance()
-        if lit.type not in _LITERAL_TYPES:
-            raise ParseError(lit.line, lit.col, "expected literal")
-        return EqualsExpr(column=cname, value=lit.value)
+        if (self.peek().type == "KEYWORD"
+                and self.peek().value in _DATETIME_KEYWORDS):
+            lit_val = self._parse_datetime_literal()
+        elif (self.peek().type == "KEYWORD"
+                and self.peek().value == "DECIMAL"):
+            lit_val = self._parse_decimal_literal()
+        else:
+            lit = self.advance()
+            if lit.type not in _LITERAL_TYPES:
+                raise ParseError(lit.line, lit.col, "expected literal")
+            lit_val = lit.value
+        return EqualsExpr(column=cname, value=lit_val)
+
+    # --- DATE / TIME / TIMESTAMP literal prefix ---------------------------
+
+    def _parse_datetime_literal(self):
+        """Parse DATE / TIME / TIMESTAMP 'literal' and return a Python value.
+
+        The literal string is validated via ``datetime`` ISO parsers, matching
+        the codec's encoding contract for date/time/timestamp types.
+        """
+        import datetime as _dt
+        kw = self.expect_keyword(self.peek().value)
+        text_tok = self.advance()
+        if text_tok.type != "TEXT":
+            raise ParseError(
+                text_tok.line, text_tok.col,
+                f"{kw.value} literal requires quoted string",
+            )
+        text = text_tok.value
+        try:
+            if kw.value == "DATE":
+                return _dt.date.fromisoformat(text)
+            if kw.value == "TIME":
+                return _dt.time.fromisoformat(text)
+            if kw.value == "TIMESTAMP":
+                return _dt.datetime.fromisoformat(text)
+        except ValueError as e:
+            raise ParseError(
+                kw.line, kw.col,
+                f"{kw.value} literal invalid: {text!r} ({e})",
+            ) from e
+        # Unreachable: expect_keyword guarantees one of the three above.
+        raise ParseError(kw.line, kw.col, f"unknown datetime literal {kw.value}")
+
+    # --- DECIMAL literal prefix ---------------------------------------------
+
+    def _parse_decimal_literal(self):
+        """Parse DECIMAL 'literal' and return a Python float.
+
+        Mirrors the DATE/TIME/TIMESTAMP literal contract: the quoted text is
+        validated via ``float()`` and surfaced as a Python float. The codec
+        applies the DECIMAL(p, s) rounding/encode at write time.
+        """
+        kw = self.expect_keyword("DECIMAL")
+        text_tok = self.advance()
+        if text_tok.type != "TEXT":
+            raise ParseError(
+                text_tok.line, text_tok.col,
+                f"{kw.value} literal requires quoted string",
+            )
+        text = text_tok.value
+        try:
+            return float(text)
+        except ValueError as e:
+            raise ParseError(
+                kw.line, kw.col,
+                f"{kw.value} literal invalid: {text!r} ({e})",
+            ) from e
 
 
 # --- Public entry ------------------------------------------------------------

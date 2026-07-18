@@ -23,7 +23,11 @@ from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
     NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
 )
-from tinydb.type_system import py_to_db
+from tinydb.type_system import (
+    codec_for,
+    infer_literal_type,
+    validate_compare_types,
+)
 
 # MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
 # an empty page leaves room for the slot directory entry (no overlap).
@@ -33,21 +37,30 @@ _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
 def eval_expr(expr: Any, row: list, schema: list) -> bool:
     """Recursive WHERE-expression evaluator; AND/OR short-circuit; strict type check.
 
+    ``schema`` is the v2 form ``[(name, type, type_params), ...]`` so codec
+    dispatch can honor parametric types (VARCHAR(N), CHAR(N), DECIMAL(p, s)).
+
     Raises:
         ExecutionError: unknown column.
         TypeError: column type vs literal type mismatch (preserves MVP behavior).
     """
     if isinstance(expr, EqualsExpr):
         col_idx = next(
-            (i for i, (n, _) in enumerate(schema) if n == expr.column),
+            (i for i, (n, _, *_) in enumerate(schema) if n == expr.column),
             None,
         )
         if col_idx is None:
             raise ExecutionError(f"unknown column {expr.column!r}")
         col_type = schema[col_idx][1]
+        col_params = schema[col_idx][2] if len(schema[col_idx]) >= 3 else ()
+        # Strict same-type check first (Design D6 / Task 18): if the parsed
+        # literal's inferred DB type or its params disagree with the column
+        # declaration, raise TypeError before any byte encoding happens.
+        lit_type, lit_params = infer_literal_type(expr.value)
+        validate_compare_types(col_type, col_params, lit_type, lit_params)
         try:
-            py_to_db(expr.value, col_type)
-        except (TypeError, ValueError) as e:
+            codec_for(col_type, col_params).validate(expr.value)
+        except (TypeError, ValueError, OverflowError) as e:
             raise TypeError(
                 f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
             ) from e
@@ -142,6 +155,7 @@ class Executor:
             cols.append(Column(
                 name=cd.name,
                 type=cd.type,
+                type_params=cd.type_params,
                 nullable=cd.nullable,
                 unique=cd.unique,
                 primary_key=cd.primary_key,
@@ -234,16 +248,18 @@ class Executor:
                     if normalized_tuple[i] is None and (not c.nullable or c.primary_key):
                         raise ConstraintViolation(kind="null", column=c.name, value=normalized_tuple[i])
 
-                # 6. Type validation (existing path: only non-None values).
+                # 6. Type validation via the codec registry (Task 17 wires
+                #    all 15 types through ``codec_for``). ``c.type_params``
+                #    carries parametric info (VARCHAR(N), CHAR(N), DECIMAL(p, s)).
+                #    Codec errors (TypeError / ValueError / OverflowError)
+                #    propagate naturally — the codec is the canonical source
+                #    of validation truth.
                 validated: list = []
                 for c, v in zip(cols, normalized_tuple):
                     if v is None:
                         validated.append(None)
                         continue
-                    try:
-                        py_to_db(v, c.type)
-                    except (TypeError, ValueError) as e:
-                        raise ExecutionError(f"column {c.name}: {e}") from e
+                    codec_for(c.type, c.type_params).validate(v)
                     validated.append(v)
 
                 # 7. UNIQUE / PK duplicate check (Task 10). The session_keys
@@ -254,8 +270,9 @@ class Executor:
                     normalized_tuple, ti, name_to_idx, session_keys,
                 )
 
-                # 8. Encode + insert.
-                row_bytes = encode_row(validated, ti.schema)
+                # 8. Encode + insert. Use schema_v2 so codec dispatch in row_codec
+                #    receives the type_params tuple for parametric types.
+                row_bytes = encode_row(validated, ti.schema_v2)
                 self._insert_row_into_chain(ti, row_bytes)
         finally:
             session_keys.clear()
@@ -448,7 +465,7 @@ class Executor:
                     continue
                 if slot.flags & FLAG_SPILL_START:
                     row_bytes = row_bytes + self._read_overflow_chain(pid)
-                results.append((sid, decode_row(row_bytes, ti.schema), pid))
+                results.append((sid, decode_row(row_bytes, ti.schema_v2), pid))
             if pid == ti.next_page_id:
                 break
             pid += 1
@@ -476,7 +493,9 @@ class Executor:
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
-        schema = ti.schema
+        # Use schema_v2 (3-tuple with type_params) so codec dispatch in
+        # eval_expr / _stable_sort honors parametric types (Task 17).
+        schema = ti.schema_v2
 
         # Validate LIMIT/OFFSET non-negative.
         if stmt.offset is not None and stmt.offset < 0:
@@ -487,7 +506,7 @@ class Executor:
         # Validate ORDER BY columns up front so an unknown column surfaces
         # before sort (which would otherwise never check on a 1-row table).
         if stmt.order_by:
-            name_to_idx_sort = {n: i for i, (n, _) in enumerate(schema)}
+            name_to_idx_sort = {n: i for i, (n, _, *_) in enumerate(schema)}
             for it in stmt.order_by:
                 if it.column not in name_to_idx_sort:
                     raise ExecutionError(
@@ -498,7 +517,7 @@ class Executor:
         # unknown column surfaces before we return any partial result.
         proj_idx: list[int] = []
         if stmt.columns != ("*",):
-            name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+            name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
             for cname in stmt.columns:
                 if cname not in name_to_idx:
                     raise ExecutionError(f"unknown column {cname!r}")
@@ -531,15 +550,18 @@ class Executor:
         self,
         rows: list[tuple[int, list[Any], int]],
         items: tuple,
-        schema: list[tuple[str, str]],
+        schema: list[tuple[str, str, tuple]],
     ) -> list[tuple[int, list[Any], int]]:
         """Stable multi-key sort by OrderByItem list.
 
         Uses ``cmp_to_key`` to support arbitrary Python types (INT, TEXT,
         FLOAT, BOOL) and mixed ASC/DESC. Python ``sorted`` is stable, so
         equal keys preserve insertion order (which itself is page-slot order).
+
+        ``schema`` is the v2 form (3-tuple with type_params) so codec
+        dispatch honors parametric types (Task 17).
         """
-        name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+        name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
 
         def cmp(r1: tuple, r2: tuple) -> int:
             for it in items:
@@ -550,12 +572,13 @@ class Executor:
                 i = name_to_idx[it.column]
                 v1, v2 = r1[1][i], r2[1][i]
                 col_type = schema[i][1]
-                # py_to_db is the canonical type check; surface type errors as
-                # ExecutionError (consistent with executor error model).
+                col_params = schema[i][2] if len(schema[i]) >= 3 else ()
+                # codec_for is the canonical type check; surface type errors
+                # as ExecutionError (consistent with executor error model).
                 try:
-                    py_to_db(v1, col_type)
-                    py_to_db(v2, col_type)
-                except (TypeError, ValueError) as e:
+                    codec_for(col_type, col_params).validate(v1)
+                    codec_for(col_type, col_params).validate(v2)
+                except (TypeError, ValueError, OverflowError) as e:
                     raise ExecutionError(
                         f"column {it.column!r}: {e}"
                     ) from e
@@ -582,7 +605,7 @@ class Executor:
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
-        schema = ti.schema
+        schema = ti.schema_v2
 
         # Collect (page_id, slot_id) pairs first to avoid mutating pages
         # while we are still scanning them.
@@ -620,19 +643,20 @@ class Executor:
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
-        schema = ti.schema
+        schema = ti.schema_v2
 
         # 1) Validate SET columns + literal types
-        col_name_to_idx = {n: i for i, (n, _) in enumerate(schema)}
+        col_name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
         for col_name, expr in stmt.sets:
             if col_name not in col_name_to_idx:
                 raise ExecutionError(f"unknown column {col_name!r}")
             if not isinstance(expr, EqualsExpr):
                 raise ExecutionError("SET right-hand side must be a literal")
             col_type = schema[col_name_to_idx[col_name]][1]
+            col_params = schema[col_name_to_idx[col_name]][2] if len(schema[col_name_to_idx[col_name]]) >= 3 else ()
             try:
-                py_to_db(expr.value, col_type)
-            except (TypeError, ValueError) as e:
+                codec_for(col_type, col_params).validate(expr.value)
+            except (TypeError, ValueError, OverflowError) as e:
                 raise TypeError(
                     f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
                 ) from e
