@@ -4,6 +4,8 @@
 
 > **Status:** MVP complete — `CREATE` / `DROP` / `INSERT` / `SELECT` / `DELETE` over `INT` / `TEXT` / `FLOAT` / `BOOL`. Non-ACID, single-process. See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
 >
+> The 15-type extension (`tinydb-types` change) adds `VARCHAR(N)`, `CHAR(N)`, `DECIMAL(p, s)`, `DOUBLE`, `REAL`, `BOOLEAN`, `INTEGER`, `SMALLINT`, `BIGINT`, `DATE`, `TIME`, `TIMESTAMP` — see [§ Types](#types).
+>
 > A stdlib-only interactive shell (`tinydb-repl`) ships with the package — see [§ REPL](#repl).
 
 ## Quick start
@@ -56,6 +58,39 @@ The REPL supports multi-line SQL: an unterminated single quote or open parenthes
 | `.read <path>` | execute a UTF-8 SQL script |
 
 On Unix-like platforms with `readline`, history persists at `~/.tinydb_history` (missing file or write failures are silent). Platforms without `readline` (e.g. default Windows) fall back to built-in `input()`: SQL, meta-commands, and output all work, but history is not loaded or saved.
+
+## Types
+
+15 column types are supported (the 4 MVP types + 11 new types):
+
+| Type | Params | Notes |
+|------|--------|-------|
+| `INT` / `INTEGER` | — | 4-byte signed |
+| `SMALLINT` | — | 2-byte signed (range ±32767) |
+| `BIGINT` | — | 8-byte signed |
+| `FLOAT` / `REAL` | — | **4-byte IEEE 754 single** (≈7 digits) |
+| `DOUBLE` | — | 8-byte IEEE 754 double |
+| `TEXT` | — | length-prefixed UTF-8 |
+| `VARCHAR(N)` | N ≥ 1 | length-prefixed UTF-8, max N bytes |
+| `CHAR(N)` | N ≥ 1 | right-space padded to N bytes on write (`PAD SPACE`) |
+| `BOOL` / `BOOLEAN` | — | 1 byte |
+| `DECIMAL(p, s)` | 1 ≤ p ≤ 18, 0 ≤ s < p | scaled int64 (max precision 18 digits) |
+| `DATE` | — | 4-byte days since 1970-01-01 UTC |
+| `TIME` | — | 4-byte seconds since midnight UTC |
+| `TIMESTAMP` | — | 8-byte seconds since 1970-01-01 UTC (naive datetime) |
+
+**Literal prefixes** for typed values: `DATE '2026-07-16'`, `TIME '14:30:00'`, `TIMESTAMP '2026-07-16 14:30:00'`, `DECIMAL '99.99'`.
+
+**Strict same-type comparison (Design D6):** `WHERE col = literal` requires exact type match. Cross-type comparisons raise `TypeError`:
+- `INT` ≠ `SMALLINT` ≠ `BIGINT`
+- `FLOAT` ≠ `DOUBLE`
+- `VARCHAR(N)` ≠ `TEXT`
+- `DATE` ≠ `TIMESTAMP`
+- `DECIMAL(10, 2)` ≠ `DECIMAL(10, 4)`
+
+**Rejected values:** `FLOAT` / `DOUBLE` reject `Infinity` and `NaN` at all paths (literal parse, encode, validate). `DECIMAL` enforces precision/scale overflow at encode. `VARCHAR(N)` / `CHAR(N)` enforce max length.
+
+See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) § tinydb-types for the complete contract.
 
 ## Module map (line budgets per proposal)
 
