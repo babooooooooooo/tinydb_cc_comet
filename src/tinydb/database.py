@@ -64,9 +64,16 @@ class Database:
         # Existing tables: rebuild indexes from a full scan (rebuild_for_table
         # will populate empty B-trees if no rows are passed) and install
         # _IndexPager wrappers so subsequent B+tree allocations are tracked.
+        # Also rebuild the Executor's per-table data page list by walking
+        # each table's contiguous data chain — the in-memory list maintained
+        # during a session isn't persisted, so reopening must re-discover
+        # extension pages that were appended past the root.
         for ti in self.catalog.tables.values():
             self.index_manager.rebuild_for_table(ti)
             self._install_index_pagers(ti.name)
+            self.executor._table_data_pages[ti.name] = (
+                self.executor._rebuild_data_pages_from_chain(ti)
+            )
         # New tables (created via CREATE TABLE during this session) install
         # their wrappers inside Executor._exec_create_table.
 

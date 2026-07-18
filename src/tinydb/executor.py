@@ -24,6 +24,7 @@ from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
     NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
 )
+from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
 from tinydb.type_system import (
     codec_for,
     infer_literal_type,
@@ -169,6 +170,14 @@ class Executor:
         # splits) and skip them when extending the data-page chain.
         # Populated by :meth:`register_index_pager` (called from Database).
         self._index_pagers: list[_IndexPager] = []
+        # Per-table list of data page ids. The classic ``ti.root_page_id``
+        # / ``ti.next_page_id`` chain assumes contiguous pages, but DROP
+        # reclamation can return pages with ids smaller than ``ti.root``
+        # (free list is LIFO). We track the actual page list here so insert
+        # and scan walk it instead of relying on ``pid += 1`` arithmetic.
+        # Keyed by table name; absent entries are lazily initialized from
+        # ``ti.root_page_id``. Cleared by ``_exec_drop_table``.
+        self._table_data_pages: dict[str, list[int]] = {}
 
     def register_index_pager(self, wrapper: "_IndexPager") -> None:
         """Track an _IndexPager so its allocated pages are skipped on data-chain extensions."""
@@ -250,6 +259,12 @@ class Executor:
             stmt.name, tuple(cols),
             root_page_id=root_id, next_page_id=root_id,
         )
+        # Seed the per-table data page list with the just-allocated root
+        # so subsequent INSERTs and SELECTs walk it directly. Without this
+        # entry, ``_insert_inline_only`` and ``_scan_table`` would fall
+        # back to contiguous ``pid += 1`` walking which DROP reclamation
+        # breaks.
+        self._table_data_pages[stmt.name] = [root_id]
 
         # Initialize empty B+tree indexes for this table's indexed columns
         # (PK + UNIQUE). INSERTs will populate them incrementally.
@@ -279,21 +294,151 @@ class Executor:
             db._install_index_pagers(table_name)
 
     def _exec_drop_table(self, stmt: DropTable) -> list:
-        """Remove a table from the catalog.
+        """Drop a table and reclaim its data + index pages via the free list.
 
-        MVP behavior: best-effort drop that leaks the table's root page(s).
-        Page recycling lands in Task 21 (overflow chain + free-page list).
-        The missing-table case surfaces as ``ExecutionError`` so callers
-        see a single uniform error type at the execution boundary.
+        Walks the table's contiguous data page chain (skipping any page id
+        owned by a B+tree wrapper) plus any per-page overflow chains for
+        spilled rows; frees them all. Then walks every B+tree index for
+        the table's PK + UNIQUE columns, frees their nodes via the per-
+        BTree ``_IndexPager`` wrapper (which clears the wrapper's
+        ``_allocated`` set), and finally forgets the B+trees in
+        :class:`IndexManager`. The catalog is persisted inline (single
+        page) to stay consistent with ``_exec_create_table``.
+
+        Task 8 of ``tinydb-engine-v2`` (DROP TABLE reclamation).
         """
-        if self.catalog.get_table(stmt.name) is None:
+        ti = self.catalog.get_table(stmt.name)
+        if ti is None:
             raise ExecutionError(f"table {stmt.name!r} does not exist")
 
-        # MVP: best-effort, leak page (Task 21 will reclaim).
+        # Collect page ids BEFORE removing from catalog (we need ``ti``).
+        data_pids = self._collect_table_data_pages(ti)
+        index_pids = self._collect_index_pages(ti)
+
+        # Drop from catalog first so subsequent persistence writes a
+        # consistent catalog. The page ids are already captured above.
         self.catalog.drop_table(stmt.name)
+        # Drop the per-table data page list so a future CREATE TABLE with
+        # the same name starts with a fresh entry (no stale page ids).
+        self._table_data_pages.pop(stmt.name, None)
+
+        # Free data pages via the raw pager (data chain has no wrapper).
+        for pid in data_pids:
+            self.pager.free_page(pid)
+
+        # Free index pages. When a BTree's pager is an ``_IndexPager``
+        # wrapper (the Database-installed path), use the wrapper's
+        # ``free_page`` so its ``_allocated`` tracking is cleared; this
+        # prevents phantom "owned" entries from polluting the Executor's
+        # collision avoidance after the BTree is forgotten. When no
+        # wrapper is present (e.g., standalone Executor in unit tests),
+        # fall back to freeing via the raw pager.
+        for col in ti.columns:
+            if not (col.primary_key or col.unique):
+                continue
+            bt = self.index_manager.get_btree(stmt.name, col.name)
+            if bt is None:
+                continue
+            wrapper = bt.pager if type(bt.pager).__name__ == "_IndexPager" else None
+            if wrapper is not None:
+                for pid in list(wrapper._allocated):
+                    wrapper.free_page(pid)
+            else:
+                for pid in index_pids:
+                    self.pager.free_page(pid)
+
+        # Forget B+trees for this table. After this the IndexManager has
+        # no record of the dropped table; the corresponding wrapper
+        # instances are left in ``self._index_pagers`` with empty
+        # ``_allocated`` sets (harmless).
+        self.index_manager.forget_table(stmt.name)
+
+        # Persist catalog. We use the inline format ``write_page(1,
+        # to_bytes())`` to stay consistent with ``_exec_create_table`` and
+        # ``_insert_inline_only`` (which both write inline format). The
+        # chain-format writer ``Pager.write_catalog_chain`` is reserved
+        # for future multi-page overflow support; mixing the two
+        # formats breaks ``Catalog.from_bytes`` on subsequent opens.
         self.pager.write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
+
+    def _collect_table_data_pages(self, ti: TableInfo) -> list[int]:
+        """Return every page id used by ``ti``'s data chain + spill chains.
+
+        Walks the range ``[ti.root_page_id, ti.next_page_id]`` and collects
+        only DATA pages, skipping any page id that is currently tracked by
+        a B+tree ``_IndexPager`` wrapper. The data chain is NOT contiguous
+        in the presence of indexes — ``_insert_inline_only`` advances by
+        ``pid += 1`` while skipping index pages — so the catalog's
+        ``next_page_id`` may equal a page id owned by a B+tree.
+
+        For each data page, follows its ``overflow_next`` link to pick up
+        any overflow pages used for spilled rows. We defensively treat
+        both ``0`` and ``NULL_PAGE_ID`` as "no overflow chain" because
+        freshly-allocated data pages haven't had ``overflow_next``
+        initialized; we additionally require the target page to have
+        ``page_type == 2`` (overflow) before following it.
+        """
+        pids: list[int] = []
+        seen: set[int] = set()
+        if ti.root_page_id == 0 or ti.next_page_id < ti.root_page_id:
+            return pids
+        # Index page ids are owned by B+tree wrappers — they live in the
+        # address space between data pages and must not be freed as data.
+        index_pages = self._index_pages()
+        pid = ti.root_page_id
+        end = ti.next_page_id
+        while pid <= end:
+            if pid in index_pages:
+                pid += 1
+                continue
+            if pid not in seen:
+                seen.add(pid)
+                pids.append(pid)
+                # Follow the per-page overflow chain (bytes 4:8 of every
+                # data page hold the next overflow page id, 0 or
+                # ``NULL_PAGE_ID`` on the tail).
+                nxt = int.from_bytes(self.pager.read_page(pid)[4:8], "big")
+                while nxt > 0 and nxt != NULL_PAGE_ID and nxt not in seen:
+                    target_raw = self.pager.read_page(nxt)
+                    if target_raw[0] != 2:
+                        break
+                    seen.add(nxt)
+                    pids.append(nxt)
+                    nxt = int.from_bytes(target_raw[4:8], "big")
+            pid += 1
+        return pids
+
+    def _collect_index_pages(self, ti: TableInfo) -> list[int]:
+        """Return every page id used by every B+tree index for ``ti``.
+
+        Walks each indexed column's B+tree by iterative descent: pop a
+        page off the stack, deserialize it, and push internal-node
+        children until only leaves remain. Leaf pages are collected but
+        not descended into. Duplicate page ids (which can't occur in a
+        well-formed B+tree) are skipped defensively.
+        """
+        pids: list[int] = []
+        seen: set[int] = set()
+        for col in ti.columns:
+            if not (col.primary_key or col.unique):
+                continue
+            bt = self.index_manager.get_btree(ti.name, col.name)
+            if bt is None or bt.root_page_id is None:
+                continue
+            stack: list[int] = [bt.root_page_id]
+            while stack:
+                pid = stack.pop()
+                if pid in seen:
+                    continue
+                seen.add(pid)
+                pids.append(pid)
+                page = self.pager.read_page(pid)
+                if page[0] == NODE_TYPE_INTERNAL:
+                    node = InternalNode.deserialize(page)
+                    stack.extend(node.children)
+        return pids
 
     # --- DML: INSERT / SELECT / DELETE -------------------------------------
 
@@ -470,40 +615,70 @@ class Executor:
     def _insert_inline_only(self, ti: TableInfo, row_bytes: bytes) -> tuple[int, int]:
         """Walk the data-page chain, allocating a new page when full.
 
-        Starts at ``ti.root_page_id`` and tries ``SlottedPage.insert`` on
-        each page in turn. On :class:`PageFull`, advances to the next page
-        id; when the chain tail (``ti.next_page_id``) is reached, a fresh
-        page is allocated, ``ti.next_page_id`` is advanced, and the catalog
-        is persisted.
+        Walks the table's tracked data page list (see ``_table_data_pages``)
+        rather than relying on contiguous ``pid += 1`` arithmetic — DROP
+        reclamation can return pages with ids smaller than ``ti.root`` from
+        the LIFO free list, breaking the contiguous assumption. The list
+        is initialized lazily from ``ti.root_page_id`` on first access.
 
-        Skip-pages check (Task 7): the data chain advances by ``pid += 1``
-        when walking past full data pages. This can land on a page owned
-        by a B+tree root OR a leaf allocated by a split. Both are tracked
-        by the registered _IndexPager wrappers, so we use their union to
-        skip those pages.
+        Skip-pages check (Task 7): any page id in ``_index_pages()`` (owned
+        by a B+tree) is skipped, even if it appears in the tracked list.
         """
-        pid = ti.root_page_id
-        while True:
-            if pid in self._index_pages():
-                pid += 1
+        index_pages = self._index_pages()
+        data_pages = self._table_data_pages.setdefault(
+            ti.name, [ti.root_page_id],
+        )
+        for pid in data_pages:
+            if pid in index_pages:
                 continue
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             try:
                 sid = page.insert(row_bytes)
             except PageFull:
-                if pid == ti.next_page_id:
-                    new_pid = self._alloc_data_page()
-                    ti.next_page_id = new_pid
-                    self.pager.write_page(1, self.catalog.to_bytes())
-                    self.pager.flush()
-                    pid = new_pid
-                    continue
-                pid += 1
                 continue
             self.pager.write_page(pid, page.to_bytes())
             self.pager.flush()
             return (pid, sid)
+        # All current pages full (or empty list); allocate a fresh page and
+        # append to the tracked list. ``_alloc_data_page`` filters out
+        # B+tree pages so the new pid won't collide with any index.
+        new_pid = self._alloc_data_page()
+        data_pages.append(new_pid)
+        ti.next_page_id = new_pid
+        self.pager.write_page(1, self.catalog.to_bytes())
+        self.pager.flush()
+        page = SlottedPage.from_bytes(new_pid, self.pager.read_page(new_pid))
+        sid = page.insert(row_bytes)
+        self.pager.write_page(new_pid, page.to_bytes())
+        self.pager.flush()
+        return (new_pid, sid)
+
+    def _rebuild_data_pages_from_chain(self, ti: TableInfo) -> list[int]:
+        """Walk ``ti``'s contiguous data chain and return the actual data page ids.
+
+        Used by :meth:`Database.__init__` to rebuild the per-table data
+        page list after a file reopen. The in-memory list maintained by
+        :meth:`_insert_inline_only` is session-scoped, so persistence only
+        carries the catalog's ``root_page_id`` / ``next_page_id``. We
+        walk the catalog range with ``pid += 1`` (the chain is contiguous
+        on a fresh open — reclamation hasn't happened yet) and skip any
+        page id owned by a B+tree wrapper.
+
+        If the chain is empty (``root_page_id == 0`` or ``next < root``),
+        returns ``[]``.
+        """
+        if ti.root_page_id == 0 or ti.next_page_id < ti.root_page_id:
+            return []
+        index_pages = self._index_pages()
+        data_pages: list[int] = []
+        pid = ti.root_page_id
+        end = ti.next_page_id
+        while pid <= end:
+            if pid not in index_pages:
+                data_pages.append(pid)
+            pid += 1
+        return data_pages
 
     def _alloc_data_page(self) -> int:
         """Allocate a fresh data page that does NOT collide with any B+tree page.
@@ -583,15 +758,26 @@ class Executor:
     def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
 
-        Iterates page ids from ``ti.root_page_id`` through
-        ``ti.next_page_id`` inclusive. Each surviving slot is decoded via
-        :func:`row_codec.decode_row` and returned as a 3-tuple of
+        Walks the table's tracked data page list (see ``_table_data_pages``)
+        rather than relying on contiguous ``pid += 1`` arithmetic from
+        ``ti.root_page_id`` to ``ti.next_page_id`` — DROP reclamation can
+        leave the chain non-monotonic in id. Each surviving slot is decoded
+        via :func:`row_codec.decode_row` and returned as a 3-tuple of
         ``(slot_id, decoded_values, page_id)``. Slots with FLAG_SPILL_START
         have their inline first chunk concatenated with the overflow chain.
         """
-        pid = ti.root_page_id
+        index_pages = self._index_pages()
+        data_pages = self._table_data_pages.get(ti.name)
+        if data_pages is None:
+            # Legacy fallback (executor constructed without
+            # ``_table_data_pages`` init): walk the catalog's contiguous
+            # range. Used by standalone unit tests that don't go through
+            # ``_exec_create_table``.
+            data_pages = list(range(ti.root_page_id, ti.next_page_id + 1))
         results: list[tuple[int, list[Any], int]] = []
-        while True:
+        for pid in data_pages:
+            if pid in index_pages:
+                continue
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             for sid in range(page.num_slots):
@@ -604,9 +790,6 @@ class Executor:
                 if slot.flags & FLAG_SPILL_START:
                     row_bytes = row_bytes + self._read_overflow_chain(pid)
                 results.append((sid, decode_row(row_bytes, ti.schema_v2), pid))
-            if pid == ti.next_page_id:
-                break
-            pid += 1
         return results
 
     def _exec_select(self, stmt: Select) -> list[list[Any]]:

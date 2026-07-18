@@ -58,3 +58,17 @@ class IndexManager:
 
     def get_btree(self, table_name: str, column_name: str):
         return self._indexes.get((table_name, column_name))
+
+    def forget_table(self, table_name: str) -> None:
+        """Remove all B+tree indexes for ``table_name`` (called after DROP TABLE).
+
+        Drops every ``(table_name, col)`` entry from :attr:`_indexes`. The
+        corresponding ``_IndexPager`` wrappers installed on those BTrees are
+        left in place but their ``_allocated`` sets must be cleared by the
+        caller (the Executor does this during ``_exec_drop_table``); leaving
+        the wrappers themselves is harmless because their ``_allocated``
+        will be empty.
+        """
+        keys_to_remove = [k for k in self._indexes if k[0] == table_name]
+        for k in keys_to_remove:
+            del self._indexes[k]
