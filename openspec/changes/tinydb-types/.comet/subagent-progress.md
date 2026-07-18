@@ -27,7 +27,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 | # | Task Text | OpenSpec Sub-task | Status | Reviewer | Round |
 |---|---|---|---|---|---|
-| 1 | TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding | 1.1-1.3 | pending | — | — |
+| 1 | TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding | 1.1-1.2 | done | sonnet | 1 |
 | 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | (none specific) | pending | — | — |
 | 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | pending | — | — |
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | pending | — | — |
@@ -51,15 +51,23 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 1**: TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding
-- **Stage**: task-review
-- **Implementer status**: DONE_WITH_CONCERNS
-- **Implementer commit**: `7f520bf feat(types): add TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding`
+**Task 2**: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)
+- **Stage**: task-implement
+- **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Reviewer**: pending dispatch (risk signal: 公共 API 契约变更 partial hit)
-- **Review round**: 0
+- **Risk signals**: 公共 API 契约变更（新增 `_IntCodec`/`_TextCodec`/`_BoolCodec`/`_FloatCodec`）+ schema 变更（`row_codec.encode_row` 解包三元组 `(name, type, params)`）+ FLOAT 4 字节迁移
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 1 reviewer (sonnet, background)
+- Reviewer verdict: **APPROVED_WITH_CONCERNS** (5 NITs, all stylistic/forward-looking, no functional impact)
+  - NIT-1/2/3: bare `tuple` type hints vs `tuple[str, ...]` — Protocol structural, scaffolding only
+  - NIT-4: `codec_for` checks `_ALIAS_MAP` (forward-compatible with Task 2 alias registration)
+  - NIT-5: `codec_for` returns via `lookup()` (functionally safe)
+- Spec compliance: PASS — all 8 tests match plan; backward compat verified; file scope respected
+- Code quality: PASS — type hints, docstrings, actionable error messages
+- Process compliance: PASS — no plan/design/openspec tampering; conventional commit format
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 1 implementer (sonnet, background)
 - Dispatched implementer with full Task 1 text + TDD + file scope + risk signal checklist

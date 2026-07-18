@@ -2,8 +2,8 @@
 
 ## 1. type_system 注册表与 codec 框架
 
-- [ ] 1.1 编写 `tests/unit/test_type_system_v2.py::test_codec_registry_*`，红
-- [ ] 1.2 在 `type_system.py` 定义 `TypeCodec` Protocol + `REGISTRY` 字典
+- [x] 1.1 编写 `tests/unit/test_type_system_v2.py::test_codec_registry_*`，红
+- [x] 1.2 在 `type_system.py` 定义 `TypeCodec` Protocol + `REGISTRY` 字典
 - [ ] 1.3 把 MVP 4 个 codec 迁移到 registry 形式（旧路径保持兼容）
 
 ## 2. 整数宽度（S/I/B）

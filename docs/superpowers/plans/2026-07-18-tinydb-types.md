@@ -83,11 +83,13 @@ Commit message 格式：`feat(types): <subject>` / `test(types): <subject>` / `r
 
 ### Task 1: TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding
 
+- [x] **Task 1: TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py`
 - Create: `tests/unit/test_type_system_registry.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/unit/test_type_system_registry.py
@@ -150,12 +152,12 @@ def test_lookup_unknown_type_raises():
         lookup("UNKNOWN_TYPE")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /home/lz/projects/tinydb-worktrees/tinydb-types && .venv/bin/python -m pytest tests/unit/test_type_system_registry.py -v`
 Expected: FAIL with `ImportError: cannot import name 'lookup' from 'tinydb.type_system'` or `ModuleNotFoundError`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/tinydb/type_system.py (append below existing functions)
@@ -213,12 +215,12 @@ def codec_for(type_name: str, params: tuple = ()):
     return REGISTRY[type_name]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_type_system_registry.py -v`
 Expected: 8 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/lz/projects/tinydb-worktrees/tinydb-types
@@ -229,6 +231,8 @@ git commit -m "feat(types): add TypeCodec Protocol + REGISTRY + lookup/codec_for
 ---
 
 ### Task 2: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)
+
+- [ ] **Task 2: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
@@ -524,6 +528,8 @@ git commit -m "refactor(types): migrate MVP codecs to Protocol form (FLOAT 4-byt
 
 ### Task 3: SMALLINT (IntCodec with width=2)
 
+- [ ] **Task 3: SMALLINT (IntCodec with width=2)**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py`
 - Modify: `tests/unit/test_type_system_v2.py`
@@ -626,6 +632,8 @@ git commit -m "feat(types): add SMALLINT codec (IntCodec with width=2)"
 
 ### Task 4: BIGINT (IntCodec with width=8)
 
+- [ ] **Task 4: BIGINT (IntCodec with width=8)**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py`
 - Modify: `tests/unit/test_type_system_v2.py`
@@ -694,6 +702,8 @@ git commit -m "feat(types): add BIGINT codec (IntCodec with width=8) + INTEGER a
 ---
 
 ### Task 5: DOUBLE (FloatCodec with width=8)
+
+- [ ] **Task 5: DOUBLE (FloatCodec with width=8)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
@@ -813,6 +823,8 @@ git commit -m "feat(types): add DOUBLE codec (8-byte) + DOUBLE PRECISION alias"
 
 ### Task 6: BOOLEAN alias for BOOL
 
+- [ ] **Task 6: BOOLEAN alias for BOOL**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py`
 - Modify: `tests/unit/test_type_system_v2.py`
@@ -856,6 +868,8 @@ git commit -m "feat(types): register BOOLEAN alias for BOOL"
 ---
 
 ### Task 7: VARCHAR (parametric codec with max_len)
+
+- [ ] **Task 7: VARCHAR (parametric codec with max_len)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
@@ -972,6 +986,8 @@ git commit -m "feat(types): add VARCHAR(N) codec with max_len validation"
 
 ### Task 8: CHAR (parametric codec with PAD SPACE)
 
+- [ ] **Task 8: CHAR (parametric codec with PAD SPACE)**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py`
 - Modify: `tests/unit/test_type_system_v2.py`
@@ -1081,6 +1097,8 @@ git commit -m "feat(types): add CHAR(N) codec with PAD SPACE semantics"
 ---
 
 ### Task 9: DECIMAL (scaled int64 with precision/scale)
+
+- [ ] **Task 9: DECIMAL (scaled int64 with precision/scale)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
@@ -1216,6 +1234,8 @@ git commit -m "feat(types): add DECIMAL(p,s) codec with scaled int64 encoding"
 ---
 
 ### Task 10: DATE / TIME / TIMESTAMP UTC
+
+- [ ] **Task 10: DATE / TIME / TIMESTAMP UTC**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
@@ -1414,6 +1434,8 @@ git commit -m "feat(types): add DATE / TIME / TIMESTAMP codecs (UTC unified)"
 
 ### Task 11: Verify all 15 codecs in REGISTRY
 
+- [ ] **Task 11: Verify all 15 codecs in REGISTRY**
+
 **Files:**
 - Modify: `tests/unit/test_type_system_registry.py`
 
@@ -1460,6 +1482,8 @@ git commit -m "test(types): assert full 15-type REGISTRY + alias resolution"
 ---
 
 ### Task 12: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)
+
+- [ ] **Task 12: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)**
 
 **Files:**
 - Modify: `src/tinydb/parser.py`
@@ -1623,6 +1647,8 @@ git commit -m "feat(types): parser accepts VARCHAR(N) / CHAR(N) / DECIMAL(p,s) w
 
 ### Task 13: Parser — DATE / TIME / TIMESTAMP literal prefix
 
+- [ ] **Task 13: Parser — DATE / TIME / TIMESTAMP literal prefix**
+
 **Files:**
 - Modify: `src/tinydb/parser.py`
 - Modify: `src/tinydb/tokenizer.py` (KEYWORDS)
@@ -1736,6 +1762,8 @@ git commit -m "feat(types): parser accepts DATE / TIME / TIMESTAMP '...' literal
 
 ### Task 14: Parser — DECIMAL literal prefix
 
+- [ ] **Task 14: Parser — DECIMAL literal prefix**
+
 **Files:**
 - Modify: `src/tinydb/parser.py`
 - Modify: `tests/unit/test_parser_decimal_lit.py`
@@ -1812,6 +1840,8 @@ git commit -m "feat(types): parser accepts DECIMAL 'literal' prefix"
 ---
 
 ### Task 15: Catalog — Column.type_params + backward compat
+
+- [ ] **Task 15: Catalog — Column.type_params + backward compat**
 
 **Files:**
 - Modify: `src/tinydb/catalog.py`
@@ -1927,6 +1957,8 @@ git commit -m "feat(types): catalog.Column.type_params with backward-compatible 
 ---
 
 ### Task 16: row_codec — schema_v2() + codec_for dispatch
+
+- [ ] **Task 16: row_codec — schema_v2() + codec_for dispatch**
 
 **Files:**
 - Modify: `src/tinydb/catalog.py` (add `schema_v2()` method to TableInfo)
@@ -2057,6 +2089,8 @@ git commit -m "feat(types): row_codec.encode/decode uses codec_for(typ, params) 
 
 ### Task 17: Executor — wire 15 types into INSERT / SELECT / WHERE
 
+- [ ] **Task 17: Executor — wire 15 types into INSERT / SELECT / WHERE**
+
 **Files:**
 - Modify: `src/tinydb/executor.py`
 - Modify: `tests/integration/test_types_roundtrip.py`
@@ -2186,6 +2220,8 @@ git commit -m "feat(types): executor wires 15 codecs into INSERT / SELECT paths"
 
 ### Task 18: WHERE clause strict same-type comparison
 
+- [ ] **Task 18: WHERE clause strict same-type comparison**
+
 **Files:**
 - Modify: `src/tinydb/type_system.py` (add `validate_compare`)
 - Modify: `src/tinydb/executor.py`
@@ -2304,6 +2340,8 @@ git commit -m "feat(types): WHERE enforces strict same-type comparison (Design D
 
 ### Task 19: FLOAT 4-byte regression cleanup
 
+- [ ] **Task 19: FLOAT 4-byte regression cleanup**
+
 **Files:**
 - Modify: existing test files with FLOAT hardcoded values
 
@@ -2344,6 +2382,8 @@ git commit -m "fix(types): update existing tests for FLOAT 4-byte single precisi
 ---
 
 ### Task 20: REPL integration tests
+
+- [ ] **Task 20: REPL integration tests**
 
 **Files:**
 - Modify: `tests/integration/test_types_repl.py` (new)
@@ -2435,6 +2475,8 @@ git commit -m "test(types): REPL integration tests for 15 types"
 ---
 
 ### Task 21: Coverage + final verification
+
+- [ ] **Task 21: Coverage + final verification**
 
 **Files:**
 - Modify: `docs/MVP_LIMITATIONS.md` (add types section)
