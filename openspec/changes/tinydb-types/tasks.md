@@ -53,7 +53,7 @@
 
 ## 8. 字面量识别
 
-- [ ] 8.1 在 `tokenizer.py` 实现 `DATE` / `TIME` / `TIMESTAMP` 前缀关键字路径
+- [x] 8.1 在 `tokenizer.py` 实现 `DATE` / `TIME` / `TIMESTAMP` 前缀关键字路径
 - [ ] 8.2 编写 `test_literal_type_resolution_against_schema`，红
 - [ ] 8.3 在 INSERT 路径根据 schema 把不带前缀的字面量 assign 类型（已有 strict 校验；本次扩到 15 类型）
 

@@ -39,7 +39,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | done | sonnet | 0 |
 | 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | done | — | 0 |
 | 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | done | — | 0 |
-| 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | pending | — | — |
+| 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | done | — | 0 |
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | pending | — | — |
 | 15 | Catalog — Column.type_params + backward compat | (covered) | pending | — | — |
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | pending | — | — |
@@ -51,13 +51,27 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 13**: Parser — DATE / TIME / TIMESTAMP literal prefix
+**Task 14**: Parser — DECIMAL literal prefix
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: tokenizer/parser 字面量识别路径变更 + 与 schema 推断的交互
+- **Risk signals**: tokenizer/parser 字面量识别路径扩展 + 与 DECIMAL codec parse_literal 对齐
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 13 implementer (sonnet, background)
+- Implementer status: DONE_WITH_CONCERNS
+- Commit `386c203 feat(parser): DATE/TIME/TIMESTAMP literal prefix parsing`
+- RED: 7 failed (no `_parse_datetime_literal` method)
+- GREEN: 7/7 new tests pass; full unit suite 337 passed
+- File scope: parser.py + tokenizer.py + new test_parser_datetime_lit.py — type_system.py, executor.py, row_codec.py, catalog.py NOT touched
+- parser.py line count: **828** (well under 870 budget)
+- Routed `_parse_insert`, `_parse_update`, `_parse_comparison` to detect DATE/TIME/TIMESTAMP prefix and delegate to new method (peek-before-advance)
+- Concerns (both valid adaptations):
+  - `parse(sql)` adapted to `parse(tokenize(sql))` because public `parse()` takes list[Token] (not str) — `stmt.values[0]` adapted to `stmt.values[0][0]` (rows are nested lists)
+  - Only added DATE/TIME/TIMESTAMP to KEYWORDS (not other types from plan example) — correct scoping to Task 13 boundary
+- No per-task reviewer (decisive completion; concerns are well-handled)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 12 implementer (sonnet, background)
 - Implementer status: DONE

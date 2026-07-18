@@ -1647,7 +1647,7 @@ git commit -m "feat(types): parser accepts VARCHAR(N) / CHAR(N) / DECIMAL(p,s) w
 
 ### Task 13: Parser — DATE / TIME / TIMESTAMP literal prefix
 
-- [ ] **Task 13: Parser — DATE / TIME / TIMESTAMP literal prefix**
+- [x] **Task 13: Parser — DATE / TIME / TIMESTAMP literal prefix**
 
 **Files:**
 - Modify: `src/tinydb/parser.py`
