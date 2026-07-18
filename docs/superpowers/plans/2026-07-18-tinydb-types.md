@@ -2340,7 +2340,7 @@ git commit -m "feat(types): WHERE enforces strict same-type comparison (Design D
 
 ### Task 19: FLOAT 4-byte regression cleanup
 
-- [ ] **Task 19: FLOAT 4-byte regression cleanup**
+- [x] **Task 19: FLOAT 4-byte regression cleanup**
 
 **Files:**
 - Modify: existing test files with FLOAT hardcoded values

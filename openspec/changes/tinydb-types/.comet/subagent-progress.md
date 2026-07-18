@@ -45,19 +45,30 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | done | — | 0 |
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | done | — | 0 |
 | 18 | WHERE clause strict same-type comparison | (covered) | done | — | 0 |
-| 19 | FLOAT 4-byte regression cleanup | 10.1 | pending | — | — |
+| 19 | FLOAT 4-byte regression cleanup | 10.1 | done | — | 0 |
 | 20 | REPL integration tests | (covered) | pending | — | — |
 | 21 | Coverage + final verification | 10.1-10.3 | pending | — | — |
 
 ## Current Task
 
-**Task 19**: FLOAT 4-byte regression cleanup
+**Task 20**: REPL integration tests
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 现有测试硬编码 double-precision FLOAT 字面量 → 需要适配 4-byte single precision
+- **Risk signals**: subprocess REPL 测试 + .sql golden 文件维护
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 19 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `d74a016 fix(tests): no FLOAT 4-byte regressions found` (empty commit)
+- Scanned 21 FLOAT-related tests across all test directories
+- All 21 tests pass without modification
+- Categories: exact-representable values (1.5/-2.5/0.0), tolerant comparison (abs < 1e-6), legacy 8-byte helper API, codec-based 4-byte registry, tokenizer/parser/round-trip
+- No source code in src/tinydb/ changed
+- Full test suite: 559 passed + 2 pre-existing failures (test_column_dataclass_roundtrip + test_golden_sql[error_cases/02_unsupported_type.sql])
+- No per-task reviewer (decisive completion; nothing to fix)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 18 implementer (sonnet, background)
 - Implementer status: DONE
