@@ -2,6 +2,7 @@
 
 import math
 import struct
+from typing import Any, Protocol
 
 _INT_FMT = ">q"  # signed 64-bit big-endian
 _INT_SIZE = 8
@@ -127,3 +128,69 @@ def validate_compare(col_bytes: bytes, col_type: str,
         v = decode_float(col_bytes, 0)[0]
         if math.isnan(v) or math.isinf(v):
             raise ValueError("FLOAT inf/NaN not allowed")
+
+
+# ---------------------------------------------------------------------------
+# TypeCodec Protocol + REGISTRY scaffolding (Task 1 of tinydb-types change).
+# The legacy module-level encode/decode helpers above remain untouched for
+# backward compatibility (Design §F2). Subsequent tasks will populate
+# REGISTRY with concrete codec instances and introduce parameterised
+# variants for VARCHAR/CHAR/DECIMAL.
+# ---------------------------------------------------------------------------
+
+
+class TypeCodec(Protocol):
+    """Protocol for all type codecs. Each codec owns its bytes encoding."""
+
+    name: str
+    aliases: tuple = ()
+
+    def encode_py(self, value: Any) -> bytes: ...
+    def decode_bytes(self, buf: bytes, offset: int) -> tuple: ...
+    def parse_literal(self, text: str, params: tuple) -> Any: ...
+    def validate(self, value: Any) -> None: ...
+
+
+REGISTRY: dict = {}
+
+
+_ALIAS_MAP: dict = {}
+
+
+def lookup(type_name: str):
+    """Return the parameterless codec template for type_name (case-sensitive uppercase).
+
+    Raises KeyError if unknown.
+    """
+    if type_name in REGISTRY:
+        return REGISTRY[type_name]
+    if type_name in _ALIAS_MAP:
+        return _ALIAS_MAP[type_name]
+    raise KeyError(f"unknown type: {type_name!r}")
+
+
+def codec_for(type_name: str, params: tuple = ()):
+    """Return a configured codec instance for type_name with params.
+
+    For non-parametric types (INT, TEXT, FLOAT, BOOL, DATE, TIME, TIMESTAMP),
+    params must be () and the registry singleton is returned.
+
+    For parametric types:
+      - VARCHAR(N) / CHAR(N): params must be (N,) with N >= 1
+      - DECIMAL(p, s): params must be (p, s) with 1 <= p <= 18 and 0 <= s < p
+
+    Returns the registry entry for now (specific instantiations in later tasks).
+    Raises ValueError on invalid params; KeyError on unknown type.
+    """
+    if type_name not in REGISTRY and type_name not in _ALIAS_MAP:
+        raise KeyError(f"unknown type: {type_name!r}")
+    if type_name in ("VARCHAR", "CHAR"):
+        if len(params) != 1 or params[0] < 1:
+            raise ValueError(f"{type_name} requires (N,) with N >= 1, got {params}")
+    if type_name == "DECIMAL":
+        if len(params) != 2:
+            raise ValueError(f"DECIMAL requires (p, s), got {params}")
+        p, s = params
+        if not (1 <= p <= 18 and 0 <= s < p):
+            raise ValueError(f"DECIMAL({p},{s}) invalid; need 1 <= p <= 18 and 0 <= s < p")
+    return lookup(type_name)
