@@ -52,10 +52,23 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 ## Current Task
 
 **Task 1**: TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding
-- **Stage**: ready-to-dispatch
-- **Implementer model**: TBD
-- **Reviewer**: TBD (risk signal pending)
+- **Stage**: task-review
+- **Implementer status**: DONE_WITH_CONCERNS
+- **Implementer commit**: `7f520bf feat(types): add TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding`
+- **Implementer model**: sonnet
+- **Reviewer**: pending dispatch (risk signal: 公共 API 契约变更 partial hit)
+- **Review round**: 0
 
 ## Dispatch Log
 
-(empty)
+### 2026-07-18 — Task 1 implementer (sonnet, background)
+- Dispatched implementer with full Task 1 text + TDD + file scope + risk signal checklist
+- Implementer reported DONE_WITH_CONCERNS:
+  - Commit `7f520bf` in place
+  - 7/8 tests fail (scaffold-aligned RED; REGISTRY empty by design — subsequent tasks populate)
+  - 1/8 passes (`test_lookup_unknown_type_raises`)
+  - Legacy 31 tests still pass (backward compat verified)
+  - Concern: brief said "7 should PASS" but only 1 did — implementer correctly noted this is scaffold-aligned, not a bug
+- Coordinator verification: ran tests with correct `.venv/bin/python` after installing venv (was missing in worktree); confirmed 7 fail + 1 pass matches report
+- Risk signal hit: 公共 API 契约变更 (adds 4 new public names: TypeCodec, REGISTRY, lookup, codec_for)
+- Action: dispatch task reviewer (per review_mode=standard risk rule)
