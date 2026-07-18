@@ -528,7 +528,7 @@ git commit -m "refactor(types): migrate MVP codecs to Protocol form (FLOAT 4-byt
 
 ### Task 3: SMALLINT (IntCodec with width=2)
 
-- [ ] **Task 3: SMALLINT (IntCodec with width=2)**
+- [x] **Task 3: SMALLINT (IntCodec with width=2)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`

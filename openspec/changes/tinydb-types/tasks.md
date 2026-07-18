@@ -8,9 +8,9 @@
 
 ## 2. 整数宽度（S/I/B）
 
-- [ ] 2.1 编写 `test_smallint_range_boundary`，红
-- [ ] 2.2 在 `IntCodec` 上加 `width` 参数；SMALLINT (2)、INT (4)、BIGINT (8)
-- [ ] 2.3 编写 `test_int_overflow_raises`，绿
+- [x] 2.1 编写 `test_smallint_range_boundary`，红
+- [x] 2.2 在 `IntCodec` 上加 `width` 参数；SMALLINT (2)、INT (4)、BIGINT (8)
+- [x] 2.3 编写 `test_int_overflow_raises`，绿
 - [ ] 2.4 编写 `test_bigint_min_max`，绿
 
 ## 3. 浮点（DOUBLE/REAL + inf/nan 拒绝）

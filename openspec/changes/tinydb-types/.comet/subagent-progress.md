@@ -29,7 +29,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 |---|---|---|---|---|---|
 | 1 | TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding | 1.1-1.2 | done | sonnet | 1 |
 | 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | 1.3 | done | sonnet | 1 |
-| 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | pending | — | — |
+| 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | done | sonnet | 0 |
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | pending | — | — |
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | pending | — | — |
 | 6 | BOOLEAN alias for BOOL | 3.5 | pending | — | — |
@@ -51,13 +51,27 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 3**: SMALLINT (IntCodec with width=2)
+**Task 4**: BIGINT (IntCodec with width=8)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 无显著风险（纯加法：扩展 `_IntCodec` 支持 `width` 参数 + 注册 SMALLINT）
+- **Risk signals**: 无显著风险（纯加法：BIGINT 实例 + INTEGER alias）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 3 implementer (sonnet, background)
+- Implementer status: DONE_WITH_CONCERNS
+- Commit `ffaa4ee feat(types): add SMALLINT codec (IntCodec with width=2)`
+- RED: 3 failed with KeyError: 'SMALLINT'
+- GREEN: 53 tests passed (19 prior v2 + 3 SMALLINT + 31 legacy)
+- File scope: ONLY type_system.py + test_type_system_v2.py (54 ins / 25 del)
+- Module line count: 348 (≤ 350 budget)
+- Concerns (minor, accepted):
+  1. Combined `_fmt` + `_bounds` properties → single `_spec` tuple (saves 4 lines, preserves semantics)
+  2. Inlined SMALLINT registration (3 lines via direct REGISTRY["SMALLINT"] assignment)
+  3. Trimmed "Codec Protocol implementations" comment block from 13→4 lines to fit budget
+- No per-task reviewer (no risk signals hit)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 2 reviewer (sonnet, background)
 - Reviewer verdict: **APPROVED_WITH_NITS** (6 NITs, all docs/cosmetic, no functional impact)
