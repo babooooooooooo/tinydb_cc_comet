@@ -38,7 +38,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | done (manual) | sonnet | 0 |
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | done | sonnet | 0 |
 | 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | done | — | 0 |
-| 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | pending | — | — |
+| 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | done | — | 0 |
 | 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | pending | — | — |
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | pending | — | — |
 | 15 | Catalog — Column.type_params + backward compat | (covered) | pending | — | — |
@@ -51,13 +51,25 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 12**: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)
+**Task 13**: Parser — DATE / TIME / TIMESTAMP literal prefix
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: parser 公共 API 契约变更（column definition 语法扩展）+ 跨模块影响（row_codec、catalog）
+- **Risk signals**: tokenizer/parser 字面量识别路径变更 + 与 schema 推断的交互
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 12 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `6d17f6d feat(parser): accept VARCHAR(N) and DECIMAL(p, s) in column definitions`
+- RED: 12 failed, 5 passed — every type-spec case (VARCHAR/CHAR/DECIMAL with params, missing-param rejection, invalid DECIMAL precision/scale, non-parametric-with-params rejection, type_params dataclass field)
+- GREEN: test_parser_type_spec.py 17/17 + test_parser.py 16/16 + full unit suite 330/330
+- File scope: parser.py + tests/unit/test_parser.py + tests/unit/test_parser_type_spec.py (NEW) — type_system.py, row_codec.py, catalog.py, executor.py NOT touched
+- codec_for integration: parser `_parse_type_params` calls `codec_for(name, params)` (lazy import) as single source of truth for range validation (VARCHAR N>=1, DECIMAL 1<=p<=18, 0<=s<p)
+- Backward compat: existing `name INT` still parses; ColumnDefinition.type_params defaults to ()
+- Informational: parser.py now 780 lines (self-imposed soft target was ≤750); not blocking
+- No per-task reviewer (decisive completion; codec_for delegation eliminates duplication risk)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 11 implementer (sonnet, background)
 - Implementer status: DONE

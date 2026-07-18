@@ -1483,7 +1483,7 @@ git commit -m "test(types): assert full 15-type REGISTRY + alias resolution"
 
 ### Task 12: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)
 
-- [ ] **Task 12: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)**
+- [x] **Task 12: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)**
 
 **Files:**
 - Modify: `src/tinydb/parser.py`

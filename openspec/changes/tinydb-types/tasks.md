@@ -46,10 +46,10 @@
 
 ## 7. Parser 列定义带参数
 
-- [ ] 7.1 编写 `test_parser_varchar_with_max_len`，红
-- [ ] 7.2 在 `parser.py::parse_column_def` 接收可选 `(N)` 或 `(p, s)` 参数
-- [ ] 7.3 编写 `test_parser_decimal_with_precision_scale`，绿
-- [ ] 7.4 编写 `test_parser_rejects_too_many_params`，绿
+- [x] 7.1 编写 `test_parser_varchar_with_max_len`，红
+- [x] 7.2 在 `parser.py::parse_column_def` 接收可选 `(N)` 或 `(p, s)` 参数
+- [x] 7.3 编写 `test_parser_decimal_with_precision_scale`，绿
+- [x] 7.4 编写 `test_parser_rejects_too_many_params`，绿
 
 ## 8. 字面量识别
 
