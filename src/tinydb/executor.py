@@ -13,6 +13,7 @@ from functools import cmp_to_key
 
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
+from tinydb.index_manager import IndexManager
 from tinydb.pager import Pager
 from tinydb.parser import (
     CreateTable, DropTable, Insert, Select, Delete, Update,
@@ -32,6 +33,52 @@ from tinydb.type_system import (
 # MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
 # an empty page leaves room for the slot directory entry (no overlap).
 _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
+
+
+class _IndexPager:
+    """Wrap a Pager to record every page the IndexManager/BTree allocates.
+
+    B+tree splits allocate new pages via ``self.pager.alloc_page()`` inside
+    ``BTree.insert`` / ``BTree._insert_into_parent`` — pages that the
+    Executor's data-page chain would happily walk into and corrupt on the
+    next ``PageFull``-driven ``pid += 1`` step. By tracking every page id
+    the index side hands out, :meth:`Executor._alloc_data_page` (and the
+    skip loop in :meth:`Executor._insert_inline_only`) can guarantee the
+    data chain never collides with a B+tree node.
+
+    Forwarded methods: ``read_page``, ``write_page``, ``flush``, ``close``,
+    ``alloc_page``, ``free_page`` (the last two update the tracker).
+    """
+
+    def __init__(self, pager):
+        self._pager = pager
+        self._allocated: set[int] = set()
+
+    def read_page(self, page_id: int) -> bytes:
+        return self._pager.read_page(page_id)
+
+    def write_page(self, page_id: int, data: bytes) -> None:
+        self._pager.write_page(page_id, data)
+
+    def alloc_page(self) -> int:
+        pid = self._pager.alloc_page()
+        self._allocated.add(pid)
+        return pid
+
+    def free_page(self, page_id: int) -> None:
+        # BTree never frees pages, but keep the wrapper symmetric.
+        self._pager.free_page(page_id)
+        self._allocated.discard(page_id)
+
+    def flush(self) -> None:
+        self._pager.flush()
+
+    def close(self) -> None:
+        self._pager.close()
+
+    @property
+    def allocated(self) -> set[int]:
+        return set(self._allocated)
 
 
 def eval_expr(expr: Any, row: list, schema: list) -> bool:
@@ -103,9 +150,42 @@ class Executor:
     flushes page 1 (the catalog slot) back to disk.
     """
 
-    def __init__(self, pager: Pager, catalog: Catalog) -> None:
+    def __init__(
+        self,
+        pager: Pager,
+        catalog: Catalog,
+        index_manager: Optional[IndexManager] = None,
+    ) -> None:
         self.pager = pager
         self.catalog = catalog
+        # IndexManager is optional for backward compatibility; default to
+        # a fresh per-instance manager so unit tests that construct
+        # Executor(pager, catalog) directly still work.
+        self.index_manager = (
+            index_manager if index_manager is not None else IndexManager(pager)
+        )
+        # Index pagers wrap the real Pager so the Executor can tell which
+        # page ids are owned by B+tree nodes (root + leaves allocated by
+        # splits) and skip them when extending the data-page chain.
+        # Populated by :meth:`register_index_pager` (called from Database).
+        self._index_pagers: list[_IndexPager] = []
+
+    def register_index_pager(self, wrapper: "_IndexPager") -> None:
+        """Track an _IndexPager so its allocated pages are skipped on data-chain extensions."""
+        self._index_pagers.append(wrapper)
+
+    def _make_index_pager(self, pager) -> "_IndexPager":
+        """Build a fresh _IndexPager and register it for collision avoidance."""
+        wrapper = _IndexPager(pager)
+        self.register_index_pager(wrapper)
+        return wrapper
+
+    def _index_pages(self) -> set[int]:
+        """Union of every page id owned by every registered B+tree wrapper."""
+        out: set[int] = set()
+        for wrapper in self._index_pagers:
+            out.update(wrapper._allocated)
+        return out
 
     # --- public dispatch ----------------------------------------------------
 
@@ -171,9 +251,32 @@ class Executor:
             root_page_id=root_id, next_page_id=root_id,
         )
 
+        # Initialize empty B+tree indexes for this table's indexed columns
+        # (PK + UNIQUE). INSERTs will populate them incrementally.
+        self.index_manager.rebuild_for_table(self.catalog.get_table(stmt.name))
+        # Wrap each new B+tree's pager so subsequent B+tree allocations
+        # (root + future splits) are tracked by Executor's collision
+        # avoidance. Database.__init__ installs wrappers for pre-existing
+        # tables; mid-session CREATE TABLE has to do it here.
+        self._on_table_created(stmt.name)
+
         self.pager.write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
+
+    def _on_table_created(self, table_name: str) -> None:
+        """Install _IndexPager wrappers for a table created mid-session.
+
+        Bypasses the wrapper if the B+tree already uses one (idempotent).
+        Database._install_index_pagers is the canonical entrypoint; this
+        method exists so the Executor doesn't have to reach into Database
+        state directly. Standalone Executor instances (constructed in
+        unit tests without a Database) skip this step — their data pages
+        are allocated without collision avoidance.
+        """
+        db = getattr(self, "_database_ref", None)
+        if db is not None:
+            db._install_index_pagers(table_name)
 
     def _exec_drop_table(self, stmt: DropTable) -> list:
         """Remove a table from the catalog.
@@ -273,7 +376,12 @@ class Executor:
                 # 8. Encode + insert. Use schema_v2 so codec dispatch in row_codec
                 #    receives the type_params tuple for parametric types.
                 row_bytes = encode_row(validated, ti.schema_v2)
-                self._insert_row_into_chain(ti, row_bytes)
+                slot_ref = self._insert_row_into_chain(ti, row_bytes)
+
+                # 9. Index maintenance (Task 7): for each indexed column
+                #    (PK + UNIQUE), encode the new key and add (key, slot_ref)
+                #    to the B+tree. NULL members skip per R9 裁决 9.
+                self._index_row(ti, validated, slot_ref)
         finally:
             session_keys.clear()
         return []
@@ -346,35 +454,46 @@ class Executor:
             seen.add(key)
         return seen
 
-    def _insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> int:
-        """Dispatch to spill path or inline path.
+    def _insert_row_into_chain(self, ti: TableInfo, row_bytes: bytes) -> tuple[int, int]:
+        """Dispatch to spill path or inline path; return (page_id, slot_id).
 
         Rows larger than ``MAX_INLINE_PAYLOAD`` cannot fit in a single data
         page slot, so we split them across a chain of ``page_type=2``
         overflow pages. Smaller rows take the original linear-probing path.
+        The (page_id, slot_id) pair is the B+tree slot reference used to
+        satisfy SELECT fast-path reads (Task 7).
         """
         if len(row_bytes) > MAX_INLINE_PAYLOAD:
             return self._insert_with_overflow(ti, row_bytes)
         return self._insert_inline_only(ti, row_bytes)
 
-    def _insert_inline_only(self, ti: TableInfo, row_bytes: bytes) -> int:
+    def _insert_inline_only(self, ti: TableInfo, row_bytes: bytes) -> tuple[int, int]:
         """Walk the data-page chain, allocating a new page when full.
 
         Starts at ``ti.root_page_id`` and tries ``SlottedPage.insert`` on
         each page in turn. On :class:`PageFull`, advances to the next page
         id; when the chain tail (``ti.next_page_id``) is reached, a fresh
         page is allocated, ``ti.next_page_id`` is advanced, and the catalog
-        is persisted. Returns the page id that accepted the row.
+        is persisted.
+
+        Skip-pages check (Task 7): the data chain advances by ``pid += 1``
+        when walking past full data pages. This can land on a page owned
+        by a B+tree root OR a leaf allocated by a split. Both are tracked
+        by the registered _IndexPager wrappers, so we use their union to
+        skip those pages.
         """
         pid = ti.root_page_id
         while True:
+            if pid in self._index_pages():
+                pid += 1
+                continue
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             try:
-                page.insert(row_bytes)
+                sid = page.insert(row_bytes)
             except PageFull:
                 if pid == ti.next_page_id:
-                    new_pid = self.pager.alloc_page()
+                    new_pid = self._alloc_data_page()
                     ti.next_page_id = new_pid
                     self.pager.write_page(1, self.catalog.to_bytes())
                     self.pager.flush()
@@ -384,9 +503,28 @@ class Executor:
                 continue
             self.pager.write_page(pid, page.to_bytes())
             self.pager.flush()
-            return pid
+            return (pid, sid)
 
-    def _insert_with_overflow(self, ti: TableInfo, row_bytes: bytes) -> int:
+    def _alloc_data_page(self) -> int:
+        """Allocate a fresh data page that does NOT collide with any B+tree page.
+
+        The Executor's data page chain and the IndexManager's B+tree pages
+        share the pager's address space. A naive ``pager.alloc_page`` can
+        return a page id already used by a B+tree root or leaf, causing
+        the data write that follows to corrupt the index. We detect that
+        and free the colliding page (push it back onto the free list)
+        until we land on a page no B+tree owns.
+        """
+        reserved = self._index_pages()
+        while True:
+            pid = self.pager.alloc_page()
+            if pid not in reserved:
+                return pid
+            # Collision: push this page back onto the free list and retry.
+            self.pager.free_page(pid)
+            reserved.add(pid)
+
+    def _insert_with_overflow(self, ti: TableInfo, row_bytes: bytes) -> tuple[int, int]:
         """Spill a row exceeding MAX_INLINE into an overflow chain.
 
         The first chunk lands inline so the data page carries the slot entry (with
@@ -395,10 +533,10 @@ class Executor:
         """
         first_chunk = row_bytes[:_CHUNK_SIZE]
         rest = row_bytes[_CHUNK_SIZE:]
-        pid_first = self._insert_inline_only(ti, first_chunk)
+        pid_first, sid_first = self._insert_inline_only(ti, first_chunk)
         # Mark SPILL_START on the slot that now holds the first chunk.
         page = SlottedPage.from_bytes(pid_first, self.pager.read_page(pid_first))
-        page.slots[page.num_slots - 1].flags |= FLAG_SPILL_START
+        page.slots[sid_first].flags |= FLAG_SPILL_START
         self.pager.write_page(pid_first, page.to_bytes())
         # Chain overflow pages; nxt placeholder is patched on the next iteration
         # (or stays NULL_PAGE_ID on the final page).
@@ -418,7 +556,7 @@ class Executor:
             self.pager.write_page(prev_pid, bytes(prev_buf))
             prev_pid, prev_buf = ov_pid, ov_buf
         self.pager.flush()
-        return pid_first
+        return (pid_first, sid_first)
 
     def _read_overflow_chain(self, start_pid: int) -> bytes:
         """Follow ``overflow_next`` from ``start_pid``; concatenate raw[16:] per page."""
@@ -523,6 +661,45 @@ class Executor:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
+        # --- B+tree fast path ------------------------------------------------
+        # Single-equality WHERE on an indexed column short-circuits the full
+        # scan: encode the literal with the column's codec, look it up in the
+        # per-(table,col) B+tree, and read at most one row by (page_id,
+        # slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
+        # INDEX MAINTENANCE DEPENDENCY: this returns [] if the key is not in
+        # the index, so INSERT/DELETE/UPDATE must keep indexes in sync.
+        if stmt.where is not None and self._is_single_eq_on_indexed(stmt.where, ti):
+            col_name, lit_value = self._parse_single_eq(stmt.where)
+            if col_name is not None:
+                col_obj = next((c for c in ti.columns if c.name == col_name), None)
+                if col_obj is not None:
+                    bt = self.index_manager.get_btree(ti.name, col_name)
+                    if bt is not None:
+                        try:
+                            key = codec_for(
+                                col_obj.type, col_obj.type_params
+                            ).encode_py(lit_value)
+                            ref = self.index_manager.lookup_key(
+                                ti.name, col_name, key
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            ref = None
+                        if ref is None:
+                            return []
+                        fast_rows = self._read_row_by_slot(ti, ref)
+                        # Apply OFFSET / LIMIT / projection.
+                        if stmt.offset:
+                            fast_rows = fast_rows[stmt.offset:]
+                        if stmt.limit is not None:
+                            fast_rows = fast_rows[:stmt.limit]
+                        results: list[list[Any]] = []
+                        for _sid, vals, _pid in fast_rows:
+                            if stmt.columns == ("*",):
+                                results.append(list(vals))
+                            else:
+                                results.append([vals[i] for i in proj_idx])
+                        return results
+
         # filter + collect (sid, vals, pid) for stable sort
         rows: list[tuple[int, list[Any], int]] = []
         for sid, vals, pid in self._scan_table(ti):
@@ -607,20 +784,25 @@ class Executor:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
         schema = ti.schema_v2
 
-        # Collect (page_id, slot_id) pairs first to avoid mutating pages
-        # while we are still scanning them.
-        to_delete: list[tuple[int, int]] = []
+        # Collect (page_id, slot_id, vals) triples first to avoid mutating pages
+        # while we are still scanning them. The vals are needed for index
+        # maintenance (Task 7): DELETE must clear the B+tree entry, which
+        # requires encoding the indexed-column key BEFORE the slot is
+        # tombstoned.
+        to_delete: list[tuple[int, int, list]] = []
         for sid, vals, pid in self._scan_table(ti):
             if stmt.where is None or eval_expr(stmt.where, vals, schema):
-                to_delete.append((pid, sid))
+                to_delete.append((pid, sid, vals))
 
-        for pid, sid in to_delete:
+        for pid, sid, vals in to_delete:
             raw = self.pager.read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             if page.slots[sid].flags & FLAG_SPILL_START:
                 self._free_overflow_chain(pid)
             page.delete(sid)
             self.pager.write_page(pid, page.to_bytes())
+            # Tombstone the B+tree entry for every indexed column.
+            self._unindex_row(ti, vals)
         if to_delete:
             self.pager.flush()
         return []
@@ -673,10 +855,15 @@ class Executor:
             by_page.setdefault(pid, []).append((sid, vals))
 
         # 4) Per-page in-place update + fallback
+        #    For each updated row, compute (old_vals, new_vals) index deltas
+        #    and apply them AFTER the write so the index always references
+        #    a live slot. In-place updates keep the same (pid, sid); the
+        #    fallback path (delete + reinsert or chain) gets a NEW (pid, sid).
         for pid, sid_vals_list in by_page.items():
             page = SlottedPage.from_bytes(pid, self.pager.read_page(pid))
-            pending_chain_inserts: list[bytes] = []
+            pending_chain_inserts: list[tuple[list, list, bytes]] = []
             for sid, vals in sid_vals_list:
+                old_vals = list(vals)
                 new_vals = list(vals)
                 for col_name, expr in stmt.sets:
                     new_vals[col_name_to_idx[col_name]] = expr.value
@@ -687,6 +874,10 @@ class Executor:
                 if not grew:
                     try:
                         page.update(sid, new_bytes)
+                        # In-place: slot_ref stays (pid, sid).
+                        self._update_index_for_row(
+                            ti, old_vals, new_vals, (pid, sid),
+                        )
                         continue
                     except PageFull:
                         grew = True
@@ -695,14 +886,129 @@ class Executor:
                     self._free_overflow_chain(pid)
                 page.delete(sid)
                 try:
-                    page.insert(new_bytes)
+                    new_sid = page.insert(new_bytes)
+                    # Delete old index entries (slot gone), insert new.
+                    self._update_index_for_row(
+                        ti, old_vals, new_vals, (pid, new_sid),
+                    )
                 except PageFull:
-                    pending_chain_inserts.append(new_bytes)
+                    pending_chain_inserts.append((old_vals, new_vals, new_bytes))
 
             # Flush this page before chain inserts (may advance next_page_id).
             self.pager.write_page(pid, page.to_bytes())
-            for new_bytes in pending_chain_inserts:
-                self._insert_row_into_chain(ti, new_bytes)
+            for old_vals, new_vals, new_bytes in pending_chain_inserts:
+                new_pid, new_sid = self._insert_row_into_chain(ti, new_bytes)
+                # Old slot is tombstoned (different page now); delete old
+                # index keys, insert new with the new (pid, sid) ref.
+                self._update_index_for_row(
+                    ti, old_vals, new_vals, (new_pid, new_sid),
+                )
 
         self.pager.flush()
         return []
+
+    # --- B+tree fast-path helpers (Task 7) ----------------------------------
+
+    def _index_row(
+        self, ti: TableInfo, row_vals: list, slot_ref: tuple[int, int],
+    ) -> None:
+        """Insert (key, slot_ref) into the B+tree for every indexed column.
+
+        NULL values are NOT indexed (R9 裁决 9 — SQL standard semantics that
+        treats NULL as unknown, never equal to anything, including itself).
+        Indexed columns are PK + UNIQUE columns (per IndexManager.indexed_columns).
+        """
+        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        for col in self.index_manager.indexed_columns(ti):
+            val = row_vals[name_to_idx[col.name]]
+            if val is None:
+                continue
+            key = self.index_manager.key_for(col, val)
+            self.index_manager.insert(ti.name, col.name, key, slot_ref)
+
+    def _unindex_row(
+        self, ti: TableInfo, row_vals: list,
+    ) -> None:
+        """Remove (key, _) from the B+tree for every indexed column.
+
+        Tombstones the entry but does not free the underlying B+tree page;
+        the entry is reclaimed on a future split/merge (out of scope for MVP).
+        NULL values were never indexed, so they are skipped.
+        """
+        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        for col in self.index_manager.indexed_columns(ti):
+            val = row_vals[name_to_idx[col.name]]
+            if val is None:
+                continue
+            key = self.index_manager.key_for(col, val)
+            self.index_manager.delete(ti.name, col.name, key)
+
+    def _update_index_for_row(
+        self,
+        ti: TableInfo,
+        old_vals: list,
+        new_vals: list,
+        new_slot_ref: tuple[int, int],
+    ) -> None:
+        """Reconcile B+tree entries for a row whose values changed.
+
+        For each indexed column (PK + UNIQUE):
+          * old == new: no-op (already points at the right slot).
+          * both non-NULL differ: delete old key, insert new key.
+          * old non-NULL, new NULL: delete old key (NULL not indexed).
+          * old NULL, new non-NULL: insert new key.
+          * both NULL: no-op (NULL never indexed).
+
+        Delete-then-insert ordering matters when the new key collides with
+        a DIFFERENT row's old key: tombstoning first lets B+tree.insert
+        upsert the entry under the new key without confusion.
+        """
+        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        for col in self.index_manager.indexed_columns(ti):
+            i = name_to_idx[col.name]
+            old_v = old_vals[i]
+            new_v = new_vals[i]
+            if old_v == new_v:
+                continue
+            if old_v is not None:
+                old_key = self.index_manager.key_for(col, old_v)
+                self.index_manager.delete(ti.name, col.name, old_key)
+            if new_v is not None:
+                new_key = self.index_manager.key_for(col, new_v)
+                self.index_manager.insert(
+                    ti.name, col.name, new_key, new_slot_ref,
+                )
+
+    def _is_single_eq_on_indexed(self, expr: Any, ti: TableInfo) -> bool:
+        """True iff ``expr`` is a single ``EqualsExpr`` on a column with a B+tree."""
+        if not isinstance(expr, EqualsExpr):
+            return False
+        return self.index_manager.get_btree(ti.name, expr.column) is not None
+
+    def _parse_single_eq(self, expr: Any) -> tuple[Optional[str], Any]:
+        """Return (column_name, literal_value) for an ``EqualsExpr``, else (None, None)."""
+        if isinstance(expr, EqualsExpr):
+            return expr.column, expr.value
+        return None, None
+
+    def _read_row_by_slot(
+        self, ti: TableInfo, slot_ref: tuple[int, int],
+    ) -> list[tuple[int, list[Any], int]]:
+        """Read one row from a (page_id, slot_id) reference.
+
+        Returns ``[(slot_id, decoded_values, page_id)]`` on hit; ``[]`` if
+        the slot has been tombstoned since the index was last updated
+        (defensive — should not happen with correct maintenance).
+        """
+        page_id, slot_id = slot_ref
+        raw = self.pager.read_page(page_id)
+        page = SlottedPage.from_bytes(page_id, raw)
+        slot = page.slots[slot_id]
+        if slot.flags & FLAG_TOMBSTONE:
+            return []
+        row_bytes = page.get(slot_id)
+        if row_bytes is None:
+            return []
+        if slot.flags & FLAG_SPILL_START:
+            row_bytes = row_bytes + self._read_overflow_chain(page_id)
+        return [(slot_id, decode_row(row_bytes, ti.schema_v2), page_id)]

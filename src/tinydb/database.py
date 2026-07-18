@@ -2,10 +2,11 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Dict, Tuple, Union
 
 from tinydb.catalog import Catalog
 from tinydb.executor import Executor
+from tinydb.index_manager import IndexManager
 from tinydb.pager import Pager
 from tinydb.parser import parse, Select
 from tinydb.tokenizer import tokenize
@@ -50,7 +51,24 @@ class Database:
         """
         self.pager = Pager(path)
         self.catalog = Catalog.from_bytes(self.pager.read_page(1))
-        self.executor = Executor(self.pager, self.catalog)
+        # IndexManager holds B+tree indexes per (table, indexed-column).
+        # For pre-existing tables (post-reopen), rebuild indexes from a
+        # full table scan so lookups reflect on-disk data; for fresh tables
+        # this builds empty B-trees that INSERTs will populate incrementally.
+        self.index_manager = IndexManager(self.pager)
+        self.executor = Executor(self.pager, self.catalog, self.index_manager)
+        # Back-reference so Executor can install index-pager wrappers when
+        # CREATE TABLE adds a new table mid-session.
+        self.executor._database_ref = self
+        self._index_pagers: Dict[Tuple[str, str], Any] = {}
+        # Existing tables: rebuild indexes from a full scan (rebuild_for_table
+        # will populate empty B-trees if no rows are passed) and install
+        # _IndexPager wrappers so subsequent B+tree allocations are tracked.
+        for ti in self.catalog.tables.values():
+            self.index_manager.rebuild_for_table(ti)
+            self._install_index_pagers(ti.name)
+        # New tables (created via CREATE TABLE during this session) install
+        # their wrappers inside Executor._exec_create_table.
 
     def execute(self, sql: str) -> list[Row]:
         """Run one statement or ``;``-separated script; return final result.
@@ -87,3 +105,22 @@ class Database:
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
+
+    def _install_index_pagers(self, table_name: str) -> None:
+        """Install _IndexPager wrappers on every B+tree of ``table_name``.
+
+        Called from Database.__init__ for pre-existing tables and from
+        Executor._exec_create_table for tables created mid-session. Each
+        wrapper replaces ``bt.pager`` so every B+tree allocation (root +
+        leaves from splits) flows through the tracker; the Executor then
+        consults :meth:`_index_pages` to keep the data-page chain off
+        B+tree pages.
+        """
+        for (tname, cname), bt in self.index_manager._indexes.items():
+            if tname != table_name or bt.pager.__class__.__name__ == "_IndexPager":
+                continue
+            wrapper = self.executor._make_index_pager(self.pager)
+            bt.pager = wrapper
+            if bt.root_page_id is not None:
+                wrapper._allocated.add(bt.root_page_id)
+            self._index_pagers[(tname, cname)] = wrapper
