@@ -131,11 +131,9 @@ def validate_compare(col_bytes: bytes, col_type: str,
 
 
 # ---------------------------------------------------------------------------
-# TypeCodec Protocol + REGISTRY scaffolding (Task 1 of tinydb-types change).
-# The legacy module-level encode/decode helpers above remain untouched for
-# backward compatibility (Design §F2). Subsequent tasks will populate
-# REGISTRY with concrete codec instances and introduce parameterised
-# variants for VARCHAR/CHAR/DECIMAL.
+# TypeCodec Protocol + REGISTRY (Task 1); legacy encode_*/decode_* helpers
+# above kept for backward compat (Design §F2). Parametric types (VARCHAR/CHAR/
+# DECIMAL) store CLASS in REGISTRY; codec_for() instantiates per-call.
 # ---------------------------------------------------------------------------
 
 
@@ -193,10 +191,9 @@ def codec_for(type_name: str, params: tuple = ()):
     return entry
 
 
-# Codec Protocol implementations (Tasks 2-3 of tinydb-types). Each codec owns
-# its bytes encoding; legacy module-level encode_*/decode_* helpers above
-# remain untouched per Design §F2. FLOAT 4-byte single precision per Design D3.
-# Task 3 generalises _IntCodec via `width` and registers SMALLINT (width=2).
+# Codec Protocol implementations (Tasks 2+). Each codec owns its bytes encoding;
+# legacy module-level encode_*/decode_* helpers above remain for backward compat (Design §F2).
+# FLOAT = 4-byte single precision per Design D3; _IntCodec uses `width` for SMALLINT/BIGINT.
 
 
 class _IntCodec:
@@ -349,24 +346,27 @@ class _VarcharCodec:
         self._check(len(value.encode("utf-8")))
 
 
-# Populate REGISTRY with MVP codecs (Plan task 1.3)
+class _CharCodec(_VarcharCodec):
+    """CHAR(N): fixed-length UTF-8 string with right-space padding (SQL92 PAD SPACE)."""
+    name = "CHAR"
+    def encode_py(self, value):
+        d = value.encode("utf-8")
+        if len(d) > self.max_len: raise TypeError(f"CHAR({self.max_len}) length {len(d)} exceeds max")
+        return struct.pack(">H", self.max_len) + (value + " " * (self.max_len - len(d))).encode("utf-8")
+
+
+# Populate REGISTRY.
 REGISTRY["INT"] = _IntCodec()
 REGISTRY["TEXT"] = _TextCodec()
 REGISTRY["BOOL"] = _BoolCodec()
 REGISTRY["FLOAT"] = _FloatCodec()
-# Register SMALLINT (width=2) — separate _IntCodec instance with narrower width.
-REGISTRY["SMALLINT"] = _IntCodec()  # default INT/width=4 below is overwritten
-REGISTRY["SMALLINT"].name = "SMALLINT"
-REGISTRY["SMALLINT"].width = 2
-# Register BIGINT (width=8); declare INTEGER alias for INT (picked up by loop).
+REGISTRY["SMALLINT"] = _IntCodec(); REGISTRY["SMALLINT"].name = "SMALLINT"; REGISTRY["SMALLINT"].width = 2
 REGISTRY["BIGINT"] = _IntCodec(); REGISTRY["BIGINT"].name = "BIGINT"; REGISTRY["BIGINT"].width = 8
 REGISTRY["INT"].aliases = ("INTEGER",)
-# Register DOUBLE (width=8) + DOUBLE PRECISION alias.
 REGISTRY["DOUBLE"] = _FloatCodec(); REGISTRY["DOUBLE"].name = "DOUBLE"; REGISTRY["DOUBLE"].width = 8
 REGISTRY["DOUBLE"].aliases = ("DOUBLE PRECISION",)
-# Parametric codecs — REGISTRY stores the CLASS; codec_for() instantiates per-call.
 REGISTRY["VARCHAR"] = _VarcharCodec
-# Build alias map from any declared aliases on the registered codecs.
+REGISTRY["CHAR"] = _CharCodec
 for _codec in REGISTRY.values():
     if isinstance(_codec, type):
         continue  # skip parametric class entries (no aliases to register)

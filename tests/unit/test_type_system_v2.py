@@ -260,3 +260,35 @@ def test_varchar_codec_per_call_instance():
     a = codec_for("VARCHAR", (10,))
     b = codec_for("VARCHAR", (20,))
     assert a is not b
+
+
+# ---------------------------------------------------------------------------
+# Task 8: CHAR (parametric codec with PAD SPACE).
+# ---------------------------------------------------------------------------
+
+
+def test_char_codec_pads_short_string():
+    codec = codec_for("CHAR", (5,))
+    encoded = codec.encode_py("ab")
+    assert len(encoded) == 2 + 5  # length prefix + 5 bytes (padded)
+    assert codec.decode_bytes(encoded, 0)[0] == "ab   "  # spaces preserved
+
+
+def test_char_codec_rejects_overlong():
+    codec = codec_for("CHAR", (5,))
+    with pytest.raises(TypeError, match="CHAR\\(5\\) length 6 exceeds max"):
+        codec.encode_py("abcdef")
+
+
+def test_char_codec_accepts_exact_length():
+    codec = codec_for("CHAR", (5,))
+    encoded = codec.encode_py("abcde")
+    assert codec.decode_bytes(encoded, 0)[0] == "abcde"
+
+
+def test_char_codec_no_trim_on_decode():
+    """SQL92 PAD SPACE: padding is preserved on read (no RTRIM)."""
+    codec = codec_for("CHAR", (5,))
+    encoded = codec.encode_py("ab")
+    assert codec.decode_bytes(encoded, 0)[0] == "ab   "
+    # NOT "ab"
