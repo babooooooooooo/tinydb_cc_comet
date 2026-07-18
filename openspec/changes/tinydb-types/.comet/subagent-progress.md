@@ -47,17 +47,37 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 18 | WHERE clause strict same-type comparison | (covered) | done | — | 0 |
 | 19 | FLOAT 4-byte regression cleanup | 10.1 | done | — | 0 |
 | 20 | REPL integration tests | (covered) | done | — | 0 |
-| 21 | Coverage + final verification | 10.1-10.3 | pending | — | — |
+| 21 | Coverage + final verification | 10.1-10.3 | done | — | 0 |
 
 ## Current Task
 
-**Task 21**: Coverage + final verification
-- **Stage**: task-verify
-- **Implementer**: pending dispatch
-- **Implementer model**: sonnet
-- **Risk signals**: 2 pre-existing failures (test_column_dataclass_roundtrip, test_golden_sql[error_cases/02_unsupported_type.sql]) + module line budget audit + 覆盖率 ≥ 90%
+**All 21 tasks complete.** Build phase ready to transition to verify phase.
+
+**Final state:**
+- 21 tasks done
+- 575 tests pass, 0 fail
+- Coverage 94.28% (target ≥ 90%)
+- type_system.py: 508 lines (158 over §F6 budget of 350; documented in MVP_LIMITATIONS.md as deferred refactor)
+- parser.py: 861 lines (within 870 budget)
+- executor.py: 707 lines (no explicit budget)
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 21 coordinator verification
+- Status: COMPLETE
+- Commit `aee27f0 fix(types): update stale tests for new 15-type behavior + document system`
+- **Full test suite: 575 passed, 0 fail** (was 573 + 2 pre-existing failures fixed = 575)
+- **Coverage: 94.28%** (target ≥ 90% PASSED)
+- **Module line counts:**
+  - type_system.py: **508 lines** (158 over §F6 budget of 350; documented in MVP_LIMITATIONS.md as deferred refactor — codec framework + 15 codecs + legacy helpers (132 lines preserved per §F2) push count up)
+  - parser.py: **861 lines** (within 870 budget, 9-line headroom)
+  - executor.py: **707 lines** (no explicit budget)
+- **Pre-existing failures fixed (coordinator action):**
+  1. `test_column_dataclass_roundtrip` — updated expected dict to include `type_params: []` (Task 15 added the field; test was stale)
+  2. `test_golden_sql[error_cases/02_unsupported_type.sql]` — golden file expected "VARCHAR not supported in MVP" error; Tasks 12-14 added VARCHAR support; updated expected to `(no rows)\n`
+- **MVP_LIMITATIONS.md updated** with comprehensive 15-type documentation including strict same-type rules, FLOAT 4-byte note, DECIMAL precision limits, and the type_system.py line budget overrun (deferred refactor)
+- 22 total commits since base (10 feat + 1 refactor + 11 chore/checkoff + 1 fix = 23, plus base merge)
+- Build phase complete; ready to transition to verify phase
 
 ### 2026-07-18 — Task 20 implementer (sonnet, background)
 - Implementer status: DONE

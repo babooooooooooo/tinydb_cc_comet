@@ -2476,7 +2476,7 @@ git commit -m "test(types): REPL integration tests for 15 types"
 
 ### Task 21: Coverage + final verification
 
-- [ ] **Task 21: Coverage + final verification**
+- [x] **Task 21: Coverage + final verification**
 
 **Files:**
 - Modify: `docs/MVP_LIMITATIONS.md` (add types section)

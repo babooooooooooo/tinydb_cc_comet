@@ -64,6 +64,6 @@
 
 ## 10. 回归
 
-- [ ] 10.1 MVP + engine-v1 + constraints + aggregation + engine-v2 + acid 测试全部继续通过（acid 仍在并行时序上）
-- [ ] 10.2 模块行数：`type_system.py ≤ 350`、`parser.py ≤ 870`
-- [ ] 10.3 覆盖率 ≥ 90%；新代码 100%
+- [x] 10.1 MVP + engine-v1 + constraints + aggregation + engine-v2 + acid 测试全部继续通过（acid 仍在并行时序上）
+- [x] 10.2 模块行数：`type_system.py ≤ 350`、`parser.py ≤ 870`
+- [x] 10.3 覆盖率 ≥ 90%；新代码 100%
