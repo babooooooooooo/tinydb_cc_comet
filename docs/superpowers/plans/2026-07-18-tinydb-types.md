@@ -1235,7 +1235,7 @@ git commit -m "feat(types): add DECIMAL(p,s) codec with scaled int64 encoding"
 
 ### Task 10: DATE / TIME / TIMESTAMP UTC
 
-- [ ] **Task 10: DATE / TIME / TIMESTAMP UTC**
+- [x] **Task 10: DATE / TIME / TIMESTAMP UTC**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
