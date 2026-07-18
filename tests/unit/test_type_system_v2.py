@@ -292,3 +292,53 @@ def test_char_codec_no_trim_on_decode():
     encoded = codec.encode_py("ab")
     assert codec.decode_bytes(encoded, 0)[0] == "ab   "
     # NOT "ab"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: DECIMAL (scaled int64 with precision/scale).
+# ---------------------------------------------------------------------------
+
+
+def test_decimal_codec_roundtrip_simple():
+    codec = codec_for("DECIMAL", (10, 2))
+    encoded = codec.encode_py(1.23)
+    assert len(encoded) == 8
+    assert codec.decode_bytes(encoded, 0)[0] == 1.23
+
+
+def test_decimal_codec_negative_roundtrip():
+    codec = codec_for("DECIMAL", (10, 2))
+    encoded = codec.encode_py(-123.45)
+    assert codec.decode_bytes(encoded, 0)[0] == -123.45
+
+
+def test_decimal_codec_zero_scale():
+    codec = codec_for("DECIMAL", (10, 0))
+    encoded = codec.encode_py(123)
+    assert codec.decode_bytes(encoded, 0)[0] == 123
+
+
+def test_decimal_codec_precision_overflow():
+    codec = codec_for("DECIMAL", (5, 2))
+    # DECIMAL(5,2): value range is [-999.99, 999.99]
+    with pytest.raises(OverflowError, match=r"DECIMAL\(5,2\) value .* out of range"):
+        codec.encode_py(1000.00)
+    with pytest.raises(OverflowError, match=r"DECIMAL\(5,2\) value .* out of range"):
+        codec.encode_py(-1000.00)
+
+
+def test_decimal_codec_scaled_overflow():
+    codec = codec_for("DECIMAL", (18, 6))
+    # DECIMAL(18,6): value range is [-10^12, 10^12 - 10^-6]
+    with pytest.raises(OverflowError):
+        codec.encode_py(1e13)  # exceeds 10^12
+
+
+def test_decimal_codec_rejects_p_lt_s():
+    with pytest.raises(ValueError, match="DECIMAL"):
+        codec_for("DECIMAL", (2, 5))
+
+
+def test_decimal_codec_rejects_p_too_large():
+    with pytest.raises(ValueError, match="DECIMAL"):
+        codec_for("DECIMAL", (19, 0))

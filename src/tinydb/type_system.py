@@ -130,11 +130,8 @@ def validate_compare(col_bytes: bytes, col_type: str,
             raise ValueError("FLOAT inf/NaN not allowed")
 
 
-# ---------------------------------------------------------------------------
-# TypeCodec Protocol + REGISTRY (Task 1); legacy encode_*/decode_* helpers
-# above kept for backward compat (Design §F2). Parametric types (VARCHAR/CHAR/
-# DECIMAL) store CLASS in REGISTRY; codec_for() instantiates per-call.
-# ---------------------------------------------------------------------------
+# TypeCodec registry; legacy helpers above stay for backward compatibility.
+# Parametric codecs are stored as classes and instantiated by codec_for().
 
 
 class TypeCodec(Protocol):
@@ -168,32 +165,20 @@ def lookup(type_name: str):
 
 
 def codec_for(type_name: str, params: tuple = ()):
-    """Return configured codec. Non-parametric: registry singleton. Parametric
-    (VARCHAR/CHAR/DECIMAL): validates params, instantiates per-call from class.
-    Raises ValueError on invalid params; KeyError on unknown type.
-    """
+    """Return a validated singleton or configured parametric codec."""
     if type_name not in REGISTRY and type_name not in _ALIAS_MAP:
         raise KeyError(f"unknown type: {type_name!r}")
     if type_name in ("VARCHAR", "CHAR"):
         if len(params) != 1 or params[0] < 1:
             raise ValueError(f"{type_name} requires (N,) with N >= 1, got {params}")
-    elif type_name == "DECIMAL":
-        if len(params) != 2:
-            raise ValueError(f"DECIMAL requires (p, s), got {params}")
-        p, s = params
-        if not (1 <= p <= 18 and 0 <= s < p):
-            raise ValueError(f"DECIMAL({p},{s}) invalid")
+    elif type_name == "DECIMAL" and len(params) != 2:
+        raise ValueError(f"DECIMAL requires (p, s), got {params}")
     entry = lookup(type_name)
-    if isinstance(entry, type):
-        if type_name == "DECIMAL":
-            return entry(params[0], params[1])
-        return entry(params[0])
-    return entry
+    return entry(*params) if isinstance(entry, type) else entry
 
 
-# Codec Protocol implementations (Tasks 2+). Each codec owns its bytes encoding;
-# legacy module-level encode_*/decode_* helpers above remain for backward compat (Design §F2).
-# FLOAT = 4-byte single precision per Design D3; _IntCodec uses `width` for SMALLINT/BIGINT.
+# Codec implementations; legacy helpers above remain for backward compatibility.
+# FLOAT is 4-byte single precision; integer width selects SMALLINT/INT/BIGINT.
 
 
 class _IntCodec:
@@ -355,6 +340,32 @@ class _CharCodec(_VarcharCodec):
         return struct.pack(">H", self.max_len) + (value + " " * (self.max_len - len(d))).encode("utf-8")
 
 
+class _DecimalCodec:
+    """DECIMAL(p,s): scaled signed int64."""
+    name = "DECIMAL"
+    def __init__(self, precision: int, scale: int):
+        if not 1 <= precision <= 18: raise ValueError(f"DECIMAL precision must be 1..18, got {precision}")
+        if not 0 <= scale < precision: raise ValueError(f"DECIMAL scale must be 0..{precision - 1}, got {scale}")
+        self.precision, self.scale = precision, scale
+        self._factor, self._max_abs = 10 ** scale, 10 ** (precision - scale)
+    def _to_scaled(self, value):
+        scaled = round(value * self._factor)
+        if abs(scaled) >= 2**63: raise OverflowError(f"DECIMAL({self.precision},{self.scale}) scaled value overflow")
+        if abs(value) >= self._max_abs: raise OverflowError(f"DECIMAL({self.precision},{self.scale}) value {value} out of range")
+        return scaled
+    def encode_py(self, value):
+        return struct.pack(">q", self._to_scaled(value))
+    def decode_bytes(self, buf, offset):
+        if offset + 8 > len(buf): raise ValueError(f"DECIMAL({self.precision},{self.scale}) decode truncated")
+        (scaled,) = struct.unpack_from(">q", buf, offset)
+        return scaled / self._factor, offset + 8
+    def parse_literal(self, text, params):
+        return self._to_scaled(float(text)) / self._factor
+    def validate(self, value):
+        if not isinstance(value, (int, float)) or isinstance(value, bool): raise TypeError(f"expected number for DECIMAL, got {type(value).__name__}")
+        self._to_scaled(value)
+
+
 # Populate REGISTRY.
 REGISTRY["INT"] = _IntCodec()
 REGISTRY["TEXT"] = _TextCodec()
@@ -367,6 +378,7 @@ REGISTRY["DOUBLE"] = _FloatCodec(); REGISTRY["DOUBLE"].name = "DOUBLE"; REGISTRY
 REGISTRY["DOUBLE"].aliases = ("DOUBLE PRECISION",)
 REGISTRY["VARCHAR"] = _VarcharCodec
 REGISTRY["CHAR"] = _CharCodec
+REGISTRY["DECIMAL"] = _DecimalCodec
 for _codec in REGISTRY.values():
     if isinstance(_codec, type):
         continue  # skip parametric class entries (no aliases to register)
