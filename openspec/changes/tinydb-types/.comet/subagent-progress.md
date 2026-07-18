@@ -28,7 +28,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | # | Task Text | OpenSpec Sub-task | Status | Reviewer | Round |
 |---|---|---|---|---|---|
 | 1 | TypeCodec Protocol + REGISTRY + lookup/codec_for scaffolding | 1.1-1.2 | done | sonnet | 1 |
-| 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | (none specific) | pending | — | — |
+| 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | 1.3 | done | sonnet | 1 |
 | 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | pending | — | — |
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | pending | — | — |
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | pending | — | — |
@@ -51,13 +51,34 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 2**: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)
+**Task 3**: SMALLINT (IntCodec with width=2)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 公共 API 契约变更（新增 `_IntCodec`/`_TextCodec`/`_BoolCodec`/`_FloatCodec`）+ schema 变更（`row_codec.encode_row` 解包三元组 `(name, type, params)`）+ FLOAT 4 字节迁移
+- **Risk signals**: 无显著风险（纯加法：扩展 `_IntCodec` 支持 `width` 参数 + 注册 SMALLINT）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 2 reviewer (sonnet, background)
+- Reviewer verdict: **APPROVED_WITH_NITS** (6 NITs, all docs/cosmetic, no functional impact)
+  - NIT-1: type_system.py module docstring stale line count (`<= 150` → actual 343)
+  - NIT-2: `_IntCodec` docstring references wrong task (says "Plan task 2" → should be tasks 3/4)
+  - NIT-3: codec method type hints dropped (`def encode_py(self, value)` vs `value: int`)
+  - NIT-4/5/6: NOT BUG — docstring hints, class attribute, mutable globals
+- Spec compliance: PASS — file scope clean, all 15 legacy MVP functions preserved, REGISTRY has 4 keys, _ALIAS_MAP populated, FLOAT 4-byte, inf/nan rejected, row_codec accepts both 2-tuple + 3-tuple schemas, 114 in-scope tests green, 5 registry failures scaffold-aligned RED
+- Code quality: PASS — type hints on public methods, actionable error messages, no silent failures
+- Process compliance: PASS — implementer did not check off tasks, did not touch out-of-scope files
+- Coordinator decision: APPROVE — proceed to checkoff
+
+### 2026-07-18 — Task 2 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `313be81 refactor(types): migrate MVP codecs to Protocol form (FLOAT 4-byte migration)`
+- RED: 19 failed with KeyError: 'INT'/'TEXT'/'BOOL'/'FLOAT'
+- GREEN: 114 in-scope tests passed (test_type_system_v2 + legacy test_type_system + test_row_codec + test_parser + e2e)
+- FLOAT 4-byte verified: encoded 1.5 → 3fc00000 (4 bytes)
+- Backward compat: all 15 legacy MVP functions preserved; row_codec accepts both schema formats
+- Risk signal hits: 公共 API 契约变更 + schema 变更 + FLOAT 4-byte migration
+- Action: dispatch task reviewer per review_mode=standard risk rule
 
 ### 2026-07-18 — Task 1 reviewer (sonnet, background)
 - Reviewer verdict: **APPROVED_WITH_CONCERNS** (5 NITs, all stylistic/forward-looking, no functional impact)

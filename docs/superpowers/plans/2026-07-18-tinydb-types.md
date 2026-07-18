@@ -232,7 +232,7 @@ git commit -m "feat(types): add TypeCodec Protocol + REGISTRY + lookup/codec_for
 
 ### Task 2: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)
 
-- [ ] **Task 2: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)**
+- [x] **Task 2: Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`
