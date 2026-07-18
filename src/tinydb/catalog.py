@@ -62,6 +62,13 @@ class TableInfo:
         read ``self.columns`` directly."""
         return [(c.name, c.type) for c in self.columns]
 
+    @property
+    def schema_v2(self) -> list[tuple[str, str, tuple]]:
+        """Canonical ``[(name, type, type_params)]`` projection for row_codec
+        v2 and other code paths that need parametric type info (VARCHAR(N),
+        CHAR(N), DECIMAL(p, s))."""
+        return [(c.name, c.type, c.type_params) for c in self.columns]
+
 
 def _enc_int(v: int) -> str:
     return str(v)
