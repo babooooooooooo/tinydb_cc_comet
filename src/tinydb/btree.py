@@ -133,7 +133,10 @@ class BTree:
         page = self.pager.read_page(pid)
         while page[0] == NODE_TYPE_INTERNAL:
             node = InternalNode.deserialize(page)
-            i = self._bisect_left(node.keys, key)
+            # Convention: node.keys[i] = smallest key in children[i+1].
+            # bisect_right gives the child index that contains K (or would,
+            # for K equal to a separator, the right subtree).
+            i = self._bisect_right(node.keys, key)
             pid = node.children[i]
             page = self.pager.read_page(pid)
         return pid, LeafNode.deserialize(page)
@@ -160,8 +163,95 @@ class BTree:
             leaf.keys.insert(i, key)
             leaf.values.insert(i, value)
             leaf.tombstones.insert(i, False)
-        # NOTE: split-on-overflow lands in Task 4. For now, write the leaf as-is.
-        self.pager.write_page(leaf_pid, leaf.serialize())
+
+        # Try to serialize; if it overflows the page, split.
+        try:
+            payload = leaf.serialize()
+        except ValueError:
+            # Split leaf at median.
+            mid = len(leaf.keys) // 2
+            left = LeafNode(
+                keys=leaf.keys[:mid],
+                values=leaf.values[:mid],
+                next_leaf_id=0,  # patched below
+                tombstones=leaf.tombstones[:mid],
+            )
+            right = LeafNode(
+                keys=leaf.keys[mid:],
+                values=leaf.values[mid:],
+                next_leaf_id=0,
+                tombstones=leaf.tombstones[mid:],
+            )
+            # Allocate new right page; left stays at leaf_pid.
+            right_pid = self.pager.alloc_page()
+            # Chain left -> right.
+            left.next_leaf_id = right_pid
+            self.pager.write_page(leaf_pid, left.serialize())
+            self.pager.write_page(right_pid, right.serialize())
+            promoted_key = right.keys[0]
+            # Insert separator into parent.
+            self._insert_into_parent(leaf_pid, promoted_key, right_pid)
+            return
+
+        self.pager.write_page(leaf_pid, payload)
+
+    def _insert_into_parent(
+        self, left_pid: int, key: bytes, right_pid: int
+    ) -> None:
+        """Insert separator key+right_pid into parent internal node, splitting if needed."""
+        if self.root_page_id is None:
+            raise RuntimeError("root unexpectedly None")
+        # If the split leaf was the root, create a new root.
+        if self.root_page_id == left_pid:
+            new_root_pid = self.pager.alloc_page()
+            internal = InternalNode(keys=[key], children=[left_pid, right_pid])
+            self.pager.write_page(new_root_pid, internal.serialize())
+            self.root_page_id = new_root_pid
+            return
+        # Walk down from root tracking parent path until we find left_pid as a child.
+        parent_pid = self._find_parent_pid(self.root_page_id, left_pid, key)
+        parent_page = self.pager.read_page(parent_pid)
+        parent = InternalNode.deserialize(parent_page)
+        i = self._bisect_left(parent.keys, key)
+        parent.keys.insert(i, key)
+        parent.children.insert(i + 1, right_pid)
+        try:
+            payload = parent.serialize()
+        except ValueError:
+            # Split internal node at median. Promote the median key.
+            mid = len(parent.keys) // 2
+            promoted_key = parent.keys[mid]
+            left_int = InternalNode(
+                keys=parent.keys[:mid], children=parent.children[: mid + 1]
+            )
+            right_int = InternalNode(
+                keys=parent.keys[mid + 1 :], children=parent.children[mid + 1 :]
+            )
+            self.pager.write_page(parent_pid, left_int.serialize())
+            right_pid_int = self.pager.alloc_page()
+            self.pager.write_page(right_pid_int, right_int.serialize())
+            # Recurse: parent_pid now holds the left half.
+            self._insert_into_parent(parent_pid, promoted_key, right_pid_int)
+            return
+        self.pager.write_page(parent_pid, payload)
+
+    def _find_parent_pid(self, root_pid: int, target_pid: int, key: bytes) -> int:
+        """Walk from root until target_pid is the next child to descend into; return parent page id."""
+        pid = root_pid
+        page = self.pager.read_page(pid)
+        while page[0] == NODE_TYPE_INTERNAL:
+            node = InternalNode.deserialize(page)
+            # Same convention as _descend_to_leaf: keys[i] = smallest key
+            # in children[i+1]; bisect_right selects the right subtree.
+            i = self._bisect_right(node.keys, key)
+            child_pid = node.children[i]
+            if child_pid == target_pid:
+                return pid
+            pid = child_pid
+            page = self.pager.read_page(pid)
+        raise RuntimeError(
+            f"target_pid {target_pid} not found in path from root {root_pid}"
+        )
 
     def search(self, key: bytes) -> tuple[int, int] | None:
         if self.root_page_id is None:
@@ -178,6 +268,17 @@ class BTree:
         while lo < hi:
             mid = (lo + hi) // 2
             if keys[mid] < key:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    @staticmethod
+    def _bisect_right(keys: list[bytes], key: bytes) -> int:
+        lo, hi = 0, len(keys)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if keys[mid] <= key:
                 lo = mid + 1
             else:
                 hi = mid
