@@ -54,3 +54,11 @@ def test_lookup_unknown_type_raises():
     import pytest
     with pytest.raises(KeyError):
         lookup("UNKNOWN_TYPE")
+
+
+def test_aliases_resolve():
+    """REAL, BOOLEAN, DOUBLE PRECISION, INTEGER all resolve."""
+    assert lookup("REAL").name == "FLOAT"
+    assert lookup("BOOLEAN").name == "BOOL"
+    assert lookup("DOUBLE PRECISION").name == "DOUBLE"
+    assert lookup("INTEGER").name == "INT"

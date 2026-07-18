@@ -434,6 +434,9 @@ REGISTRY["DECIMAL"] = _DecimalCodec
 REGISTRY["DATE"] = _DateCodec()
 REGISTRY["TIME"] = _TimeCodec()
 REGISTRY["TIMESTAMP"] = _TimestampCodec()
+# BOOLEAN and REAL are first-class REGISTRY keys per the public contract.
+REGISTRY["BOOLEAN"] = REGISTRY["BOOL"]
+REGISTRY["REAL"] = REGISTRY["FLOAT"]
 for _codec in REGISTRY.values():
     if isinstance(_codec, type):
         continue  # skip parametric class entries (no aliases to register)
