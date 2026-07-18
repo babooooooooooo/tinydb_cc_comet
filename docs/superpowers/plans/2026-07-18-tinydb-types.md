@@ -823,7 +823,7 @@ git commit -m "feat(types): add DOUBLE codec (8-byte) + DOUBLE PRECISION alias"
 
 ### Task 6: BOOLEAN alias for BOOL
 
-- [ ] **Task 6: BOOLEAN alias for BOOL**
+- [x] **Task 6: BOOLEAN alias for BOOL**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`

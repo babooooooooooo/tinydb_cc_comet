@@ -32,7 +32,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | done | sonnet | 0 |
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | done | sonnet | 0 |
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | done | sonnet | 0 |
-| 6 | BOOLEAN alias for BOOL | 3.5 | pending | — | — |
+| 6 | BOOLEAN alias for BOOL | 3.5 | done | sonnet | 0 |
 | 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | pending | — | — |
 | 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | pending | — | — |
 | 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | pending | — | — |
@@ -51,13 +51,24 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 6**: BOOLEAN alias for BOOL
+**Task 7**: VARCHAR (parametric codec with max_len)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 无风险（alias-only；Task 2 已设置 `_BoolCodec.aliases = ("BOOLEAN",)` 但需要补 plan 要求的 test_boolean_alias_resolves_to_bool 单元测试）
+- **Risk signals**: 公共 API 契约变更（首个 parametric codec — `codec_for("VARCHAR", (N,))` 返回 per-call 实例而非 singleton；REGISTRY 需存 class 而非 instance；codec_for 内部分支逻辑新增）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 6 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `4ac9454 feat(types): register BOOLEAN alias for BOOL`
+- Investigation: BOOLEAN alias ALREADY wired by Task 2 (`aliases = ("BOOLEAN",)` on `_BoolCodec` + alias-build loop)
+- RED→GREEN collapse (test passed immediately on first run; pure test addition)
+- GREEN: 63 tests passed (1 new + 62 existing)
+- File scope: ONLY test_type_system_v2.py (no src change needed)
+- Module line count: 345 (unchanged, ≤ 350 budget)
+- No per-task reviewer (no risk signals hit)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 5 implementer (sonnet, background)
 - Implementer status: DONE
