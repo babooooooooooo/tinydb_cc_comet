@@ -42,7 +42,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | done | — | 0 |
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | done | — | 0 |
 | 15 | Catalog — Column.type_params + backward compat | (covered) | done | — | 0 |
-| 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | pending | — | — |
+| 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | done | — | 0 |
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | pending | — | — |
 | 18 | WHERE clause strict same-type comparison | (covered) | pending | — | — |
 | 19 | FLOAT 4-byte regression cleanup | 10.1 | pending | — | — |
@@ -51,13 +51,26 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 16**: row_codec — schema_v2() + codec_for dispatch
+**Task 17**: Executor — wire 15 types into INSERT / SELECT / WHERE
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: row codec dispatch 路径变更 + FLOAT 4-byte wire-format 不变 + VARCHAR/CHAR/DECIMAL/DATE/TIME/TIMESTAMP 全部需要 wire encode/decode
+- **Risk signals**: 跨模块集成（catalog + row_codec + parser）+ 端到端 15 类型 wire 路径 + INF/NaN 拒绝 + 严格类型校验
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 16 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `b662ed4 feat(row_codec): wire all 15 types + schema_v2 dispatch`
+- RED: 1 failed (no `schema_v2` property); other 17 passed (Task 2 had already wired codecs correctly)
+- GREEN: 18/18 new tests pass; full unit suite **370 passed** (352 + 18)
+- File scope: catalog.py (+7 lines schema_v2 property) + new test_row_codec_v2.py (161 lines, 18 tests) — **row_codec.py required ZERO source changes** (Task 2 already handled 3-tuple via `_column_type_and_params` + routed through `codec_for`)
+- Backward compat verified: legacy 2-tuple `[(name, type)]` schema still works; FLOAT 4-byte wire format preserved
+- All 15 types roundtrip verified: INT/SMALLINT/BIGINT/TEXT/BOOL/FLOAT/DOUBLE/VARCHAR/CHAR/DECIMAL/DATE/TIME/TIMESTAMP
+- CHAR(N) padding verified: `"ab"` → `"ab   "` roundtrip preserved
+- DECIMAL precision verified: 1.23 roundtrip ≈ 1.23 (within scale)
+- No per-task reviewer (decisive completion; minimal diff; well-scoped property addition)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 15 implementer (sonnet, background)
 - Implementer status: DONE

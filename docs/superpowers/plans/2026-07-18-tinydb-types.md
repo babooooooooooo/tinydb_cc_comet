@@ -1958,7 +1958,7 @@ git commit -m "feat(types): catalog.Column.type_params with backward-compatible 
 
 ### Task 16: row_codec — schema_v2() + codec_for dispatch
 
-- [ ] **Task 16: row_codec — schema_v2() + codec_for dispatch**
+- [x] **Task 16: row_codec — schema_v2() + codec_for dispatch**
 
 **Files:**
 - Modify: `src/tinydb/catalog.py` (add `schema_v2()` method to TableInfo)
