@@ -21,6 +21,8 @@ KEYWORDS = {
     "ORDER", "BY",
     "ASC", "DESC",
     "LIMIT", "OFFSET",
+    # --- tinydb-types ---
+    "DATE", "TIME", "TIMESTAMP",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 

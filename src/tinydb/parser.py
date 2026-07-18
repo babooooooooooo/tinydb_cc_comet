@@ -24,6 +24,7 @@ SUPPORTED_TYPES = {
 }
 SUPPORTED_OPS = {"="}
 _LITERAL_TYPES = ("INT", "FLOAT", "TEXT", "BOOL")
+_DATETIME_KEYWORDS = ("DATE", "TIME", "TIMESTAMP")
 
 # Parametric types require an explicit parameter list at parse time.
 # Maps type name -> expected arity (number of required int params).
@@ -518,13 +519,18 @@ class _Parser:
                 tok = self.peek()
                 raise ParseError(tok.line, tok.col, "expected literal")
             while True:
-                v = self.advance()
+                v = self.peek()
                 if v.type == "KEYWORD" and v.value == "NULL":
+                    self.advance()
                     row.append(None)
-                elif v.type in _LITERAL_TYPES:
-                    row.append(v.value)
+                elif v.type == "KEYWORD" and v.value in _DATETIME_KEYWORDS:
+                    row.append(self._parse_datetime_literal())
                 else:
-                    raise ParseError(v.line, v.col, "expected literal")
+                    tok = self.advance()
+                    if tok.type in _LITERAL_TYPES:
+                        row.append(tok.value)
+                    else:
+                        raise ParseError(tok.line, tok.col, "expected literal")
                 if self.peek().type == "PUNCT" and self.peek().value == ",":
                     self.advance()
                     continue
@@ -671,13 +677,18 @@ class _Parser:
                 raise ParseError(ct.line, ct.col, "expected column name in SET")
             col = self.advance().value
             self.expect("PUNCT", "=")
-            lit_tok = self.advance()
-            if lit_tok.type not in _LITERAL_TYPES:
-                raise ParseError(
-                    lit_tok.line, lit_tok.col,
-                    "SET right-hand side must be a literal",
-                )
-            sets.append((col, EqualsExpr(column=col, value=lit_tok.value)))
+            if (self.peek().type == "KEYWORD"
+                    and self.peek().value in _DATETIME_KEYWORDS):
+                val = self._parse_datetime_literal()
+            else:
+                lit_tok = self.advance()
+                if lit_tok.type not in _LITERAL_TYPES:
+                    raise ParseError(
+                        lit_tok.line, lit_tok.col,
+                        "SET right-hand side must be a literal",
+                    )
+                val = lit_tok.value
+            sets.append((col, EqualsExpr(column=col, value=val)))
             if self.peek().type == "PUNCT" and self.peek().value == ",":
                 self.advance()
                 continue
@@ -763,10 +774,47 @@ class _Parser:
                 op_tok.line, op_tok.col,
                 f"operator {op_repr} not supported; MVP supports only =",
             )
-        lit = self.advance()
-        if lit.type not in _LITERAL_TYPES:
-            raise ParseError(lit.line, lit.col, "expected literal")
-        return EqualsExpr(column=cname, value=lit.value)
+        if (self.peek().type == "KEYWORD"
+                and self.peek().value in _DATETIME_KEYWORDS):
+            lit_val = self._parse_datetime_literal()
+        else:
+            lit = self.advance()
+            if lit.type not in _LITERAL_TYPES:
+                raise ParseError(lit.line, lit.col, "expected literal")
+            lit_val = lit.value
+        return EqualsExpr(column=cname, value=lit_val)
+
+    # --- DATE / TIME / TIMESTAMP literal prefix ---------------------------
+
+    def _parse_datetime_literal(self):
+        """Parse DATE / TIME / TIMESTAMP 'literal' and return a Python value.
+
+        The literal string is validated via ``datetime`` ISO parsers, matching
+        the codec's encoding contract for date/time/timestamp types.
+        """
+        import datetime as _dt
+        kw = self.expect_keyword(self.peek().value)
+        text_tok = self.advance()
+        if text_tok.type != "TEXT":
+            raise ParseError(
+                text_tok.line, text_tok.col,
+                f"{kw.value} literal requires quoted string",
+            )
+        text = text_tok.value
+        try:
+            if kw.value == "DATE":
+                return _dt.date.fromisoformat(text)
+            if kw.value == "TIME":
+                return _dt.time.fromisoformat(text)
+            if kw.value == "TIMESTAMP":
+                return _dt.datetime.fromisoformat(text)
+        except ValueError as e:
+            raise ParseError(
+                kw.line, kw.col,
+                f"{kw.value} literal invalid: {text!r} ({e})",
+            ) from e
+        # Unreachable: expect_keyword guarantees one of the three above.
+        raise ParseError(kw.line, kw.col, f"unknown datetime literal {kw.value}")
 
 
 # --- Public entry ------------------------------------------------------------
