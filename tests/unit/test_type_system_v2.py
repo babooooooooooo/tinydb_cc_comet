@@ -152,3 +152,34 @@ def test_smallint_codec_overflow_raises():
         codec.encode_py(32768)
     with pytest.raises(OverflowError, match="SMALLINT out of range"):
         codec.encode_py(-32769)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: BIGINT (IntCodec with width=8) + INTEGER alias.
+# ---------------------------------------------------------------------------
+
+
+def test_bigint_codec_roundtrip():
+    codec = codec_for("BIGINT")
+    for v in [-(2**63), -1, 0, 1, 2**63 - 1]:
+        assert codec.decode_bytes(codec.encode_py(v), 0)[0] == v
+
+
+def test_bigint_codec_8byte_size():
+    codec = codec_for("BIGINT")
+    assert len(codec.encode_py(0)) == 8
+
+
+def test_bigint_codec_overflow_raises():
+    codec = codec_for("BIGINT")
+    with pytest.raises(OverflowError, match="BIGINT out of range"):
+        codec.encode_py(2**63)
+    with pytest.raises(OverflowError, match="BIGINT out of range"):
+        codec.encode_py(-(2**63) - 1)
+
+
+def test_int_alias_integer():
+    """INTEGER alias resolves to INT (width=4)."""
+    codec = lookup("INTEGER")
+    assert codec.name == "INT"
+    assert codec.width == 4

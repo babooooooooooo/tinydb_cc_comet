@@ -341,7 +341,9 @@ REGISTRY["FLOAT"] = _FloatCodec()
 REGISTRY["SMALLINT"] = _IntCodec()  # default INT/width=4 below is overwritten
 REGISTRY["SMALLINT"].name = "SMALLINT"
 REGISTRY["SMALLINT"].width = 2
-
+# Register BIGINT (width=8); declare INTEGER alias for INT (picked up by loop).
+REGISTRY["BIGINT"] = _IntCodec(); REGISTRY["BIGINT"].name = "BIGINT"; REGISTRY["BIGINT"].width = 8
+REGISTRY["INT"].aliases = ("INTEGER",)
 # Build alias map from any declared aliases on the registered codecs.
 for _codec in REGISTRY.values():
     for _alias in getattr(_codec, "aliases", ()):
