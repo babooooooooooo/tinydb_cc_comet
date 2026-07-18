@@ -68,3 +68,32 @@ def test_btree_insert_triggers_internal_split_via_long_keys():
         key = i.to_bytes(KEY_LEN, "big")
         assert bt.search(key) == (10 + i, 0), f"missing key {i}"
     p.close()
+
+
+def test_btree_range_iterates_in_order():
+    from tinydb.btree import BTree
+    from tinydb.pager import Pager
+
+    p = Pager(":memory:")
+    bt = BTree(pager=p, root_page_id=None)
+    for i in [5, 1, 9, 3, 7, 2, 8, 4, 6]:
+        bt.insert(i.to_bytes(2, "big"), (i, 0))
+    result = list(bt.range(b"\x00\x03", b"\x00\x07"))
+    assert result == [(3, 0), (4, 0), (5, 0), (6, 0)]
+    p.close()
+
+
+def test_btree_delete_marks_tombstone():
+    from tinydb.btree import BTree
+    from tinydb.pager import Pager
+
+    p = Pager(":memory:")
+    bt = BTree(pager=p, root_page_id=None)
+    bt.insert(b"\x00\x01", (1, 0))
+    bt.insert(b"\x00\x02", (2, 0))
+    bt.insert(b"\x00\x03", (3, 0))
+    bt.delete(b"\x00\x02")
+    assert bt.search(b"\x00\x02") is None  # tombstoned
+    assert bt.search(b"\x00\x01") == (1, 0)
+    assert bt.search(b"\x00\x03") == (3, 0)
+    p.close()

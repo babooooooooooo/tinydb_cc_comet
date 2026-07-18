@@ -262,6 +262,40 @@ class BTree:
             return leaf.values[i]
         return None
 
+    def range(self, start: bytes, end: bytes) -> list[tuple[int, int]]:
+        """Return all non-tombstone values in [start, end), in key order."""
+        if self.root_page_id is None:
+            return []
+        # Descend to start leaf
+        leaf_pid = self.root_page_id
+        page = self.pager.read_page(leaf_pid)
+        while page[0] == NODE_TYPE_INTERNAL:
+            node = InternalNode.deserialize(page)
+            i = self._bisect_left(node.keys, start)
+            leaf_pid = node.children[i]
+            page = self.pager.read_page(leaf_pid)
+        # Walk leaves
+        results: list[tuple[int, int]] = []
+        while leaf_pid != 0:
+            leaf = LeafNode.deserialize(self.pager.read_page(leaf_pid))
+            for k, v, t in zip(leaf.keys, leaf.values, leaf.tombstones):
+                if k >= end:
+                    return results
+                if k >= start and not t:
+                    results.append(v)
+            leaf_pid = leaf.next_leaf_id
+        return results
+
+    def delete(self, key: bytes) -> None:
+        """Mark entry as tombstone. No merge."""
+        if self.root_page_id is None:
+            return
+        leaf_pid, leaf = self._descend_to_leaf(key)
+        i = self._bisect_left(leaf.keys, key)
+        if i < len(leaf.keys) and leaf.keys[i] == key:
+            leaf.tombstones[i] = True
+            self.pager.write_page(leaf_pid, leaf.serialize())
+
     @staticmethod
     def _bisect_left(keys: list[bytes], key: bytes) -> int:
         lo, hi = 0, len(keys)
