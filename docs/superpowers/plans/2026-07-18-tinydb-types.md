@@ -703,7 +703,7 @@ git commit -m "feat(types): add BIGINT codec (IntCodec with width=8) + INTEGER a
 
 ### Task 5: DOUBLE (FloatCodec with width=8)
 
-- [ ] **Task 5: DOUBLE (FloatCodec with width=8)**
+- [x] **Task 5: DOUBLE (FloatCodec with width=8)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`

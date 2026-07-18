@@ -31,7 +31,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 2 | Migrate 4 MVP codecs to Protocol form (INT/TEXT/FLOAT/BOOL) | 1.3 | done | sonnet | 1 |
 | 3 | SMALLINT (IntCodec with width=2) | 2.1-2.4 | done | sonnet | 0 |
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | done | sonnet | 0 |
-| 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | pending | — | — |
+| 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | done | sonnet | 0 |
 | 6 | BOOLEAN alias for BOOL | 3.5 | pending | — | — |
 | 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | pending | — | — |
 | 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | pending | — | — |
@@ -51,13 +51,25 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 5**: DOUBLE (FloatCodec with width=8)
+**Task 6**: BOOLEAN alias for BOOL
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 无显著风险（纯加法：DOUBLE 实例 + DOUBLE PRECISION alias）
+- **Risk signals**: 无风险（alias-only；Task 2 已设置 `_BoolCodec.aliases = ("BOOLEAN",)` 但需要补 plan 要求的 test_boolean_alias_resolves_to_bool 单元测试）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 5 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `6e5b82a feat(types): add DOUBLE codec (8-byte) + DOUBLE PRECISION alias`
+- RED: 4 failed with KeyError: 'DOUBLE'/'DOUBLE PRECISION'
+- GREEN: 62 tests passed (5 new + 57 existing)
+- File scope: ONLY type_system.py + test_type_system_v2.py
+- Module line count: 345 (-5 from Task 4's 350)
+- DOUBLE PRECISION alias via `aliases = ("DOUBLE PRECISION",)` declarative (Task 4 pattern)
+- REAL still maps to FLOAT (not DOUBLE) — confirmed
+- No per-task reviewer (no risk signals hit)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 4 implementer (sonnet, background)
 - Implementer status: DONE
