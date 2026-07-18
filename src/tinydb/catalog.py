@@ -21,6 +21,7 @@ class Column:
 
     name: str
     type: str
+    type_params: tuple = ()
     nullable: bool = True
     unique: bool = False
     primary_key: bool = False
@@ -29,6 +30,7 @@ class Column:
         return {
             "name": self.name,
             "type": self.type,
+            "type_params": list(self.type_params),
             "nullable": self.nullable,
             "unique": self.unique,
             "primary_key": self.primary_key,
@@ -39,6 +41,7 @@ class Column:
         return cls(
             name=d["name"],
             type=d["type"],
+            type_params=tuple(d.get("type_params", ())),
             nullable=d.get("nullable", True),
             unique=d.get("unique", False),
             primary_key=d.get("primary_key", False),
