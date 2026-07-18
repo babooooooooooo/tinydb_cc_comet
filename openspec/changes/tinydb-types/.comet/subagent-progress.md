@@ -44,20 +44,36 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 15 | Catalog — Column.type_params + backward compat | (covered) | done | — | 0 |
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | done | — | 0 |
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | done | — | 0 |
-| 18 | WHERE clause strict same-type comparison | (covered) | pending | — | — |
+| 18 | WHERE clause strict same-type comparison | (covered) | done | — | 0 |
 | 19 | FLOAT 4-byte regression cleanup | 10.1 | pending | — | — |
 | 20 | REPL integration tests | (covered) | pending | — | — |
 | 21 | Coverage + final verification | 10.1-10.3 | pending | — | — |
 
 ## Current Task
 
-**Task 18**: WHERE clause strict same-type comparison
+**Task 19**: FLOAT 4-byte regression cleanup
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: WHERE 类型校验语义变更（strict same-type per Design D6）+ 跨 codec 比较路径
+- **Risk signals**: 现有测试硬编码 double-precision FLOAT 字面量 → 需要适配 4-byte single precision
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 18 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `e910649 feat(types): WHERE enforces strict same-type comparison (Design D6)`
+- RED: 1 failed (DATE vs TIMESTAMP not distinguished at Python level)
+- GREEN: 34 new tests pass (13 unit + 13 integration + 8 extras); full suite **559 passed**, coverage **94.28%**
+- File scope: type_system.py + executor.py + 2 new test files (test_validate_compare_types.py, test_types_in_where.py)
+- Added: `validate_compare_types(col_type, col_params, lit_type, lit_params)`, `infer_literal_type(value)`, `_format_type_params(params)`
+- eval_expr now: infer literal type → call validate_compare_types → delegate to codec
+- Critical correctness fix: `datetime.datetime` is checked BEFORE `datetime.date` (datetime is subclass of date)
+- Strict same-type verified for: INT vs SMALLINT/BIGINT/TEXT, VARCHAR(N) vs VARCHAR(M)/TEXT, DECIMAL(p1,s1) vs DECIMAL(p2,s2), DATE vs TIMESTAMP, FLOAT vs DOUBLE, CHAR vs TEXT, INT vs BOOL, TEXT vs INT
+- Legacy `validate_compare(col_bytes, col_type, lit_bytes, lit_type)` preserved for backward compat
+- Same-type cases still work: `WHERE id = 2`, `WHERE active = TRUE`, `WHERE d = DATE '...'`
+- SQL-syntax pivot: VARCHAR/DECIMAL/SMALLINT literal prefixes don't exist in tokenizer → covered via unit tests with synthetic tuples
+- No per-task reviewer (decisive completion; comprehensive coverage)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 17 implementer (sonnet, background)
 - Implementer status: DONE

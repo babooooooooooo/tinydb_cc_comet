@@ -2220,7 +2220,7 @@ git commit -m "feat(types): executor wires 15 codecs into INSERT / SELECT paths"
 
 ### Task 18: WHERE clause strict same-type comparison
 
-- [ ] **Task 18: WHERE clause strict same-type comparison**
+- [x] **Task 18: WHERE clause strict same-type comparison**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py` (add `validate_compare`)
