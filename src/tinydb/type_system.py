@@ -194,3 +194,150 @@ def codec_for(type_name: str, params: tuple = ()):
         if not (1 <= p <= 18 and 0 <= s < p):
             raise ValueError(f"DECIMAL({p},{s}) invalid; need 1 <= p <= 18 and 0 <= s < p")
     return lookup(type_name)
+
+
+# ---------------------------------------------------------------------------
+# Codec Protocol implementations (Task 2 / Plan 1.3).
+#
+# Each codec is a stateless singleton instance that owns its bytes encoding.
+# The legacy module-level encode_*/decode_* helpers above remain untouched
+# per Design §F2; call sites that have not yet been migrated (e.g. the
+# MVP executor) continue to use those helpers. Newly dispatched call sites
+# (row_codec via codec_for, future catalog paths) go through these codecs.
+#
+# FLOAT intentionally uses 4-byte single precision (Design D3). The legacy
+# encode_float / decode_float remain 8-byte double for backward compatibility
+# until downstream code is migrated (Task 19 regression cleanup).
+# ---------------------------------------------------------------------------
+
+
+class _IntCodec:
+    """32-bit signed integer (INT). SMALLINT/BIGINT via width param (Plan task 2)."""
+
+    name = "INT"
+
+    def encode_py(self, value):
+        if not (-(2**31) <= value < 2**31):
+            raise OverflowError(f"INT out of range: {value}")
+        return struct.pack(">i", value)
+
+    def decode_bytes(self, buf, offset):
+        if offset + 4 > len(buf):
+            raise ValueError(f"INT decode truncated at offset {offset}")
+        return struct.unpack_from(">i", buf, offset)[0], offset + 4
+
+    def parse_literal(self, text, params):
+        v = int(text)
+        if not (-(2**31) <= v < 2**31):
+            raise OverflowError(f"INT out of range: {v}")
+        return v
+
+    def validate(self, value):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"expected int for INT, got {type(value).__name__}")
+        if not (-(2**31) <= value < 2**31):
+            raise OverflowError(f"INT out of range: {value}")
+
+
+class _TextCodec:
+    """Unlimited-length UTF-8 string. VARCHAR(N) / CHAR(N) in later tasks."""
+
+    name = "TEXT"
+
+    def encode_py(self, value):
+        data = value.encode("utf-8")
+        return struct.pack(">H", len(data)) + data
+
+    def decode_bytes(self, buf, offset):
+        if offset + 2 > len(buf):
+            raise ValueError("TEXT length prefix truncated")
+        (n,) = struct.unpack_from(">H", buf, offset)
+        if offset + 2 + n > len(buf):
+            raise ValueError(f"TEXT payload truncated (need {n} bytes)")
+        return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
+
+    def parse_literal(self, text, params):
+        # text includes surrounding single quotes (tokenizer produces raw text)
+        if len(text) < 2 or text[0] != "'" or text[-1] != "'":
+            raise ValueError(f"invalid text literal: {text!r}")
+        return text[1:-1].replace("''", "'")
+
+    def validate(self, value):
+        if not isinstance(value, str):
+            raise TypeError(f"expected str for TEXT, got {type(value).__name__}")
+
+
+class _BoolCodec:
+    name = "BOOL"
+    aliases = ("BOOLEAN",)
+
+    def encode_py(self, value):
+        return b"\x01" if value else b"\x00"
+
+    def decode_bytes(self, buf, offset):
+        if offset + 1 > len(buf):
+            raise ValueError("BOOL decode truncated")
+        return buf[offset] != 0, offset + 1
+
+    def parse_literal(self, text, params):
+        u = text.upper()
+        if u == "TRUE":
+            return True
+        if u == "FALSE":
+            return False
+        raise ValueError(f"invalid bool literal: {text!r}")
+
+    def validate(self, value):
+        if not isinstance(value, bool):
+            raise TypeError(f"expected bool for BOOL, got {type(value).__name__}")
+
+
+class _FloatCodec:
+    """IEEE 754 floating point.
+
+    width=4 -> single precision (FLOAT/REAL), bytes via '>f'.
+    width=8 -> double precision (DOUBLE), bytes via '>d'. Plan task 3 adds
+    DOUBLE as a separate codec that sets width=8.
+    """
+
+    name = "FLOAT"
+    aliases = ("REAL",)
+    width = 4  # default for FLOAT/REAL; DOUBLE sets width=8
+
+    def encode_py(self, value):
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(f"FLOAT inf/NaN not allowed: {value!r}")
+        if self.width == 4:
+            return struct.pack(">f", value)
+        return struct.pack(">d", value)
+
+    def decode_bytes(self, buf, offset):
+        size = 4 if self.width == 4 else 8
+        fmt = ">f" if self.width == 4 else ">d"
+        if offset + size > len(buf):
+            raise ValueError(f"FLOAT decode truncated at offset {offset}")
+        return struct.unpack_from(fmt, buf, offset)[0], offset + size
+
+    def parse_literal(self, text, params):
+        v = float(text)
+        if math.isnan(v) or math.isinf(v):
+            raise ValueError(f"FLOAT inf/NaN not allowed: {text!r}")
+        return v
+
+    def validate(self, value):
+        if not isinstance(value, float):
+            raise TypeError(f"expected float for FLOAT, got {type(value).__name__}")
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(f"FLOAT inf/NaN not allowed: {value!r}")
+
+
+# Populate REGISTRY with MVP codecs (Plan task 1.3)
+REGISTRY["INT"] = _IntCodec()
+REGISTRY["TEXT"] = _TextCodec()
+REGISTRY["BOOL"] = _BoolCodec()
+REGISTRY["FLOAT"] = _FloatCodec()
+
+# Build alias map from any declared aliases on the registered codecs.
+for _codec in REGISTRY.values():
+    for _alias in getattr(_codec, "aliases", ()):
+        _ALIAS_MAP[_alias] = _codec
