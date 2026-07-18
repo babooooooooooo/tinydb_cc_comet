@@ -41,7 +41,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | done | — | 0 |
 | 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | done | — | 0 |
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | done | — | 0 |
-| 15 | Catalog — Column.type_params + backward compat | (covered) | pending | — | — |
+| 15 | Catalog — Column.type_params + backward compat | (covered) | done | — | 0 |
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | pending | — | — |
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | pending | — | — |
 | 18 | WHERE clause strict same-type comparison | (covered) | pending | — | — |
@@ -51,13 +51,24 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 15**: Catalog — Column.type_params + backward compat
+**Task 16**: row_codec — schema_v2() + codec_for dispatch
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: catalog schema 反序列化路径变更 + 旧 MVP 4 类型子集兼容性
+- **Risk signals**: row codec dispatch 路径变更 + FLOAT 4-byte wire-format 不变 + VARCHAR/CHAR/DECIMAL/DATE/TIME/TIMESTAMP 全部需要 wire encode/decode
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 15 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `8849aa4 feat(catalog): Column.type_params with backward-compatible JSON`
+- RED: 8 failed (no `type_params` field; no `to_dict`/`from_dict` keys)
+- GREEN: 8/8 new tests pass; full unit suite **352 passed**
+- File scope: catalog.py +3 lines + new test_catalog_type_params.py (8 tests)
+- **Minimal change**: only `type_params: tuple = ()` field added between `type: str` and `nullable`; `to_dict`/`from_dict` updated to emit/read the new key
+- Backward compat preserved: legacy `_load_column(["id", "INT"])` still works (relies on defaults); old JSON without `type_params` defaults to `()`
+- No per-task reviewer (decisive completion; minimal diff, well-bounded field addition)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 14 implementer (sonnet, background)
 - Implementer status: DONE

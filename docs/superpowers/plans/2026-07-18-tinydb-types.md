@@ -1841,7 +1841,7 @@ git commit -m "feat(types): parser accepts DECIMAL 'literal' prefix"
 
 ### Task 15: Catalog — Column.type_params + backward compat
 
-- [ ] **Task 15: Catalog — Column.type_params + backward compat**
+- [x] **Task 15: Catalog — Column.type_params + backward compat**
 
 **Files:**
 - Modify: `src/tinydb/catalog.py`
