@@ -23,7 +23,11 @@ from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
     NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
 )
-from tinydb.type_system import codec_for
+from tinydb.type_system import (
+    codec_for,
+    infer_literal_type,
+    validate_compare_types,
+)
 
 # MAX_INLINE_PAYLOAD = 4078; subtract SLOT_SIZE so an inline first chunk on
 # an empty page leaves room for the slot directory entry (no overlap).
@@ -49,6 +53,11 @@ def eval_expr(expr: Any, row: list, schema: list) -> bool:
             raise ExecutionError(f"unknown column {expr.column!r}")
         col_type = schema[col_idx][1]
         col_params = schema[col_idx][2] if len(schema[col_idx]) >= 3 else ()
+        # Strict same-type check first (Design D6 / Task 18): if the parsed
+        # literal's inferred DB type or its params disagree with the column
+        # declaration, raise TypeError before any byte encoding happens.
+        lit_type, lit_params = infer_literal_type(expr.value)
+        validate_compare_types(col_type, col_params, lit_type, lit_params)
         try:
             codec_for(col_type, col_params).validate(expr.value)
         except (TypeError, ValueError, OverflowError) as e:

@@ -133,6 +133,70 @@ def validate_compare(col_bytes: bytes, col_type: str,
             raise ValueError("FLOAT inf/NaN not allowed")
 
 
+def _format_type_params(type_name: str, params: tuple) -> str:
+    """Render ``'VARCHAR(10,) [5]'`` style suffix; empty when params empty."""
+    if not params:
+        return ""
+    return f"{list(params)}"
+
+
+def validate_compare_types(col_type: str, col_params: tuple,
+                           lit_type: str, lit_params: tuple) -> None:
+    """Strict same-type comparison per Design D6.
+
+    WHERE-clause equality requires the column type and the literal type to
+    match by both ``type_name`` and ``type_params``. Used by the executor
+    before delegating byte comparison to ``codec_for``.
+
+    Raises:
+        TypeError: column type or params differ from literal.
+    """
+    if col_type != lit_type or col_params != lit_params:
+        raise TypeError(
+            f"type mismatch: {col_type}{_format_type_params(col_type, col_params)} "
+            f"vs {lit_type}{_format_type_params(lit_type, lit_params)}"
+        )
+
+
+def infer_literal_type(value: object) -> tuple[str, tuple]:
+    """Map a parsed-literal Python value to ``(type_name, type_params)``.
+
+    The parser emits Python primitives (``bool``/``int``/``float``/``str``) for
+    unprefixed literals and ``datetime.date``/``datetime.time``/
+    ``datetime.datetime`` for date/time/timestamp-prefixed literals. We infer
+    the most common DB type the literal would be assigned to:
+
+    - ``bool``  -> ``BOOL``
+    - ``int``   -> ``INT`` (the default INT width; SMALLINT/BIGINT literals
+      are not expressible in the current grammar)
+    - ``float`` -> ``DOUBLE`` (Python float is double precision; FLOAT col
+      expects a width-4 value the executor cannot infer from Python)
+    - ``str``   -> ``TEXT``
+    - ``datetime.date`` -> ``DATE``
+    - ``datetime.time`` -> ``TIME``
+    - ``datetime.datetime`` -> ``TIMESTAMP``
+
+    Raises:
+        TypeError: unrecognized Python type.
+    """
+    # bool before int: bool is a subclass of int in Python.
+    if isinstance(value, bool):
+        return "BOOL", ()
+    if isinstance(value, int):
+        return "INT", ()
+    if isinstance(value, float):
+        return "DOUBLE", ()
+    if isinstance(value, str):
+        return "TEXT", ()
+    if isinstance(value, _dt.datetime):
+        return "TIMESTAMP", ()
+    if isinstance(value, _dt.date):
+        return "DATE", ()
+    if isinstance(value, _dt.time):
+        return "TIME", ()
+    raise TypeError(f"unknown literal type: {type(value).__name__}")
+
+
 # TypeCodec registry; legacy helpers above stay for backward compatibility.
 # Parametric codecs are stored as classes and instantiated by codec_for().
 
