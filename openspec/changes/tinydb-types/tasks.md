@@ -59,7 +59,7 @@
 
 ## 9. 兼容性
 
-- [ ] 9.1 MVP 旧 catalog schema 反序列化路径不爆（4 类型仍是 4 类型 subset）
+- [x] 9.1 MVP 旧 catalog schema 反序列化路径不爆（4 类型仍是 4 类型 subset）
 - [ ] 9.2 README 增加 types 段落
 
 ## 10. 回归

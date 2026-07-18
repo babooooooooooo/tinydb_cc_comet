@@ -37,7 +37,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | done | sonnet | 0 |
 | 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | done (manual) | sonnet | 0 |
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | done | sonnet | 0 |
-| 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | pending | — | — |
+| 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | done | — | 0 |
 | 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | pending | — | — |
 | 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | pending | — | — |
 | 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | pending | — | — |
@@ -51,13 +51,25 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 11**: Verify all 15 codecs in REGISTRY
+**Task 12**: Parser — type_spec with VARCHAR(N) / DECIMAL(p,s)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 公共 API 契约变更（修复 plan §F2 alias 注册语义 — aliases 需要在 REGISTRY 中也可见）+ 1 个预存 RED 测试
+- **Risk signals**: parser 公共 API 契约变更（column definition 语法扩展）+ 跨模块影响（row_codec、catalog）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 11 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `b2418ed test(types): assert full 15-type REGISTRY + alias resolution`
+- RED: `test_registry_has_15_core_types` failed — REGISTRY had 13 keys, test expected 15
+- GREEN: registry suite 9 passed; full unit suite **313 passed**; coverage **86.78%**
+- File scope: ONLY type_system.py + test_type_system_registry.py
+- Module line count: **444 lines** (within ≤445 target)
+- Singleton identity preserved: `REGISTRY["BOOLEAN"] is REGISTRY["BOOL"] → True`; `REGISTRY["REAL"] is REGISTRY["FLOAT"] → True`
+- Aliases (INTEGER, DOUBLE PRECISION) registered as REGISTRY keys; `lookup()` resolves all 4 aliases correctly
+- No per-task reviewer (decisive completion; only test addition + singleton alias registration)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 10 implementer (sonnet, background)
 - Implementer status: DONE_WITH_CONCERNS

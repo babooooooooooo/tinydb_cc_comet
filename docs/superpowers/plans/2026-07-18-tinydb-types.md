@@ -1434,7 +1434,7 @@ git commit -m "feat(types): add DATE / TIME / TIMESTAMP codecs (UTC unified)"
 
 ### Task 11: Verify all 15 codecs in REGISTRY
 
-- [ ] **Task 11: Verify all 15 codecs in REGISTRY**
+- [x] **Task 11: Verify all 15 codecs in REGISTRY**
 
 **Files:**
 - Modify: `tests/unit/test_type_system_registry.py`
