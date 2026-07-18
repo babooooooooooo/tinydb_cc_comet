@@ -869,7 +869,7 @@ git commit -m "feat(types): register BOOLEAN alias for BOOL"
 
 ### Task 7: VARCHAR (parametric codec with max_len)
 
-- [ ] **Task 7: VARCHAR (parametric codec with max_len)**
+- [x] **Task 7: VARCHAR (parametric codec with max_len)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`

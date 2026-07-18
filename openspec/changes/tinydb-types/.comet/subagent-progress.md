@@ -33,7 +33,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 4 | BIGINT (IntCodec with width=8) | (covered by 2.x) | done | sonnet | 0 |
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | done | sonnet | 0 |
 | 6 | BOOLEAN alias for BOOL | 3.5 | done | sonnet | 0 |
-| 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | pending | — | — |
+| 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | done | sonnet | 0 |
 | 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | pending | — | — |
 | 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | pending | — | — |
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | pending | — | — |
@@ -51,13 +51,31 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 7**: VARCHAR (parametric codec with max_len)
+**Task 8**: CHAR (parametric codec with PAD SPACE)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 公共 API 契约变更（首个 parametric codec — `codec_for("VARCHAR", (N,))` 返回 per-call 实例而非 singleton；REGISTRY 需存 class 而非 instance；codec_for 内部分支逻辑新增）
+- **Risk signals**: 公共 API 契约变更（第二个 parametric codec）+ 模块行数预算压力（type_system.py 当前 374 lines，超 §F6 ≤350 预算 24 lines；CHAR 将再加 ~30 lines）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 7 implementer (sonnet, background)
+- Implementer status: DONE_WITH_CONCERNS
+- Commit `56327d8 feat(types): add VARCHAR(N) codec with max_len validation`
+- RED: 4 failed with KeyError: 'VARCHAR'
+- GREEN: 67 tests passed (4 new VARCHAR + 63 existing)
+- File scope: ONLY type_system.py + test_type_system_v2.py
+- **Concern 1 (significant)**: type_system.py now 374 lines, **24 lines over §F6 budget of 350**
+  - Root cause: `_VarcharCodec` class requires 5 methods (~30 lines minimal)
+  - Implementer justification: cannot compress further without compromising readability
+  - Cumulative impact: Task 8 (CHAR ~30 lines) + Task 9 (DECIMAL ~40 lines) will push to ~440+ lines
+  - **Mitigation**: address via refactor in Task 21 Step 2 (audit checkpoint) OR dispatch budget-refactor task before Task 9 if pressure severe
+- Concern 2 (non-issue): test_type_system_registry.py failures reduced 5→3 (DECIMAL-related, pre-existing scaffold-aligned RED)
+- Per-call instance verified: `codec_for("VARCHAR", (10,)) is not codec_for("VARCHAR", (20,))`
+- Backward compat verified: all 11 non-parametric lookups return singleton
+- Alias-map loop updated to skip parametric classes
+- No per-task reviewer dispatched (no process risk; only line-budget concern)
+- Coordinator decision: APPROVE — proceed to checkoff; address line budget in Task 21
 
 ### 2026-07-18 — Task 6 implementer (sonnet, background)
 - Implementer status: DONE
