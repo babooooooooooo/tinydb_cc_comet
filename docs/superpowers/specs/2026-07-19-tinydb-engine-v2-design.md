@@ -1,287 +1,290 @@
-# tinydb-engine-v2 Design Doc
+---
+comet_change: tinydb-engine-v2
+role: technical-design
+canonical_spec: openspec
+status: final
+---
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+# Design: tinydb-engine-v2
 
-**Goal:** Extend the storage layer with multi-page catalog overflow chain, free list page reclamation, and B+tree indexes for PRIMARY KEY / UNIQUE columns. SQL syntax and parser/executor contract unchanged.
+> **关联文档**：[proposal.md](../../../../openspec/changes/tinydb-engine-v2/proposal.md) · [design.md](../../../../openspec/changes/tinydb-engine-v2/design.md) · [tasks.md](../../../../openspec/changes/tinydb-engine-v2/tasks.md)
+> **Brainstorm checkpoint**：[brainstorm-summary.md](../../../../openspec/changes/tinydb-engine-v2/.comet/handoff/design-context.md)
+> **Date**：2026-07-19
+> **承接 change 名**：`tinydb-engine-v2`
 
-**Architecture:** Three coupled storage-layer capabilities (free list, multi-page catalog, B+tree) added under a single change because they share `Pager.alloc/free_page` as the unifying API. IndexManager wraps B+tree per (table, indexed-column) pair and routes SELECT WHERE / INSERT / UPDATE / DELETE through indexed lookups instead of O(n) scans.
-
-**Tech Stack:** Python 3.10+ stdlib only. No new external dependencies.
-
-**Pre-req:** `tinydb-constraints` (PRIMARY KEY / UNIQUE metadata already in `Column`).
+本文档落实六轮澄清与五段设计裁决，提供实现级技术方案供 build 阶段 implementer 直接对照。
 
 ---
 
 ## 1. Context
 
-MVP + 3 subsequent changes (engine-v1, constraints, types, aggregation) share three storage-layer bottlenecks:
+MVP + 四个后续 change（engine-v1、constraints、types、aggregation）共享三个存储层瓶颈：
 
-1. **Catalog single-page (4KB)** — holds table metadata as JSON on page 1; > 50 tables overflows the page.
-2. **No page reclamation** — `DROP TABLE` removes the catalog entry but the table's data pages leak; file size grows monotonically.
-3. **O(n) unique/PK checks** — `_validate_unique_keys` walks every row on every INSERT. SELECT WHERE on indexed columns also scans every row.
+1. **Catalog 单页（4KB）** —— 表元数据以 JSON 存放在 page 1；超过 50 张表即溢出页面。
+2. **无页回收** —— `DROP TABLE` 只移除 catalog 条目，表的数据页泄漏；文件大小只增不减。
+3. **O(n) 唯一/PK 校验** —— `_validate_unique_keys` 在每次 INSERT 时遍历全部行。SELECT WHERE 命中索引列时也全表扫描。
 
-These three are tightly coupled: free list serves both DROP reclamation and B+tree node allocation; multi-page catalog and B+tree persistence share the same page-level API.
+三者紧密耦合：free list 同时服务 DROP 回收与 B+tree 节点分配；多页 catalog 与 B+tree 持久化共享同一页面级 API。
 
 ## 2. Goals / Non-Goals
 
-**Goals:**
-- Pager header grows to `schema_version=0x02` + `free_list_head: u32`. Old v1 files auto-upgrade on open.
-- `Pager.alloc_page()` consults free list head before extending the file; `Pager.free_page()` head-inserts.
-- Catalog spans multiple pages via overflow chain when JSON exceeds one page.
-- B+tree self-implemented (one node per 4KB page, fanout=16). Tombstone on delete (no merge).
-- `IndexManager` indexes PRIMARY KEY and UNIQUE columns. INSERT/UPDATE/DELETE maintain the B+tree. SELECT WHERE on an indexed column uses index lookup; misses return empty.
-- Constraint validation (UNIQUE / PK) uses B+tree lookup instead of O(n) scan.
-- DROP TABLE frees data + index + overflow chain pages via `Pager.free_page()`.
-- Backward compat: existing `.db` files auto-upgrade to v2 on open; indexes built lazily on first access.
+**Goals：**
+- Pager header 升级为 `schema_version=0x02` + `free_list_head: u32`。旧 v1 文件开打时自动升级。
+- `Pager.alloc_page()` 优先查询 free list 表头；`Pager.free_page()` 头插释放页。
+- Catalog 在 JSON 超出一页时通过溢出链跨多页。
+- B+tree 自实现（每节点一 4KB 页，fanout=16）。删除仅置 tombstone（不主动 merge）。
+- `IndexManager` 索引 PRIMARY KEY 与 UNIQUE 列。INSERT/UPDATE/DELETE 维护 B+tree。SELECT WHERE 命中索引列走索引查找；miss 返回空。
+- 约束校验（UNIQUE / PK）改用 B+tree 查找，替代 O(n) 扫描。
+- DROP TABLE 通过 `Pager.free_page()` 回收 data + index + overflow chain 页。
+- 向后兼容：既有 `.db` 文件开打时自动升级到 v2；索引在首次访问该表时惰性构建。
 
-**Non-Goals:**
-- ACID / WAL / transactions (→ `tinydb-acid`)
-- Concurrency / multi-threading
-- Composite / multi-column indexes
-- Reverse indexes / full-text / hash indexes
-- ANALYZE / statistics
-- B+tree merge / underflow rebalancing (tombstone only)
-- Index-only scans (read all columns from index)
-- Periodic compaction / garbage collection of tombstone-dense pages
+**Non-Goals：**
+- ACID / WAL / 事务（→ `tinydb-acid`）
+- 并发 / 多线程
+- 复合 / 多列索引
+- 倒排索引 / 全文索引 / Hash 索引
+- ANALYZE / 统计信息
+- B+tree merge / underflow 再平衡（仅 tombstone）
+- Index-only scans（仅从索引读全部列）
+- tombstone 密集页的周期性 compaction / GC
 
 ## 3. Architecture
 
 ### 3.1 Pager v2 header + free list
 
-**File header (page 0):**
+**文件头（page 0）：**
 ```
-bytes  0-7:   magic          b'TINYDB\x00\x02'   # version 0x02
+bytes  0-7:   magic          b'TINYDB\x00\x02'   # 版本 0x02
 byte   8:     schema_version 0x02
-bytes  9-12:  free_list_head u32                  # head of free page chain, 0 = empty
+bytes  9-12:  free_list_head u32                  # free 页链头，0 = 空
 bytes 13-4095: reserved (zeros)
 ```
 
-**Free list semantics:**
-- A free page's first 4 bytes (offset 0) are interpreted as `u32 next_free_page_id` (0 = end of chain).
-- Free page contents beyond byte 4 are unused while free.
-- `Pager.alloc_page()`: if `free_list_head != 0`, read the head page, extract `next_free`, update header; return head page id. Otherwise append a new page and return its id.
-- `Pager.free_page(page_id)`: write `next_free = free_list_head` at page[0:4]; update header to `page_id`. The page contents are otherwise left intact (best-effort).
+**Free list 语义：**
+- 释放页的前 4 字节（offset 0）解释为 `u32 next_free_page_id`（0 = 链尾）。
+- 释放状态下，page 第 4 字节之后的内容不使用。
+- `Pager.alloc_page()`：若 `free_list_head != 0`，读取该页 next_free、更新 header；返回该页 id。否则追加新页。
+- `Pager.free_page(page_id)`：在 page[0:4] 写入 `next_free = free_list_head`；更新 header 的 `page_id`。其余内容 best-effort。
 
-**Backward compat (v1 → v2):**
-- On `Pager.open()`, if `schema_version=0x01`: rewrite byte 8 to 0x02, write `free_list_head=0` at bytes 9-12. No data migration.
-- IndexManager rebuilds lazily on first INSERT/SELECT for each table (one-time full scan to build B+tree).
+**向后兼容（v1 → v2）：**
+- `Pager.open()` 时若 `schema_version=0x01`：把 byte 8 改写为 0x02，在 bytes 9-12 写入 `free_list_head=0`。不迁移数据。
+- IndexManager 在每张表的首次 INSERT/SELECT 时惰性构建（一次全表扫描 → B+tree）。
 
-**Module line budget:** `pager.py ≤ 400` (was 169; +~120 lines).
+**模块行数预算：** `pager.py ≤ 400`（原 169；+~120 行）。
 
 ### 3.2 Catalog overflow chain
 
-**On-disk format:**
-- Page 1 = chain head. Each chain page holds one JSON segment: `{"tables": {...}, "_seg_index": N, "_seg_count": M}`.
-- Each non-final page starts with `u32 next_page` at offset 0 (4 bytes), then the JSON segment.
-- Final page: next_page = 0.
-- Overflow trigger: adding the next table entry would push page payload over `PAGE_SIZE - 16` bytes (16 = chain metadata + safety).
+**磁盘格式：**
+- Page 1 = chain head。每条 chain page 容纳一段 JSON segment：`{"tables": {...}, "_seg_index": N, "_seg_count": M}`。
+- 非末页的 page 起始 4 字节为 `u32 next_page`（0 = 末页），其后是 JSON segment。
+- 溢出触发：增加下一张表条目会让 page payload 超过 `PAGE_SIZE - 16` 字节（16 = chain 元数据 + 安全冗余）。
 
-**Write path (`Catalog.to_bytes` → chain):**
-1. Serialize JSON. If fits in `PAGE_SIZE - 16` bytes, write to page 1 directly (no chain).
-2. Else, segment greedily into pages, allocate new chain pages via `Pager.alloc_page()`, write each segment.
+**写路径（`Catalog.to_bytes` → chain）：**
+1. 序列化 JSON。若能放进 `PAGE_SIZE - 16` 字节，直接写入 page 1（无 chain）。
+2. 否则贪婪切分到多页，`Pager.alloc_page()` 分配新 chain page，逐段写入。
 
-**Read path (`Catalog.from_bytes`):**
-1. Walk chain head → tail.
-2. Concatenate JSON segments (strip `_seg_index` / `_seg_count` metadata, or keep as debugging aid).
-3. `json.loads` once.
+**读路径（`Catalog.from_bytes`）：**
+1. 沿 chain head → tail 走完整链。
+2. 拼接 JSON segments（剥离 `_seg_index` / `_seg_count`，或保留作调试信息）。
+3. `json.loads` 一次。
 
-**Module line budget:** `catalog.py ≤ 200` (was 169; +~80 lines).
+**模块行数预算：** `catalog.py ≤ 250`（原 169；+~80 行）。
 
 ### 3.3 B+tree
 
-**Page layout (4KB = 4096 bytes):**
+**Page 布局（4KB = 4096 字节）：**
 ```
 byte 0:      node_type     u8     (1 = leaf, 2 = internal)
 byte 1:      reserved      u8     (0)
 bytes 2-3:   key_count     u16
 bytes 4-5:   reserved      u16    (0)
-bytes 6-9:   next_leaf_id  u32    (leaf only; 0 = no next leaf; internal = 0)
+bytes 6-9:   next_leaf_id  u32    (仅 leaf；0 = 无下个 leaf；internal = 0)
 bytes 10-4095: payload     4086 bytes
 ```
 
-**Internal node payload:**
-- `keys[0..key_count-1]` (each = key_size bytes, fixed-width for fixed-width types; variable for VARCHAR/TEXT)
-- `children[0..key_count]` (each = u32 page_id; key_count+1 children)
+**内部节点 payload：**
+- `keys[0..key_count-1]`（每条 = key_size 字节；定长类型定长，变长类型变长）
+- `children[0..key_count]`（每条 = u32 page_id；key_count+1 个子节点）
 
-**Leaf node payload:**
-- `keys[0..key_count-1]` (each = key_size bytes, same encoding as internal)
-- `values[0..key_count-1]` (each = u32 row_page_id << 32 | slot_id, packed u64)
-- Tombstones: an additional bit per entry, packed into the `reserved` bytes after key_count (16 bits; current design uses in-band flag — see § 3.3.3)
+**叶子节点 payload：**
+- `keys[0..key_count-1]`（每条 = key_size 字节，与内部一致）
+- `values[0..key_count-1]`（每条 = u32 row_page_id << 32 | slot_id，u64 打包）
+- Tombstone：每条 entry 1 bit，packed 在 entry metadata byte 中（详见 § 3.3.3）
 
-**3.3.1 Key encoding** (per Q1 answer — `codec_for()`):
+**3.3.1 Key 编码**（Q1 答复 —— `codec_for()`）：
 
-| Type | Encoding | Width |
-|------|----------|-------|
-| `SMALLINT` | big-endian signed i16 | 2 bytes (fixed) |
-| `INT` / `INTEGER` | big-endian signed i32 | 4 bytes (fixed) |
-| `BIGINT` | big-endian signed i64 | 8 bytes (fixed) |
-| `FLOAT` / `REAL` | big-endian IEEE 754 single (u32 bits) | 4 bytes (fixed) |
-| `DOUBLE` | big-endian IEEE 754 double (u64 bits) | 8 bytes (fixed) |
-| `DATE` | big-endian signed i32 (days since 1970-01-01 UTC) | 4 bytes (fixed) |
-| `TIME` | big-endian unsigned u32 (seconds since midnight UTC) | 4 bytes (fixed) |
-| `TIMESTAMP` | big-endian signed i64 (seconds since 1970-01-01 UTC) | 8 bytes (fixed) |
-| `VARCHAR(N)` | u16 length prefix + UTF-8 bytes | 2 + utf8_len (variable) |
-| `CHAR(N)` | fixed N bytes (right-space padded) | N bytes (fixed) |
-| `TEXT` | u32 length prefix + UTF-8 bytes | 4 + utf8_len (variable) |
-| `DECIMAL(p,s)` | big-endian signed i64 (scaled) | 8 bytes (fixed) |
-| `BOOL` / `BOOLEAN` | u8 (0 / 1) | 1 byte (fixed) |
+| 类型 | 编码 | 宽度 |
+|------|------|------|
+| `SMALLINT` | big-endian signed i16 | 2 字节（定长） |
+| `INT` / `INTEGER` | big-endian signed i32 | 4 字节（定长） |
+| `BIGINT` | big-endian signed i64 | 8 字节（定长） |
+| `FLOAT` / `REAL` | big-endian IEEE 754 单精度（u32 位） | 4 字节（定长） |
+| `DOUBLE` | big-endian IEEE 754 双精度（u64 位） | 8 字节（定长） |
+| `DATE` | big-endian signed i32（自 UTC 1970-01-01 起天数） | 4 字节（定长） |
+| `TIME` | big-endian unsigned u32（自 UTC 当日起秒数） | 4 字节（定长） |
+| `TIMESTAMP` | big-endian signed i64（自 UTC 1970-01-01 起秒数） | 8 字节（定长） |
+| `VARCHAR(N)` | u16 长度前缀 + UTF-8 字节 | 2 + utf8_len（变长） |
+| `CHAR(N)` | 定长 N 字节（右空格填充） | N 字节（定长） |
+| `TEXT` | u32 长度前缀 + UTF-8 字节 | 4 + utf8_len（变长） |
+| `DECIMAL(p,s)` | big-endian signed i64（scaled） | 8 字节（定长） |
+| `BOOL` / `BOOLEAN` | u8（0 / 1） | 1 字节（定长） |
 
-NULL values are not indexed (R9 SQL standard semantics from constraints change). Variable-width keys (VARCHAR/TEXT) require a separate leaf payload format — each entry stores `(u16 key_len, key_bytes, u64 value)` instead of `(fixed_key, u64 value)`.
+NULL 不入索引（沿用 constraints change 的 R9 SQL 标准语义）。变长键（VARCHAR/TEXT）走单独的 leaf payload 格式：每条 entry 存 `(u16 key_len, key_bytes, u64 value)`，而非 `(fixed_key, u64 value)`。
 
-**3.3.2 Operations:**
-- `insert(key, slot_ref)`: descend tree, insert into leaf; if leaf full → split at median, promote median to parent; recurse up. Root split allocates new root page.
-- `search(key) -> SlotRef | None`: descend tree by key comparison.
-- `range(start, end) -> Iterable[SlotRef]`: descend to start leaf, iterate via `next_leaf_id` until key > end.
-- `delete(key)`: descend to leaf, mark entry as tombstone (in-band flag bit; no merge — see § 3.3.3).
+**3.3.2 操作：**
+- `insert(key, slot_ref)`：下降至 leaf 插入；leaf 满则按中位 key 拆分并提升至父节点；向上递归；根节点分裂分配新 root 页（树高增长）。
+- `search(key) -> SlotRef | None`：按 key 比较下降。
+- `range(start, end) -> Iterable[SlotRef]`：下降至起始 leaf，沿 `next_leaf_id` 迭代直至 key > end。
+- `delete(key)`：下降至 leaf，将 entry 标记为 tombstone（in-band flag 位；不主动 merge —— 详见 § 3.3.3）。
 
-**3.3.3 Tombstone semantics** (per Q3 answer — no merge):
-- Each entry in a leaf has a 1-bit tombstone flag stored in the entry's metadata byte (immediately before the key). Marked tombstone: entry stays in place but `search` skips it.
-- Periodic compaction (rebuild tombstone-dense pages) is explicitly out of scope.
+**3.3.3 Tombstone 语义**（Q3 答复 —— 不主动 merge）：
+- 每个 leaf entry 的 tombstone flag 存在 entry metadata byte（key 之前的 1 字节）。标记 tombstone 后：entry 保留原位，`search` 跳过。
+- 周期性 compaction（重建 tombstone 密集页）明确 out of scope。
 
-**Module line budget:** `btree.py ≤ 400` (new file, ~350 lines).
+**模块行数预算：** `btree.py ≤ 400`（新文件，约 350 行）。
 
-### 3.4 IndexManager + executor routing
+### 3.4 IndexManager + executor 路由
 
-**`IndexManager`** owns `dict[(table_name, column_name), BTreeRootPageId]`.
+**`IndexManager`** 持有 `dict[(table_name, column_name), BTreeRootPageId]`。
 
-**On `Database.open()`:**
-- Load catalog (walk overflow chain).
-- For each table, call `rebuild_for_table(table)`: full scan of all data pages, for each indexed column (PK or UNIQUE), `BTree.insert(encoded_key, SlotRef(page_id, slot_id))`.
+**`Database.open()` 时：**
+- 加载 catalog（走 overflow chain）。
+- 对每张表调用 `rebuild_for_table(table)`：全表扫描，对每个索引列（PK 或 UNIQUE）执行 `BTree.insert(encoded_key, SlotRef(page_id, slot_id))`。
 
-**On `INSERT`:**
-- After slot write succeeds: `index_manager.insert(table, col, encoded_key, slot_ref)` for each indexed column.
-- Pre-write check: `index_manager.lookup(...)` for each indexed column; if found → raise `ConstraintViolation` (replaces O(n) `_scan_unique_keys`).
-- Failure rollback: remove slot, `index_manager.delete(...)` for the partial insert.
+**`INSERT` 时：**
+- 写入 slot 成功后：对每个索引列调用 `index_manager.insert(table, col, encoded_key, slot_ref)`。
+- 写前检查：对每个索引列调用 `index_manager.lookup(...)`；若命中 → 抛 `ConstraintViolation`（替代 O(n) `_scan_unique_keys`）。
+- 失败回滚：删除 slot，对已完成部分插入调用 `index_manager.delete(...)`。
 
-**On `DELETE`:**
-- Identify slot(s) via `index_manager.lookup(...)` filtered by WHERE clause.
-- Remove slot, `index_manager.delete(...)` for each indexed column.
+**`DELETE` 时：**
+- 通过 `index_manager.lookup(...)` 并结合 WHERE 过滤定位 slot。
+- 删除 slot，对每个索引列调用 `index_manager.delete(...)`。
 
-**On `UPDATE`:**
-- For each indexed column whose value changes: `delete(old_key)`, then `insert(new_key)`.
+**`UPDATE` 时：**
+- 对值变化的索引列：先 `delete(old_key)` 后 `insert(new_key)`。
 
-**On `SELECT WHERE col = lit`:** (per Q4 answer — always use index, no fallback)
-- If `(table, col)` is in `index_manager` and WHERE is single equality (no AND/OR): call `index_manager.lookup(...)` for the slot_ref, read that one slot.
-- Index miss → empty result (no stderr warning).
+**`SELECT WHERE col = lit` 时**（Q4 答复 —— 始终用索引，不回退扫描）：
+- 若 `(table, col)` 在 `index_manager` 中且 WHERE 为单等值（无 AND/OR）：调用 `index_manager.lookup(...)` 拿 slot_ref，读这一条 slot。
+- 索引 miss → 返回空结果（无 stderr 警告）。
 
-**Module line budget:** `index_manager.py ≤ 200` (new file, ~150 lines). `executor.py ≤ 920` (was 707; +~100 lines for index lookup paths).
+**模块行数预算：** `index_manager.py ≤ 200`（新文件，约 150 行）；`executor.py ≤ 920`（原 707；+~100 行索引查找路径）。
 
-### 3.5 DROP TABLE reclamation
+### 3.5 DROP TABLE 回收
 
-**On `DROP TABLE`:**
-1. Walk data pages (read root, descend chain) → collect data page IDs.
-2. For each indexed column: walk its B+tree (read root, descend via child pointers) → collect index page IDs.
-3. `Pager.free_page()` each collected page id.
-4. Remove table from catalog.
-5. Catalog re-serialized to overflow chain (may shrink if it was on its own page).
+**`DROP TABLE` 时：**
+1. 走数据页（读 root，沿 chain 下降）→ 收集 data page id。
+2. 对每个索引列：走其 B+tree（读 root，沿 child 指针下降）→ 收集 index page id。
+3. `Pager.free_page()` 逐个释放收集到的页 id。
+4. 从 catalog 移除该表。
+5. Catalog 重新序列化至 overflow chain（若占用整页可能缩短）。
 
-**Module line budget:** included in `executor.py` (above).
+**模块行数预算：** 含在 `executor.py` 内（上文已计）。
 
-## 4. Spec decisions (D1–D6)
+## 4. Spec decisions（D1–D6）
 
-### D1: Index key encoding
-Per § 3.3.1 — `codec_for(type, type_params).encode_py(value)` produces fixed-width sortable bytes. NULL values not indexed.
+### D1：索引键编码
+按 § 3.3.1 —— `codec_for(type, type_params).encode_py(value)` 产出定长可排序字节。NULL 不入索引。
 
-### D2: Fanout
-Fanout = 16 keys per leaf / internal node. With max key size 8 bytes (BIGINT / DECIMAL / DOUBLE / TIMESTAMP) + 4-byte child pointer, internal nodes fit ~16 keys per 4KB page. Smaller keys (INT = 4 bytes) pack more keys per page.
+### D2：Fanout
+Fanout = 每 leaf/internal 节点 16 key。最大 key 8 字节（BIGINT / DECIMAL / DOUBLE / TIMESTAMP）+ 4 字节 child pointer，internal 节点在 4KB 内可容纳 ~16 key。短键类型（INT = 4 字节）每页装入更多 key。
 
-### D3: Tombstone on delete (no merge)
-Per Q3 answer — entries marked deleted via in-band flag. Tree shape unchanged. Compaction deferred.
+### D3：删除仅 tombstone（不主动 merge）
+按 Q3 答复 —— entry 通过 in-band flag 标记删除。树形不变。compaction 延后。
 
-### D4: Always use index (no fallback) (per Q4 answer)
-SELECT WHERE on indexed column never falls back to scan. Non-indexed columns continue to scan.
+### D4：始终用索引（不回退扫描）（Q4 答复）
+SELECT WHERE 命中索引列永不下放扫描。非索引列继续全表扫描。
 
-### D5: Full reclaim on DROP (per Q6 answer)
-Data + index + overflow chain pages all returned to free list on DROP.
+### D5：DROP 全回收（Q6 答复）
+data + index + overflow chain 页全部归还 free list。
 
-### D6: Auto-upgrade v1 → v2 on open (per Q5 answer)
-`Pager.open()` rewrites header byte 8 to 0x02 and writes `free_list_head=0`. Indexes built lazily on first INSERT/SELECT for each table.
+### D6：v1 → v2 自动升级（Q5 答复）
+`Pager.open()` 改写 header byte 8 为 0x02 并写入 `free_list_head=0`。索引在每张表的首次 INSERT/SELECT 时惰性构建。
 
 ## 5. Capabilities
 
 ### New Capabilities
 
-- `storage-free-list`: Pager maintains free list (head page id + chain); alloc consults, free head-inserts.
-- `storage-multi-page-catalog`: Catalog spans overflow chain when JSON exceeds one page.
-- `index-btree-primary`: B+tree on PRIMARY KEY column; INSERT/DELETE/UPDATE maintain; SELECT WHERE PK = lit uses index.
-- `index-btree-unique`: B+tree on any UNIQUE column (one B-tree per UNIQUE column).
+- `storage-free-list`：Pager 维护 free list（head page id + 链）；alloc 查询，free 头插。
+- `storage-multi-page-catalog`：Catalog JSON 超出一页时跨溢出链。
+- `index-btree-primary`：PRIMARY KEY 列上的 B+tree；INSERT/DELETE/UPDATE 维护；SELECT WHERE PK = lit 走索引。
+- `index-btree-unique`：任意 UNIQUE 列上的 B+tree（每 UNIQUE 列一棵）。
 
 ### Modified Capabilities
 
-- `storage-engine` (from MVP): `Pager.alloc_page` / `Pager.free_page` reworked; v1 → v2 auto-upgrade on open.
-- `schema-column-constraints` (from `tinydb-constraints`): UNIQUE / PRIMARY KEY validation switches from O(n) scan to O(log n) B+tree lookup.
-- `sql-update-statement` (from `tinydb-engine-v1`): UPDATE WHERE path uses index when applicable.
-- DROP TABLE behavior: reclaims data + index + overflow chain pages.
+- `storage-engine`（来自 MVP）：`Pager.alloc_page` / `Pager.free_page` 重写；v1 → v2 开打时自动升级。
+- `schema-column-constraints`（来自 `tinydb-constraints`）：UNIQUE / PRIMARY KEY 校验由 O(n) 扫描改为 O(log n) B+tree 查找。
+- `sql-update-statement`（来自 `tinydb-engine-v1`）：UPDATE WHERE 路径在适用场景走索引。
+- DROP TABLE 行为：回收 data + index + overflow chain 页。
 
-## 6. File / module impact
+## 6. 文件 / 模块影响
 
-| File | Status | Line budget | Notes |
-|------|--------|-------------|-------|
-| `src/tinydb/pager.py` | modify | ≤ 400 | +free list, v2 header, v1 upgrade |
-| `src/tinydb/catalog.py` | modify | ≤ 250 | +overflow chain serialization + walk |
-| `src/tinydb/btree.py` | new | ≤ 400 | B+tree node, insert, search, range, delete (tombstone) |
-| `src/tinydb/index_manager.py` | new | ≤ 200 | (table, col) → BTree root mapping; rebuild_for_table |
-| `src/tinydb/executor.py` | modify | ≤ 920 | +index lookup paths in INSERT/UPDATE/DELETE/SELECT; +DROP reclamation |
-| `src/tinydb/database.py` | modify | (no new budget) | Initialize IndexManager on open |
-| `tests/unit/test_btree.py` | new | — | ~20 tests: insert/split/search/range/delete/tombstone |
-| `tests/unit/test_free_list.py` | new | — | ~10 tests: alloc/free cycle, chain walk |
-| `tests/unit/test_index_manager.py` | new | — | ~10 tests: rebuild, lookup, insert, delete |
-| `tests/integration/test_pager_v2_header.py` | new | — | ~5 tests: v1 upgrade, magic check |
-| `tests/integration/test_catalog_overflow.py` | new | — | ~10 tests: chain, walk, persist across reopen |
-| `tests/integration/test_select_uses_index.py` | new | — | ~10 tests: PK/UNIQUE routing, no fallback |
-| `tests/integration/test_drop_reclaims_pages.py` | new | — | ~5 tests: data + index + chain reclamation |
-| `tests/perf/test_index_vs_scan.py` | new | — | ~3 benchmarks: PK lookup vs full scan at n=10000 |
-| Existing tests | unchanged | — | MVP / engine-v1 / constraints / types / aggregation all continue to pass |
+| 文件 | 状态 | 行数预算 | 说明 |
+|------|------|----------|------|
+| `src/tinydb/pager.py` | 修改 | ≤ 400 | +free list、v2 header、v1 升级 |
+| `src/tinydb/catalog.py` | 修改 | ≤ 250 | +overflow chain 序列化与遍历 |
+| `src/tinydb/btree.py` | 新增 | ≤ 400 | B+tree 节点、insert、search、range、delete（tombstone） |
+| `src/tinydb/index_manager.py` | 新增 | ≤ 200 | (table, col) → BTree root 映射；rebuild_for_table |
+| `src/tinydb/executor.py` | 修改 | ≤ 920 | +INSERT/UPDATE/DELETE/SELECT 索引查找路径；+DROP 回收 |
+| `src/tinydb/database.py` | 修改 | （无新预算） | open 时初始化 IndexManager |
+| `tests/unit/test_btree.py` | 新增 | — | ~20 测试：insert/split/search/range/delete/tombstone |
+| `tests/unit/test_free_list.py` | 新增 | — | ~10 测试：alloc/free 循环、链遍历 |
+| `tests/unit/test_index_manager.py` | 新增 | — | ~10 测试：rebuild、lookup、insert、delete |
+| `tests/integration/test_pager_v2_header.py` | 新增 | — | ~5 测试：v1 升级、magic 校验 |
+| `tests/integration/test_catalog_overflow.py` | 新增 | — | ~10 测试：chain、遍历、重开后持久化 |
+| `tests/integration/test_select_uses_index.py` | 新增 | — | ~10 测试：PK/UNIQUE 路由、非索引列扫描 |
+| `tests/integration/test_drop_reclaims_pages.py` | 新增 | — | ~5 测试：data + index + chain 回收 |
+| `tests/perf/test_index_vs_scan.py` | 新增 | — | ~3 基准：n=10000 时 PK 查找 vs 全表扫描 |
+| 既有测试 | 不变 | — | MVP / engine-v1 / constraints / types / aggregation 全部继续通过 |
 
-**External API:** `Database.execute()` signature unchanged. `Pager.read_page()` / `write_page()` / `alloc_page()` / `free_page()` signature stable (only alloc/free semantics change).
+**外部 API：** `Database.execute()` 签名不变。`Pager.read_page()` / `write_page()` / `alloc_page()` / `free_page()` 签名稳定（仅 alloc/free 语义变化）。
 
 ## 7. Out of Scope
 
-- ACID / WAL / transactions → `tinydb-acid`
-- Composite indexes (multi-column B+tree) → future
-- Reverse / full-text / hash indexes → permanent
-- ANALYZE / statistics → permanent
-- B+tree merge / underflow rebalancing → future compaction change
-- Index-only scans → future
-- Periodic compaction of tombstone-dense pages → future
-- Concurrent B+tree access → permanent (single-thread scope)
+- ACID / WAL / 事务 → `tinydb-acid`
+- 复合索引（多列 B+tree）→ 后续
+- 倒排 / 全文 / Hash 索引 → 永久
+- ANALYZE / 统计信息 → 永久
+- B+tree merge / underflow 再平衡 → 后续 compaction change
+- Index-only scans → 后续
+- tombstone 密集页的周期性 compaction → 后续
+- B+tree 并发访问 → 永久（单线程 scope）
 
-## 8. Testing strategy
+## 8. 测试策略
 
-**Unit tests:**
-- `test_btree.py`: insert/split/search/range/delete on small trees (5-50 keys); split at root; multi-page leaves; tombstone marks.
-- `test_free_list.py`: alloc/free cycle; chain walk; free list persistence across reopen.
-- `test_index_manager.py`: rebuild_for_table; lookup miss/hit; insert/delete maintains.
+**单元测试：**
+- `test_btree.py`：insert/split/search/range/delete 在小树上（5-50 key）；root 分裂；多页 leaf；tombstone 标记。
+- `test_free_list.py`：alloc/free 循环；链遍历；free list 跨重启持久化。
+- `test_index_manager.py`：rebuild_for_table；lookup miss/hit；insert/delete 维护。
 
-**Integration tests:**
-- `test_pager_v2_header.py`: open v1 file → header upgraded; open v2 file → no change; bad magic raises.
-- `test_catalog_overflow.py`: catalog with 100 tables persists across reopen; chain walk; pages reclaimed on DROP.
-- `test_select_uses_index.py`: SELECT WHERE on PK uses index; on UNIQUE uses index; non-indexed falls through to scan.
-- `test_drop_reclaims_pages.py`: DROP returns data + index pages to free list; subsequent INSERT recycles.
+**集成测试：**
+- `test_pager_v2_header.py`：开 v1 文件 → header 升级；开 v2 文件 → 不变；坏 magic 抛错。
+- `test_catalog_overflow.py`：100 张表的 catalog 跨重启持久化；chain 遍历；DROP 后页回收。
+- `test_select_uses_index.py`：SELECT WHERE PK 走索引；UNIQUE 走索引；非索引列下放扫描。
+- `test_drop_reclaims_pages.py`：DROP 归还 data + index 页至 free list；后续 INSERT 复用。
 
-**Performance benchmarks** (in `tests/perf/`):
-- `test_index_vs_scan.py`: PK lookup at n=10000 rows < full scan / 100 (acceptance criterion per §F6 of proposal).
+**性能基准**（在 `tests/perf/` 下）：
+- `test_index_vs_scan.py`：n=10000 时 PK 查找 < 全表扫描 / 100（验收标准对应提案 §F6）。
 
-**Regression:**
-- Full existing test suite (MVP / engine-v1 / constraints / types / aggregation) continues to pass without modification.
-- Coverage ≥ 90% overall; new code 100%.
+**回归：**
+- 既有完整测试套件（MVP / engine-v1 / constraints / types / aggregation）继续通过，无修改。
+- 覆盖率整体 ≥ 90%；新代码 100%。
 
 ## 9. Risks
 
-| Risk | Likelihood | Mitigation |
-|------|-----------|------------|
-| B+tree split bugs (off-by-one in median, lost child pointers) | Med | Comprehensive unit tests with explicit invariants (key count, sorted order) after every operation |
-| v1 → v2 upgrade leaves existing files inconsistent (free_list_head set but pages not actually free) | Low | Upgrade only writes header byte; never touches data pages. No code path interprets "old data page" as free. |
-| IndexManager.rebuild slow on large tables | Med | First-time cost is acceptable (~1ms per 10k rows); deferred optimization: incremental rebuild on INSERT |
-| Tombstone accumulation degrades search | Low | Out-of-scope: periodic compaction. Document as known limitation in `MVP_LIMITATIONS.md`. |
-| Pager line budget overrun (was 169 → could exceed 400) | Low | Split out `_page_alloc.py` / `_free_list.py` if needed; defer to follow-up |
+| Risk | 概率 | 缓解 |
+|------|------|------|
+| B+tree split bug（中位 off-by-one、child 指针丢失） | 中 | 单元测试在每次操作后校验不变量（key count、有序） |
+| v1 → v2 升级让既有文件不一致（写入 free_list_head 但页实际未 free） | 低 | 升级只改 header 字节；不动数据页；无路径将"旧数据页"解释为 free |
+| IndexManager.rebuild 在大表上慢 | 中 | 首次成本可接受（~1ms / 10k 行）；延迟优化：INSERT 时增量构建 |
+| Tombstone 累积拖累 search | 低 | Out of scope：周期性 compaction。作为已知限制写进 `MVP_LIMITATIONS.md` |
+| Pager 行数预算超标（原 169，可能超 400） | 低 | 需要时拆出 `_page_alloc.py` / `_free_list.py`；延后 |
 
-## 10. Acceptance criteria
+## 10. 验收标准
 
-- All existing tests pass (575+).
-- New tests: ~50 unit + ~30 integration + ~3 perf.
-- Coverage ≥ 90% overall; 100% on `btree.py`, `index_manager.py`.
-- Module line budgets respected.
-- v1 `.db` files open without errors; first INSERT/SELECT triggers IndexManager rebuild.
-- DROP frees all data + index + overflow pages (verified via `page_count()` decrease).
-- PK lookup at n=10000 < full scan / 100.
+- 既有测试全部通过（575+）。
+- 新增测试：~50 单元 + ~30 集成 + ~3 性能。
+- 覆盖率整体 ≥ 90%；`btree.py` / `index_manager.py` 100%。
+- 模块行数预算严格遵守。
+- v1 `.db` 文件开打无错；首次 INSERT/SELECT 触发 IndexManager rebuild。
+- DROP 释放所有 data + index + overflow 页（通过 `page_count()` 减少验证）。
+- n=10000 时 PK 查找 < 全表扫描 / 100。
