@@ -986,7 +986,7 @@ git commit -m "feat(types): add VARCHAR(N) codec with max_len validation"
 
 ### Task 8: CHAR (parametric codec with PAD SPACE)
 
-- [ ] **Task 8: CHAR (parametric codec with PAD SPACE)**
+- [x] **Task 8: CHAR (parametric codec with PAD SPACE)**
 
 **Files:**
 - Modify: `src/tinydb/type_system.py`

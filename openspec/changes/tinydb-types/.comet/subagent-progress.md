@@ -34,7 +34,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 5 | DOUBLE (FloatCodec with width=8) | 3.1-3.5 | done | sonnet | 0 |
 | 6 | BOOLEAN alias for BOOL | 3.5 | done | sonnet | 0 |
 | 7 | VARCHAR (parametric codec with max_len) | 4.1-4.4 | done | sonnet | 0 |
-| 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | pending | — | — |
+| 8 | CHAR (parametric codec with PAD SPACE) | (4.x) | done | sonnet | 0 |
 | 9 | DECIMAL (scaled int64 with precision/scale) | 5.1-5.4 | pending | — | — |
 | 10 | DATE / TIME / TIMESTAMP UTC | 6.1-6.6 | pending | — | — |
 | 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | pending | — | — |
@@ -51,13 +51,32 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 8**: CHAR (parametric codec with PAD SPACE)
+**Task 9**: DECIMAL (scaled int64 with precision/scale)
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: 公共 API 契约变更（第二个 parametric codec）+ 模块行数预算压力（type_system.py 当前 374 lines，超 §F6 ≤350 预算 24 lines；CHAR 将再加 ~30 lines）
+- **Risk signals**: 公共 API 契约变更（第三个 parametric codec）+ 行数预算压力（DECIMAL 比 VARCHAR/CHAR 复杂 — 可能需要净增 lines）
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 8 implementer (sonnet, background)
+- Implementer status: DONE_WITH_CONCERNS
+- Commit `134fdd0 feat(types): add CHAR(N) codec with PAD SPACE semantics`
+- RED: 4 failed with KeyError: 'CHAR'
+- GREEN: 71 tests passed (4 new CHAR + 67 existing)
+- File scope: ONLY type_system.py + test_type_system_v2.py
+- **Concern (mitigated)**: type_system.py still 374 lines (no change from Task 7)
+  - **Elegant solution**: `_CharCodec(_VarcharCodec)` inheritance with single `encode_py` override
+  - Net lines: +0 (CHAR definition is ~3 lines vs ~30 if standalone)
+  - Inherited error messages still say "VARCHAR" in non-overridden paths — tests pass because only encode_py (overridden) is exercised for error-message assertion
+- Provided **concrete refactor plan for Task 21** (5 numbered items, ~17-19 lines of potential savings):
+  1. Refactor `_VarcharCodec` to use `self.name` in error messages
+  2. Move `_IntCodec._spec` to module-level constant
+  3. Extract `_expect(tname, expected, value)` helper for py_to_db/db_to_py
+  4. Inline REGISTRATION construction via `_variant(cls, name, width)` helper
+  5. Collapse legacy `encode_text`/`decode_text` duplication with codec
+- No per-task reviewer dispatched (no process risk; line budget concern unchanged from Task 7)
+- Coordinator decision: APPROVE — proceed to checkoff; consolidate refactor plan for Task 21
 
 ### 2026-07-18 — Task 7 implementer (sonnet, background)
 - Implementer status: DONE_WITH_CONCERNS
