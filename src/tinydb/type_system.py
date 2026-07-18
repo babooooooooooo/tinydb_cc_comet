@@ -196,47 +196,47 @@ def codec_for(type_name: str, params: tuple = ()):
     return lookup(type_name)
 
 
-# ---------------------------------------------------------------------------
-# Codec Protocol implementations (Task 2 / Plan 1.3).
-#
-# Each codec is a stateless singleton instance that owns its bytes encoding.
-# The legacy module-level encode_*/decode_* helpers above remain untouched
-# per Design §F2; call sites that have not yet been migrated (e.g. the
-# MVP executor) continue to use those helpers. Newly dispatched call sites
-# (row_codec via codec_for, future catalog paths) go through these codecs.
-#
-# FLOAT intentionally uses 4-byte single precision (Design D3). The legacy
-# encode_float / decode_float remain 8-byte double for backward compatibility
-# until downstream code is migrated (Task 19 regression cleanup).
-# ---------------------------------------------------------------------------
+# Codec Protocol implementations (Tasks 2-3 of tinydb-types). Each codec owns
+# its bytes encoding; legacy module-level encode_*/decode_* helpers above
+# remain untouched per Design §F2. FLOAT 4-byte single precision per Design D3.
+# Task 3 generalises _IntCodec via `width` and registers SMALLINT (width=2).
 
 
 class _IntCodec:
-    """32-bit signed integer (INT). SMALLINT/BIGINT via width param (Plan task 2)."""
+    """Signed big-endian integer. width in bytes: 2=SMALLINT, 4=INT, 8=BIGINT."""
 
     name = "INT"
+    width = 4
+
+    @property
+    def _spec(self):
+        return {2: (">h", -(2**15), 2**15),
+                4: (">i", -(2**31), 2**31),
+                8: (">q", -(2**63), 2**63)}[self.width]
 
     def encode_py(self, value):
-        if not (-(2**31) <= value < 2**31):
-            raise OverflowError(f"INT out of range: {value}")
-        return struct.pack(">i", value)
+        fmt, lo, hi = self._spec
+        if not (lo <= value < hi):
+            raise OverflowError(f"{self.name} out of range: {value}")
+        return struct.pack(fmt, value)
 
     def decode_bytes(self, buf, offset):
-        if offset + 4 > len(buf):
-            raise ValueError(f"INT decode truncated at offset {offset}")
-        return struct.unpack_from(">i", buf, offset)[0], offset + 4
+        if offset + self.width > len(buf):
+            raise ValueError(f"{self.name} decode truncated at offset {offset}")
+        fmt, _, _ = self._spec
+        return struct.unpack_from(fmt, buf, offset)[0], offset + self.width
 
     def parse_literal(self, text, params):
         v = int(text)
-        if not (-(2**31) <= v < 2**31):
-            raise OverflowError(f"INT out of range: {v}")
+        self.validate(v)
         return v
 
     def validate(self, value):
         if not isinstance(value, int) or isinstance(value, bool):
-            raise TypeError(f"expected int for INT, got {type(value).__name__}")
-        if not (-(2**31) <= value < 2**31):
-            raise OverflowError(f"INT out of range: {value}")
+            raise TypeError(f"expected int for {self.name}, got {type(value).__name__}")
+        _, lo, hi = self._spec
+        if not (lo <= value < hi):
+            raise OverflowError(f"{self.name} out of range: {value}")
 
 
 class _TextCodec:
@@ -336,6 +336,11 @@ REGISTRY["INT"] = _IntCodec()
 REGISTRY["TEXT"] = _TextCodec()
 REGISTRY["BOOL"] = _BoolCodec()
 REGISTRY["FLOAT"] = _FloatCodec()
+
+# Register SMALLINT (width=2) — separate _IntCodec instance with narrower width.
+REGISTRY["SMALLINT"] = _IntCodec()  # default INT/width=4 below is overwritten
+REGISTRY["SMALLINT"].name = "SMALLINT"
+REGISTRY["SMALLINT"].width = 2
 
 # Build alias map from any declared aliases on the registered codecs.
 for _codec in REGISTRY.values():

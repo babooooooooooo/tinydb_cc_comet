@@ -128,3 +128,27 @@ def test_validate_float_rejects_inf():
     codec = lookup("FLOAT")
     with pytest.raises(ValueError, match="inf/NaN not allowed"):
         codec.validate(float("inf"))
+
+
+# ---------------------------------------------------------------------------
+# Task 3: SMALLINT (IntCodec with width=2).
+# ---------------------------------------------------------------------------
+
+
+def test_smallint_codec_roundtrip():
+    codec = codec_for("SMALLINT")
+    for v in [-32768, -1, 0, 1, 32767]:
+        assert codec.decode_bytes(codec.encode_py(v), 0)[0] == v
+
+
+def test_smallint_codec_2byte_size():
+    codec = codec_for("SMALLINT")
+    assert len(codec.encode_py(0)) == 2
+
+
+def test_smallint_codec_overflow_raises():
+    codec = codec_for("SMALLINT")
+    with pytest.raises(OverflowError, match="SMALLINT out of range"):
+        codec.encode_py(32768)
+    with pytest.raises(OverflowError, match="SMALLINT out of range"):
+        codec.encode_py(-32769)
