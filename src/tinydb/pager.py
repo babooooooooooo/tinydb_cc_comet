@@ -246,3 +246,69 @@ class Pager:
             self._mem_pages[page_id][:] = data
         else:
             self._mmap[off:off + PAGE_SIZE] = data
+
+    def write_catalog_chain(self, catalog) -> None:
+        """Write ``catalog`` as a chain of pages, reclaiming any old chain pages.
+
+        Page 1 is reused as the chain head (never freed — it's a structural
+        slot). Any old overflow pages are walked from the previous chain
+        and returned to the free list before the new chain is written.
+
+        Implementation note: ``_pack_chain`` emits every page with
+        ``next_page_id = 0`` placeholder. We allocate the chain pages in
+        order, write each payload, then patch the next_id field on every
+        non-tail page to point to the next chain page.
+        """
+        # Imported here to avoid a circular import (catalog.py imports
+        # PAGE_SIZE from pager).
+        from tinydb.catalog import CHAIN_HEAD_PAGE, _pack_chain
+
+        # 1. Reclaim any old overflow pages (everything after page 1 in
+        #    the previous chain). Page 1 stays — we'll overwrite it below.
+        pid = self.read_page(CHAIN_HEAD_PAGE)
+        next_id = int.from_bytes(pid[0:4], "big")
+        # Defensive loop guard: bound by current page count.
+        visited = 0
+        page_cap = self.page_count() + 1
+        while next_id != 0:
+            if visited > page_cap:
+                from tinydb.errors import InvalidDatabaseFile
+                raise InvalidDatabaseFile(
+                    f"catalog chain reclamation exceeds page_count ({page_cap})"
+                )
+            visited += 1
+            cur = next_id
+            cur_page = self.read_page(cur)
+            next_id = int.from_bytes(cur_page[0:4], "big")
+            self.free_page(cur)
+        # Reset head's next_id to 0 so a partially-reclaimed state can't
+        # mislead a reader that opens between reclaim and rewrite.
+        self._write_chain_next(CHAIN_HEAD_PAGE, 0)
+
+        # 2. Pack and write the new chain.
+        pages = _pack_chain(catalog)
+        # Track the page id of each segment so we can patch next_id later.
+        segment_ids: list[int] = []
+        for i, payload in enumerate(pages):
+            if i == 0:
+                target = CHAIN_HEAD_PAGE
+            else:
+                target = self.alloc_page()
+            self.write_page(target, payload)
+            segment_ids.append(target)
+
+        # 3. Patch next_id on every non-tail page.
+        for i, target in enumerate(segment_ids):
+            nxt = segment_ids[i + 1] if i + 1 < len(segment_ids) else 0
+            self._write_chain_next(target, nxt)
+
+    def _write_chain_next(self, page_id: int, next_page_id: int) -> None:
+        """Write the 4-byte ``next_page_id`` field at offset 0 of ``page_id``."""
+        data = next_page_id.to_bytes(4, "big")
+        if self._is_memory:
+            if page_id not in self._mem_pages:
+                self._mem_pages[page_id] = bytearray(PAGE_SIZE)
+            self._mem_pages[page_id][0:4] = data
+        else:
+            off = page_id * PAGE_SIZE
+            self._mmap[off:off + 4] = data
