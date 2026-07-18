@@ -293,42 +293,34 @@ class _BoolCodec:
 
 
 class _FloatCodec:
-    """IEEE 754 floating point.
-
-    width=4 -> single precision (FLOAT/REAL), bytes via '>f'.
-    width=8 -> double precision (DOUBLE), bytes via '>d'. Plan task 3 adds
-    DOUBLE as a separate codec that sets width=8.
-    """
+    """IEEE 754 float. width=4 single (FLOAT/REAL), width=8 double (DOUBLE)."""
 
     name = "FLOAT"
     aliases = ("REAL",)
-    width = 4  # default for FLOAT/REAL; DOUBLE sets width=8
+    width = 4  # DOUBLE sets width=8
 
     def encode_py(self, value):
         if math.isnan(value) or math.isinf(value):
-            raise ValueError(f"FLOAT inf/NaN not allowed: {value!r}")
-        if self.width == 4:
-            return struct.pack(">f", value)
-        return struct.pack(">d", value)
+            raise ValueError(f"{self.name} inf/NaN not allowed: {value!r}")
+        return struct.pack(">f" if self.width == 4 else ">d", value)
 
     def decode_bytes(self, buf, offset):
-        size = 4 if self.width == 4 else 8
-        fmt = ">f" if self.width == 4 else ">d"
+        size, fmt = (4, ">f") if self.width == 4 else (8, ">d")
         if offset + size > len(buf):
-            raise ValueError(f"FLOAT decode truncated at offset {offset}")
+            raise ValueError(f"{self.name} decode truncated at offset {offset}")
         return struct.unpack_from(fmt, buf, offset)[0], offset + size
 
     def parse_literal(self, text, params):
         v = float(text)
         if math.isnan(v) or math.isinf(v):
-            raise ValueError(f"FLOAT inf/NaN not allowed: {text!r}")
+            raise ValueError(f"{self.name} inf/NaN not allowed: {text!r}")
         return v
 
     def validate(self, value):
         if not isinstance(value, float):
-            raise TypeError(f"expected float for FLOAT, got {type(value).__name__}")
+            raise TypeError(f"expected float for {self.name}, got {type(value).__name__}")
         if math.isnan(value) or math.isinf(value):
-            raise ValueError(f"FLOAT inf/NaN not allowed: {value!r}")
+            raise ValueError(f"{self.name} inf/NaN not allowed: {value!r}")
 
 
 # Populate REGISTRY with MVP codecs (Plan task 1.3)
@@ -344,6 +336,9 @@ REGISTRY["SMALLINT"].width = 2
 # Register BIGINT (width=8); declare INTEGER alias for INT (picked up by loop).
 REGISTRY["BIGINT"] = _IntCodec(); REGISTRY["BIGINT"].name = "BIGINT"; REGISTRY["BIGINT"].width = 8
 REGISTRY["INT"].aliases = ("INTEGER",)
+# Register DOUBLE (width=8) + DOUBLE PRECISION alias.
+REGISTRY["DOUBLE"] = _FloatCodec(); REGISTRY["DOUBLE"].name = "DOUBLE"; REGISTRY["DOUBLE"].width = 8
+REGISTRY["DOUBLE"].aliases = ("DOUBLE PRECISION",)
 # Build alias map from any declared aliases on the registered codecs.
 for _codec in REGISTRY.values():
     for _alias in getattr(_codec, "aliases", ()):

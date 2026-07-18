@@ -183,3 +183,41 @@ def test_int_alias_integer():
     codec = lookup("INTEGER")
     assert codec.name == "INT"
     assert codec.width == 4
+
+
+# ---------------------------------------------------------------------------
+# Task 5: DOUBLE (FloatCodec with width=8) + DOUBLE PRECISION alias.
+# ---------------------------------------------------------------------------
+
+
+def test_double_codec_8byte():
+    codec = codec_for("DOUBLE")
+    assert len(codec.encode_py(1.5)) == 8
+
+
+def test_double_codec_roundtrip():
+    codec = codec_for("DOUBLE")
+    # high-precision value that requires double precision
+    v = 3.14159265358979
+    assert codec.decode_bytes(codec.encode_py(v), 0)[0] == v
+
+
+def test_double_codec_rejects_inf_nan():
+    codec = codec_for("DOUBLE")
+    with pytest.raises(ValueError, match="DOUBLE inf/NaN not allowed"):
+        codec.encode_py(float("inf"))
+    with pytest.raises(ValueError, match="DOUBLE inf/NaN not allowed"):
+        codec.encode_py(float("nan"))
+
+
+def test_double_precision_alias():
+    codec = lookup("DOUBLE PRECISION")
+    assert codec.name == "DOUBLE"
+    assert codec.width == 8
+
+
+def test_real_alias_resolves_to_float_4byte():
+    """REAL alias = FLOAT (4-byte single per design D3)."""
+    codec = lookup("REAL")
+    assert codec.name == "FLOAT"
+    assert codec.width == 4
