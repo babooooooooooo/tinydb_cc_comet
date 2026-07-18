@@ -1,11 +1,14 @@
 """4-type system: INT/TEXT/FLOAT/BOOL encode/decode + literal parse + py_to_db/db_to_py + validate_compare. <= 150 lines."""
 
+import datetime as _dt
 import math
 import struct
 from typing import Any, Protocol
 
 _INT_FMT = ">q"  # signed 64-bit big-endian
 _INT_SIZE = 8
+_EPOCH_DATE = _dt.date(1970, 1, 1)  # DATE days-since-epoch origin
+_EPOCH_DT = _dt.datetime(1970, 1, 1)  # TIMESTAMP seconds-since-epoch origin
 
 
 def encode_int(value: int) -> bytes:
@@ -366,6 +369,55 @@ class _DecimalCodec:
         self._to_scaled(value)
 
 
+class _DateCodec:
+    """DATE: days since UTC epoch (1970-01-01). 4-byte signed big-endian."""
+    name = "DATE"
+    def encode_py(self, value):
+        return struct.pack(">i", (value - _EPOCH_DATE).days)
+    def decode_bytes(self, buf, offset):
+        (days,) = struct.unpack_from(">i", buf, offset)
+        return _EPOCH_DATE + _dt.timedelta(days=days), offset + 4
+    def parse_literal(self, text, params):
+        try: return _dt.date.fromisoformat(text)
+        except ValueError as e: raise ValueError(f"DATE literal invalid: {text!r} ({e})") from e
+    def validate(self, value):
+        if not isinstance(value, _dt.date): raise TypeError(f"expected date for DATE, got {type(value).__name__}")
+
+
+class _TimeCodec:
+    """TIME: seconds since midnight UTC. 4-byte unsigned big-endian."""
+    name = "TIME"
+    def encode_py(self, value):
+        s = value.hour * 3600 + value.minute * 60 + value.second
+        if not 0 <= s <= 86399: raise ValueError(f"TIME out of range: {s}")
+        return struct.pack(">I", s)
+    def decode_bytes(self, buf, offset):
+        (s,) = struct.unpack_from(">I", buf, offset)
+        h, rem = divmod(s, 3600)
+        m, sec = divmod(rem, 60)
+        return _dt.time(h, m, sec), offset + 4
+    def parse_literal(self, text, params):
+        try: return _dt.time.fromisoformat(text)
+        except ValueError as e: raise ValueError(f"TIME literal invalid: {text!r} ({e})") from e
+    def validate(self, value):
+        if not isinstance(value, _dt.time): raise TypeError(f"expected time for TIME, got {type(value).__name__}")
+
+
+class _TimestampCodec:
+    """TIMESTAMP: seconds since UTC epoch. 8-byte signed big-endian. Naive datetime."""
+    name = "TIMESTAMP"
+    def encode_py(self, value):
+        return struct.pack(">q", int((value - _EPOCH_DT).total_seconds()))
+    def decode_bytes(self, buf, offset):
+        (s,) = struct.unpack_from(">q", buf, offset)
+        return _EPOCH_DT + _dt.timedelta(seconds=s), offset + 8
+    def parse_literal(self, text, params):
+        try: return _dt.datetime.fromisoformat(text)
+        except ValueError as e: raise ValueError(f"TIMESTAMP literal invalid: {text!r} ({e})") from e
+    def validate(self, value):
+        if not isinstance(value, _dt.datetime): raise TypeError(f"expected datetime for TIMESTAMP, got {type(value).__name__}")
+
+
 # Populate REGISTRY.
 REGISTRY["INT"] = _IntCodec()
 REGISTRY["TEXT"] = _TextCodec()
@@ -379,6 +431,9 @@ REGISTRY["DOUBLE"].aliases = ("DOUBLE PRECISION",)
 REGISTRY["VARCHAR"] = _VarcharCodec
 REGISTRY["CHAR"] = _CharCodec
 REGISTRY["DECIMAL"] = _DecimalCodec
+REGISTRY["DATE"] = _DateCodec()
+REGISTRY["TIME"] = _TimeCodec()
+REGISTRY["TIMESTAMP"] = _TimestampCodec()
 for _codec in REGISTRY.values():
     if isinstance(_codec, type):
         continue  # skip parametric class entries (no aliases to register)

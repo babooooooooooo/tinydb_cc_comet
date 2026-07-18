@@ -4,6 +4,8 @@ These tests exercise the new codec-based dispatch API (lookup, codec_for).
 The legacy module-level encode_*/decode_* helpers are preserved for
 backward compatibility per Design Doc §F2 and are NOT exercised here.
 """
+import datetime
+
 import pytest
 
 from tinydb.type_system import lookup, codec_for
@@ -342,3 +344,67 @@ def test_decimal_codec_rejects_p_lt_s():
 def test_decimal_codec_rejects_p_too_large():
     with pytest.raises(ValueError, match="DECIMAL"):
         codec_for("DECIMAL", (19, 0))
+
+
+# ---------------------------------------------------------------------------
+# Task 10: DATE / TIME / TIMESTAMP (UTC unified).
+# ---------------------------------------------------------------------------
+
+
+def test_date_codec_roundtrip():
+    codec = lookup("DATE")
+    d = datetime.date(2026, 7, 16)
+    encoded = codec.encode_py(d)
+    assert len(encoded) == 4  # 4-byte days since epoch
+    decoded, _ = codec.decode_bytes(encoded, 0)
+    assert decoded == d
+
+
+def test_date_codec_parse_iso_literal():
+    codec = lookup("DATE")
+    parsed = codec.parse_literal("2026-07-16", ())
+    assert parsed == datetime.date(2026, 7, 16)
+
+
+def test_date_codec_rejects_bad_format():
+    codec = lookup("DATE")
+    with pytest.raises(ValueError):
+        codec.parse_literal("2026/07/16", ())
+    with pytest.raises(ValueError):
+        codec.parse_literal("not-a-date", ())
+
+
+def test_time_codec_roundtrip():
+    codec = lookup("TIME")
+    t = datetime.time(14, 30, 0)
+    encoded = codec.encode_py(t)
+    assert len(encoded) == 4
+    decoded, _ = codec.decode_bytes(encoded, 0)
+    assert decoded == t
+
+
+def test_time_codec_parse_iso_literal():
+    codec = lookup("TIME")
+    parsed = codec.parse_literal("14:30:00", ())
+    assert parsed == datetime.time(14, 30, 0)
+
+
+def test_time_codec_rejects_out_of_range():
+    codec = lookup("TIME")
+    with pytest.raises(ValueError):
+        codec.encode_py(datetime.time(25, 0, 0))
+
+
+def test_timestamp_codec_roundtrip():
+    codec = lookup("TIMESTAMP")
+    ts = datetime.datetime(2026, 7, 16, 14, 30, 0)
+    encoded = codec.encode_py(ts)
+    assert len(encoded) == 8
+    decoded, _ = codec.decode_bytes(encoded, 0)
+    assert decoded == ts
+
+
+def test_timestamp_codec_parse_iso_literal():
+    codec = lookup("TIMESTAMP")
+    parsed = codec.parse_literal("2026-07-16 14:30:00", ())
+    assert parsed == datetime.datetime(2026, 7, 16, 14, 30, 0)
