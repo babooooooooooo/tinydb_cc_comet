@@ -1762,7 +1762,7 @@ git commit -m "feat(types): parser accepts DATE / TIME / TIMESTAMP '...' literal
 
 ### Task 14: Parser — DECIMAL literal prefix
 
-- [ ] **Task 14: Parser — DECIMAL literal prefix**
+- [x] **Task 14: Parser — DECIMAL literal prefix**
 
 **Files:**
 - Modify: `src/tinydb/parser.py`

@@ -40,7 +40,7 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 | 11 | Verify all 15 codecs in REGISTRY | 9.1-9.2 | done | — | 0 |
 | 12 | Parser — type_spec with VARCHAR(N) / DECIMAL(p,s) | 7.1-7.4 | done | — | 0 |
 | 13 | Parser — DATE / TIME / TIMESTAMP literal prefix | 8.1 | done | — | 0 |
-| 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | pending | — | — |
+| 14 | Parser — DECIMAL literal prefix | 8.2-8.3 | done | — | 0 |
 | 15 | Catalog — Column.type_params + backward compat | (covered) | pending | — | — |
 | 16 | row_codec — schema_v2() + codec_for dispatch | (covered) | pending | — | — |
 | 17 | Executor — wire 15 types into INSERT / SELECT / WHERE | (covered) | pending | — | — |
@@ -51,13 +51,28 @@ design_doc: docs/superpowers/specs/2026-07-18-tinydb-types-design.md
 
 ## Current Task
 
-**Task 14**: Parser — DECIMAL literal prefix
+**Task 15**: Catalog — Column.type_params + backward compat
 - **Stage**: task-implement
 - **Implementer**: pending dispatch
 - **Implementer model**: sonnet
-- **Risk signals**: tokenizer/parser 字面量识别路径扩展 + 与 DECIMAL codec parse_literal 对齐
+- **Risk signals**: catalog schema 反序列化路径变更 + 旧 MVP 4 类型子集兼容性
 
 ## Dispatch Log
+
+### 2026-07-18 — Task 14 implementer (sonnet, background)
+- Implementer status: DONE
+- Commit `8da63de feat(parser): DECIMAL literal prefix parsing`
+- RED: 7 failed (no `_parse_decimal_literal` method, also DECIMAL was tokenizing as IDENT)
+- GREEN: 7/7 new tests pass; full unit suite **344 passed**, coverage **86.79%**
+- File scope: parser.py + tokenizer.py + new test_parser_decimal_lit.py
+- **Tokenizer escape valve invoked**: DECIMAL was being tokenized as IDENT, RED proved missing keyword. Added DECIMAL to KEYWORDS (1-line minimal fix). Justified per task hint.
+- parser.py line count: **861** (≤870 budget, was 828)
+- Routing added at 3 sites (parallel to `_DATETIME_KEYWORDS`):
+  - INSERT VALUES (parser.py:531)
+  - UPDATE SET (parser.py:686)
+  - WHERE COMPARISON (parser.py:782)
+- No per-task reviewer (decisive completion; tokenizer escape justified by RED)
+- Coordinator decision: APPROVE — proceed to checkoff
 
 ### 2026-07-18 — Task 13 implementer (sonnet, background)
 - Implementer status: DONE_WITH_CONCERNS
