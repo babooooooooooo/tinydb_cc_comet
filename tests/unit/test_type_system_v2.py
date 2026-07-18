@@ -229,3 +229,34 @@ def test_boolean_alias_resolves_to_bool():
     # verify it encodes/decodes correctly
     assert codec.decode_bytes(codec.encode_py(True), 0)[0] is True
     assert codec.decode_bytes(codec.encode_py(False), 0)[0] is False
+
+
+# ---------------------------------------------------------------------------
+# Task 7: VARCHAR (parametric codec with max_len).
+# ---------------------------------------------------------------------------
+
+
+def test_varchar_codec_roundtrip_within_max():
+    codec = codec_for("VARCHAR", (10,))
+    for v in ["", "hello", "中文"]:
+        encoded = codec.encode_py(v)
+        assert codec.decode_bytes(encoded, 0)[0] == v
+
+
+def test_varchar_codec_rejects_overlong():
+    codec = codec_for("VARCHAR", (10,))
+    with pytest.raises(TypeError, match="VARCHAR\\(10\\) length 11 exceeds max"):
+        codec.encode_py("a" * 11)
+
+
+def test_varchar_codec_accepts_exact_max():
+    codec = codec_for("VARCHAR", (10,))
+    encoded = codec.encode_py("a" * 10)
+    assert len(encoded) == 2 + 10  # length prefix + UTF-8
+
+
+def test_varchar_codec_per_call_instance():
+    """Different max_len should produce independent codec instances."""
+    a = codec_for("VARCHAR", (10,))
+    b = codec_for("VARCHAR", (20,))
+    assert a is not b

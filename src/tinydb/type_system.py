@@ -170,16 +170,8 @@ def lookup(type_name: str):
 
 
 def codec_for(type_name: str, params: tuple = ()):
-    """Return a configured codec instance for type_name with params.
-
-    For non-parametric types (INT, TEXT, FLOAT, BOOL, DATE, TIME, TIMESTAMP),
-    params must be () and the registry singleton is returned.
-
-    For parametric types:
-      - VARCHAR(N) / CHAR(N): params must be (N,) with N >= 1
-      - DECIMAL(p, s): params must be (p, s) with 1 <= p <= 18 and 0 <= s < p
-
-    Returns the registry entry for now (specific instantiations in later tasks).
+    """Return configured codec. Non-parametric: registry singleton. Parametric
+    (VARCHAR/CHAR/DECIMAL): validates params, instantiates per-call from class.
     Raises ValueError on invalid params; KeyError on unknown type.
     """
     if type_name not in REGISTRY and type_name not in _ALIAS_MAP:
@@ -187,13 +179,18 @@ def codec_for(type_name: str, params: tuple = ()):
     if type_name in ("VARCHAR", "CHAR"):
         if len(params) != 1 or params[0] < 1:
             raise ValueError(f"{type_name} requires (N,) with N >= 1, got {params}")
-    if type_name == "DECIMAL":
+    elif type_name == "DECIMAL":
         if len(params) != 2:
             raise ValueError(f"DECIMAL requires (p, s), got {params}")
         p, s = params
         if not (1 <= p <= 18 and 0 <= s < p):
-            raise ValueError(f"DECIMAL({p},{s}) invalid; need 1 <= p <= 18 and 0 <= s < p")
-    return lookup(type_name)
+            raise ValueError(f"DECIMAL({p},{s}) invalid")
+    entry = lookup(type_name)
+    if isinstance(entry, type):
+        if type_name == "DECIMAL":
+            return entry(params[0], params[1])
+        return entry(params[0])
+    return entry
 
 
 # Codec Protocol implementations (Tasks 2-3 of tinydb-types). Each codec owns
@@ -323,12 +320,40 @@ class _FloatCodec:
             raise ValueError(f"{self.name} inf/NaN not allowed: {value!r}")
 
 
+class _VarcharCodec:
+    """VARCHAR(N): UTF-8 string with max length N."""
+    name = "VARCHAR"
+    def __init__(self, max_len: int):
+        if max_len < 1:
+            raise ValueError(f"VARCHAR max_len must be >= 1, got {max_len}")
+        self.max_len = max_len
+    def _check(self, n: int) -> None:
+        if n > self.max_len:
+            raise TypeError(f"VARCHAR({self.max_len}) length {n} exceeds max")
+    def encode_py(self, value):
+        data = value.encode("utf-8"); self._check(len(data))
+        return struct.pack(">H", len(data)) + data
+    def decode_bytes(self, buf, offset):
+        if offset + 2 > len(buf):
+            raise ValueError(f"VARCHAR({self.max_len}) length prefix truncated")
+        (n,) = struct.unpack_from(">H", buf, offset)
+        if offset + 2 + n > len(buf):
+            raise ValueError(f"VARCHAR({self.max_len}) payload truncated (need {n} bytes)")
+        return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
+    def parse_literal(self, text, params):
+        v = text[1:-1].replace("''", "'"); self._check(len(v.encode("utf-8")))
+        return v
+    def validate(self, value):
+        if not isinstance(value, str):
+            raise TypeError(f"expected str for VARCHAR, got {type(value).__name__}")
+        self._check(len(value.encode("utf-8")))
+
+
 # Populate REGISTRY with MVP codecs (Plan task 1.3)
 REGISTRY["INT"] = _IntCodec()
 REGISTRY["TEXT"] = _TextCodec()
 REGISTRY["BOOL"] = _BoolCodec()
 REGISTRY["FLOAT"] = _FloatCodec()
-
 # Register SMALLINT (width=2) — separate _IntCodec instance with narrower width.
 REGISTRY["SMALLINT"] = _IntCodec()  # default INT/width=4 below is overwritten
 REGISTRY["SMALLINT"].name = "SMALLINT"
@@ -339,7 +364,11 @@ REGISTRY["INT"].aliases = ("INTEGER",)
 # Register DOUBLE (width=8) + DOUBLE PRECISION alias.
 REGISTRY["DOUBLE"] = _FloatCodec(); REGISTRY["DOUBLE"].name = "DOUBLE"; REGISTRY["DOUBLE"].width = 8
 REGISTRY["DOUBLE"].aliases = ("DOUBLE PRECISION",)
+# Parametric codecs — REGISTRY stores the CLASS; codec_for() instantiates per-call.
+REGISTRY["VARCHAR"] = _VarcharCodec
 # Build alias map from any declared aliases on the registered codecs.
 for _codec in REGISTRY.values():
+    if isinstance(_codec, type):
+        continue  # skip parametric class entries (no aliases to register)
     for _alias in getattr(_codec, "aliases", ()):
         _ALIAS_MAP[_alias] = _codec
