@@ -73,8 +73,8 @@ def test_pager_memory_mode_no_file_created():
 @pytest.mark.integration
 @pytest.mark.spec_id("REQ-PAGER-001-SCN-05")
 def test_pager_constants():
-    assert MAGIC == b'TINYDB\x00\x01'
-    assert SCHEMA_VERSION == 0x01
+    assert MAGIC == b'TINYDB\x00\x02'
+    assert SCHEMA_VERSION == 0x02
     assert PAGE_SIZE == 4096
 
 

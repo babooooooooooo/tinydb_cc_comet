@@ -45,7 +45,7 @@
 - Test: `tests/unit/test_free_list.py`
 - Test: `tests/integration/test_pager_v2_header.py`
 
-- [ ] **Step 1: Write failing test for free list alloc/free cycle**
+- [x] **Step 1: Write failing test for free list alloc/free cycle**
 
 ```python
 # tests/unit/test_free_list.py
@@ -63,12 +63,12 @@ def test_alloc_then_free_then_alloc_recycles_same_page(tmp_path):
     p.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_free_list.py::test_alloc_then_free_then_alloc_recycles_same_page -v`
 Expected: FAIL with `AttributeError: 'Pager' object has no attribute 'free_page'`
 
-- [ ] **Step 3: Update pager.py header constants**
+- [x] **Step 3: Update pager.py header constants**
 
 Edit `src/tinydb/pager.py:12-14`:
 
@@ -80,7 +80,7 @@ FREE_LIST_HEAD_OFFSET = 9  # u32 at bytes 9-12
 HEADER_RESERVED = PAGE_SIZE - len(MAGIC) - 1 - 4  # 4083 bytes of zeros after free_list_head
 ```
 
-- [ ] **Step 4: Add free list fields to Pager.__init__**
+- [x] **Step 4: Add free list fields to Pager.__init__**
 
 Edit `src/tinydb/pager.py` `Pager.__init__` (around line 25):
 
@@ -101,7 +101,7 @@ def __init__(self, path: str):
         self._open_file()
 ```
 
-- [ ] **Step 5: Add free_list_head read/write helpers**
+- [x] **Step 5: Add free_list_head read/write helpers**
 
 Append to `src/tinydb/pager.py` (after `_init_page0`):
 
@@ -123,7 +123,7 @@ def _write_free_list_head(self, head: int) -> None:
         self._mmap[9:13] = data
 ```
 
-- [ ] **Step 6: Rewrite alloc_page to consult free list**
+- [x] **Step 6: Rewrite alloc_page to consult free list**
 
 Edit `src/tinydb/pager.py:122-144` (the `alloc_page` method):
 
@@ -167,7 +167,7 @@ def alloc_page(self) -> int:
     return pid
 ```
 
-- [ ] **Step 7: Add free_page method**
+- [x] **Step 7: Add free_page method**
 
 Append after `alloc_page`:
 
@@ -189,7 +189,7 @@ def free_page(self, page_id: int) -> None:
     self._write_free_list_head(page_id)
 ```
 
-- [ ] **Step 8: Update _init_page0 to write free_list_head=0**
+- [x] **Step 8: Update _init_page0 to write free_list_head=0**
 
 Edit `src/tinydb/pager.py:90-94`:
 
@@ -201,12 +201,12 @@ def _init_page0(self, page: bytearray) -> None:
     page[9:13] = (0).to_bytes(4, "big")  # free_list_head = 0
 ```
 
-- [ ] **Step 9: Run test to verify it passes**
+- [x] **Step 9: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_free_list.py::test_alloc_then_free_then_alloc_recycles_same_page -v`
 Expected: PASS
 
-- [ ] **Step 10: Write failing test for v1→v2 upgrade**
+- [x] **Step 10: Write failing test for v1→v2 upgrade**
 
 ```python
 # tests/integration/test_pager_v2_header.py
@@ -226,12 +226,12 @@ def test_v1_file_upgrades_header_on_open(tmp_path):
     p.close()
 ```
 
-- [ ] **Step 11: Run test to verify it fails**
+- [x] **Step 11: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_pager_v2_header.py::test_v1_file_upgrades_header_on_open -v`
 Expected: FAIL with `UnsupportedSchemaVersion` (because current code rejects schema_version=0x01)
 
-- [ ] **Step 12: Update _open_file to upgrade v1→v2**
+- [x] **Step 12: Update _open_file to upgrade v1→v2**
 
 Edit `src/tinydb/pager.py:67-72` (the schema_version check):
 
@@ -255,17 +255,17 @@ Edit `src/tinydb/pager.py:67-72` (the schema_version check):
                     )
 ```
 
-- [ ] **Step 13: Run test to verify it passes**
+- [x] **Step 13: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_pager_v2_header.py::test_v1_file_upgrades_header_on_open -v`
 Expected: PASS
 
-- [ ] **Step 14: Run full test suite to confirm no regression**
+- [x] **Step 14: Run full test suite to confirm no regression**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: 575 passed (same count as before; no new tests yet). If anything else fails, investigate — pager is core.
 
-- [ ] **Step 15: Commit**
+- [x] **Step 15: Commit**
 
 ```bash
 git add src/tinydb/pager.py tests/unit/test_free_list.py tests/integration/test_pager_v2_header.py
@@ -280,7 +280,7 @@ git commit -m "feat(pager): v2 header (free_list_head) + alloc/free cycle + v1 a
 - Modify: `src/tinydb/catalog.py`
 - Test: `tests/integration/test_catalog_overflow.py`
 
-- [ ] **Step 1: Write failing test for multi-page catalog**
+- [x] **Step 1: Write failing test for multi-page catalog**
 
 ```python
 # tests/integration/test_catalog_overflow.py
@@ -305,12 +305,12 @@ def test_overflow_chain_roundtrip(tmp_path):
     p.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_catalog_overflow.py::test_overflow_chain_roundtrip -v`
 Expected: FAIL with `ImportError: cannot import name '_pack_chain'`
 
-- [ ] **Step 3: Add chain serialization to catalog.py**
+- [x] **Step 3: Add chain serialization to catalog.py**
 
 Append to `src/tinydb/catalog.py`:
 
@@ -407,7 +407,7 @@ def _unpack_chain(pager: "Pager") -> "Catalog":
     return cat
 ```
 
-- [ ] **Step 4: Add Pager helper to write the chain**
+- [x] **Step 4: Add Pager helper to write the chain**
 
 Append to `src/tinydb/pager.py` (or wherever appropriate):
 
@@ -453,12 +453,12 @@ def write_catalog_chain(self, catalog: "Catalog") -> None:
             self.write_page(target, bytes(cur))
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_catalog_overflow.py::test_overflow_chain_roundtrip -v`
 Expected: PASS
 
-- [ ] **Step 6: Add Catalog method to walk chain (used by Database.open)**
+- [x] **Step 6: Add Catalog method to walk chain (used by Database.open)**
 
 Append to `src/tinydb/catalog.py`:
 
@@ -469,12 +469,12 @@ def load_from_pager(cls, pager: "Pager") -> "Catalog":
     return _unpack_chain(pager)
 ```
 
-- [ ] **Step 7: Run full test suite to confirm no regression**
+- [x] **Step 7: Run full test suite to confirm no regression**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: 575 passed + new tests passing
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/tinydb/catalog.py src/tinydb/pager.py tests/integration/test_catalog_overflow.py
@@ -489,7 +489,7 @@ git commit -m "feat(catalog): multi-page overflow chain for >50 tables"
 - Create: `src/tinydb/btree.py`
 - Test: `tests/unit/test_btree.py`
 
-- [ ] **Step 1: Write failing test for B+tree node serialization**
+- [x] **Step 1: Write failing test for B+tree node serialization**
 
 ```python
 # tests/unit/test_btree.py
@@ -507,12 +507,12 @@ def test_leaf_node_roundtrip_small():
     assert leaf2.next_leaf_id == 0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_leaf_node_roundtrip_small -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'tinydb.btree'`
 
-- [ ] **Step 3: Create btree.py with node classes**
+- [x] **Step 3: Create btree.py with node classes**
 
 Create `src/tinydb/btree.py`:
 
@@ -642,12 +642,12 @@ class InternalNode:
         return cls(keys=keys, children=children)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_leaf_node_roundtrip_small -v`
 Expected: PASS
 
-- [ ] **Step 5: Write failing test for simple insert (single leaf, no split)**
+- [x] **Step 5: Write failing test for simple insert (single leaf, no split)**
 
 ```python
 def test_btree_insert_single_leaf_no_split():
@@ -666,12 +666,12 @@ def test_btree_insert_single_leaf_no_split():
     p.close()
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_insert_single_leaf_no_split -v`
 Expected: FAIL with `ImportError: cannot import name 'BTree'`
 
-- [ ] **Step 7: Add BTree class with insert (no split yet)**
+- [x] **Step 7: Add BTree class with insert (no split yet)**
 
 Append to `src/tinydb/btree.py`:
 
@@ -747,7 +747,7 @@ def _leaf_pid(page: bytes) -> int:
     raise NotImplementedError("BTree.insert requires page-id tracking — see Task 4")
 ```
 
-- [ ] **Step 8: Refactor BTree.insert to take page-id tracking**
+- [x] **Step 8: Refactor BTree.insert to take page-id tracking**
 
 Replace the `_leaf_pid` stub. Modify `BTree.insert` to pass pid through descent:
 
@@ -810,12 +810,12 @@ class BTree:
 
 Remove the now-unused `_leaf_pid` stub.
 
-- [ ] **Step 9: Run test to verify it passes**
+- [x] **Step 9: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_insert_single_leaf_no_split -v`
 Expected: PASS
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/tinydb/btree.py tests/unit/test_btree.py
@@ -830,7 +830,7 @@ git commit -m "feat(btree): LeafNode/InternalNode serialization + BTree.insert/s
 - Modify: `src/tinydb/btree.py`
 - Test: `tests/unit/test_btree.py`
 
-- [ ] **Step 1: Write failing test for split**
+- [x] **Step 1: Write failing test for split**
 
 ```python
 def test_btree_insert_triggers_split_at_overflow():
@@ -850,12 +850,12 @@ def test_btree_insert_triggers_split_at_overflow():
     p.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_insert_triggers_split_at_overflow -v`
 Expected: FAIL with assertion error on the post-split lookup (insert without split overwrites payload)
 
-- [ ] **Step 3: Implement leaf split logic**
+- [x] **Step 3: Implement leaf split logic**
 
 Modify `BTree.insert` in `src/tinydb/btree.py`. Replace the simple insert with split-aware insert:
 
@@ -964,17 +964,17 @@ Modify `BTree.insert` in `src/tinydb/btree.py`. Replace the simple insert with s
         raise RuntimeError(f"target_pid {target_pid} not found in path from root {root_pid}")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_insert_triggers_split_at_overflow -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: 575 + new tests passing
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tinydb/btree.py tests/unit/test_btree.py
@@ -989,7 +989,7 @@ git commit -m "feat(btree): leaf + internal split with parent recursion"
 - Modify: `src/tinydb/btree.py`
 - Test: `tests/unit/test_btree.py`
 
-- [ ] **Step 1: Write failing test for range**
+- [x] **Step 1: Write failing test for range**
 
 ```python
 def test_btree_range_iterates_in_order():
@@ -1005,12 +1005,12 @@ def test_btree_range_iterates_in_order():
     p.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_range_iterates_in_order -v`
 Expected: FAIL with `AttributeError: 'BTree' object has no attribute 'range'`
 
-- [ ] **Step 3: Implement BTree.range**
+- [x] **Step 3: Implement BTree.range**
 
 Append to `BTree` in `src/tinydb/btree.py`:
 
@@ -1040,12 +1040,12 @@ Append to `BTree` in `src/tinydb/btree.py`:
         return results
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_range_iterates_in_order -v`
 Expected: PASS
 
-- [ ] **Step 5: Write failing test for tombstone delete**
+- [x] **Step 5: Write failing test for tombstone delete**
 
 ```python
 def test_btree_delete_marks_tombstone():
@@ -1064,12 +1064,12 @@ def test_btree_delete_marks_tombstone():
     p.close()
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_delete_marks_tombstone -v`
 Expected: FAIL with `AttributeError: 'BTree' object has no attribute 'delete'`
 
-- [ ] **Step 7: Implement BTree.delete (tombstone)**
+- [x] **Step 7: Implement BTree.delete (tombstone)**
 
 Append to `BTree`:
 
@@ -1085,12 +1085,12 @@ Append to `BTree`:
             self.pager.write_page(leaf_pid, leaf.serialize())
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_btree.py::test_btree_delete_marks_tombstone -v`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/tinydb/btree.py tests/unit/test_btree.py
@@ -1105,7 +1105,7 @@ git commit -m "feat(btree): range iteration + tombstone delete"
 - Create: `src/tinydb/index_manager.py`
 - Test: `tests/unit/test_index_manager.py`
 
-- [ ] **Step 1: Write failing test for IndexManager**
+- [x] **Step 1: Write failing test for IndexManager**
 
 ```python
 # tests/unit/test_index_manager.py
@@ -1129,12 +1129,12 @@ def test_index_manager_rebuild_for_table_with_pk():
     p.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_index_manager.py::test_index_manager_rebuild_for_table_with_pk -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'tinydb.index_manager'`
 
-- [ ] **Step 3: Create index_manager.py**
+- [x] **Step 3: Create index_manager.py**
 
 Create `src/tinydb/index_manager.py`:
 
@@ -1211,7 +1211,7 @@ class IndexManager:
         return self._indexes.get((table_name, column_name))
 ```
 
-- [ ] **Step 4: Run test, fix to use lookup_key**
+- [x] **Step 4: Run test, fix to use lookup_key**
 
 Edit the test in `tests/unit/test_index_manager.py` to use `lookup_key`:
 
@@ -1234,17 +1234,17 @@ def test_index_manager_rebuild_for_table_with_pk():
     p.close()
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/unit/test_index_manager.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Run full suite for regression**
+- [x] **Step 6: Run full suite for regression**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: 575 + new passing
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/tinydb/index_manager.py tests/unit/test_index_manager.py
@@ -1259,7 +1259,7 @@ git commit -m "feat(index_manager): per-(table,col) B+tree with rebuild_for_tabl
 - Modify: `src/tinydb/executor.py`
 - Test: `tests/integration/test_select_uses_index.py`
 
-- [ ] **Step 1: Write failing test for SELECT WHERE PK uses index**
+- [x] **Step 1: Write failing test for SELECT WHERE PK uses index**
 
 ```python
 # tests/integration/test_select_uses_index.py
@@ -1277,12 +1277,12 @@ def test_select_pk_eq_uses_btree(tmp_path):
         assert rows[0][1] == "user7"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_select_uses_index.py::test_select_pk_eq_uses_btree -v`
 Expected: PASS already (because current full-scan also returns correct results). The point is to ensure index doesn't break existing behavior. Mark as baseline.
 
-- [ ] **Step 3: Add IndexManager to Database**
+- [x] **Step 3: Add IndexManager to Database**
 
 Edit `src/tinydb/database.py`:
 
@@ -1307,7 +1307,7 @@ class Database:
 
 (Adjust imports as needed; check existing Database structure first.)
 
-- [ ] **Step 4: Add IndexManager wiring to Executor.__init__**
+- [x] **Step 4: Add IndexManager wiring to Executor.__init__**
 
 Edit `src/tinydb/executor.py`:
 
@@ -1319,7 +1319,7 @@ class Executor:
         self.index_manager = index_manager or IndexManager(pager)
 ```
 
-- [ ] **Step 5: Modify _validate_unique_keys to use index lookup**
+- [x] **Step 5: Modify _validate_unique_keys to use index lookup**
 
 Edit `src/tinydb/executor.py:_validate_unique_keys` (around line 283):
 
@@ -1360,7 +1360,7 @@ Edit `src/tinydb/executor.py:_validate_unique_keys` (around line 283):
 
 (Simplify: composite key support deferred. Single-column case is the primary path.)
 
-- [ ] **Step 6: Modify _exec_select to use index when WHERE is single equality on indexed column**
+- [x] **Step 6: Modify _exec_select to use index when WHERE is single equality on indexed column**
 
 Edit `src/tinydb/executor.py:_exec_select` (around line 474) — add index fast path before `_scan_table`:
 
@@ -1423,17 +1423,17 @@ Add helpers in `Executor`:
         return [(slot_id, sp.get_row(slot_id), page_id)]
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_select_uses_index.py::test_select_pk_eq_uses_btree -v`
 Expected: PASS
 
-- [ ] **Step 8: Run full suite**
+- [x] **Step 8: Run full suite**
 
 Run: `.venv/bin/python -m pytest -q`
 Expected: 575 + new passing
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/tinydb/executor.py src/tinydb/database.py tests/integration/test_select_uses_index.py
@@ -1449,7 +1449,7 @@ git commit -m "feat(executor): SELECT WHERE on indexed column uses B+tree (no fa
 - Modify: `src/tinydb/database.py`
 - Test: `tests/integration/test_drop_reclaims_pages.py`
 
-- [ ] **Step 1: Write failing test for DROP reclaiming pages**
+- [x] **Step 1: Write failing test for DROP reclaiming pages**
 
 ```python
 # tests/integration/test_drop_reclaims_pages.py
@@ -1467,12 +1467,12 @@ def test_drop_frees_table_and_index_pages(tmp_path):
         assert after < before  # at least the table's pages + index pages freed
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_drop_reclaims_pages.py::test_drop_frees_table_and_index_pages -v`
 Expected: FAIL with `AttributeError` (DROP currently leaks pages)
 
-- [ ] **Step 3: Implement DROP reclamation**
+- [x] **Step 3: Implement DROP reclamation**
 
 Replace `_exec_drop_table` in `src/tinydb/executor.py:178`:
 
@@ -1556,17 +1556,17 @@ Add `forget_table` to `IndexManager`:
             del self._indexes[k]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/integration/test_drop_reclaims_pages.py::test_drop_frees_table_and_index_pages -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 Run: `.venv/bin/python -m pytest --cov=tinydb --cov-fail-under=90 -q`
 Expected: 575 + new tests pass; coverage ≥ 90%
 
-- [ ] **Step 6: Add MVP_LIMITATIONS section**
+- [x] **Step 6: Add MVP_LIMITATIONS section**
 
 Edit `docs/MVP_LIMITATIONS.md` — append a `## tinydb-engine-v2` section:
 
@@ -1586,7 +1586,7 @@ Known limitations:
 - **type_system.py line budget**: deferred (pre-existing 508 vs 350 budget; refactor split into `legacy_helpers.py` + `codec_registry.py` + `codecs.py` deferred).
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/tinydb/executor.py src/tinydb/index_manager.py src/tinydb/database.py tests/integration/test_drop_reclaims_pages.py docs/MVP_LIMITATIONS.md

@@ -35,3 +35,21 @@ tinydb MVP is a teaching-grade embedded database. It explicitly does NOT provide
 - **DROP TABLE**: best-effort. The table's entry is removed from the catalog and its root/overflow pages are leaked on disk; there is no free-page list in MVP. Reclaiming those pages lands in `tinydb-engine-v2`.
 
 All of the above are scoped to follow-up changes: `tinydb-acid` (transactions, crash safety), `tinydb-engine-v2` (indexes, joins, multi-page catalog, page recycling, UPDATE).
+
+## tinydb-engine-v2
+
+Added in engine-v2 change (commits af48f73+). Capabilities:
+
+- Multi-page catalog overflow chain for >50 tables
+- Free list page reclamation on DROP TABLE
+- B+tree indexes on PRIMARY KEY / UNIQUE columns
+- v1 → v2 auto-upgrade on open (in-place header rewrite)
+- Engine-v2 also fixes a data/index page-id collision (via `_IndexPager`) — data chain uses pid+1 arithmetic while B+tree splits use `Pager.alloc_page()`; without collision avoidance, data writes would overwrite B+tree nodes.
+
+Known limitations:
+
+- **Tombstone accumulation**: B+tree delete marks entries as tombstones; pages are not merged/compacted. Long-lived tables with frequent DELETEs may accumulate dead entries. Periodic compaction is out of scope.
+- **Index lookup never falls back to scan**: SELECT WHERE on an indexed column returns empty on miss.
+- **IndexManager.rebuild scans full table**: First INSERT/SELECT after a v1→v2 upgrade walks every row. Cost: ~1ms per 10k rows.
+- **leaf-chain preservation across non-rightmost splits**: When a middle leaf splits, the new right sibling loses its `next_leaf_id` chain link to subsequent leaves. Range queries with random-order inserts may miss entries. Workaround: re-sort-and-rebuild via INSERT into a fresh tree.
+- **`_IndexPager` is a workaround**: A cleaner fix would unify data and index allocations through a single `Pager.alloc_page()` path that returns free-list pages preferentially.
