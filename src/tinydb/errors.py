@@ -58,6 +58,20 @@ class InvalidDatabaseFile(TinydbError): ...
 class UnsupportedSchemaVersion(TinydbError): ...
 
 
+class SchemaMismatch(TinydbError):
+    """Raised when on-disk schema version is incompatible with current code.
+
+    Typically raised when attempting to open a database file whose schema
+    version cannot be safely auto-upgraded (e.g. v2 db with WAL residue —
+    auto-upgrade could strand uncommitted WAL records on the wrong schema).
+    Callers are expected to run an explicit migration path.
+    """
+
+    def __init__(self, msg: str):
+        super().__init__(msg)
+        self.msg = msg
+
+
 class PageFull(TinydbError):
     """Raised when a SlottedPage has no room for a new row and no tombstone to reuse."""
 

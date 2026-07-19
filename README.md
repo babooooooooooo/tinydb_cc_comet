@@ -1,8 +1,8 @@
 # tinydb (MVP)
 
-> Minimal embedded relational database for teaching and embedding. **MVP: non-ACID, no crash safety.**
+> Minimal embedded relational database for teaching and embedding. **MVP: now ACID-capable via `tinydb-acid`.**
 
-> **Status:** MVP complete — `CREATE` / `DROP` / `INSERT` / `SELECT` / `DELETE` over `INT` / `TEXT` / `FLOAT` / `BOOL`. Non-ACID, single-process. See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
+> **Status:** MVP complete — `CREATE` / `DROP` / `INSERT` / `SELECT` / `DELETE` / `UPDATE` over `INT` / `TEXT` / `FLOAT` / `BOOL` (and 11 more types via `tinydb-types`). ACID transactions (`BEGIN` / `COMMIT` / `ROLLBACK`) ship with the `tinydb-acid` change. See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
 >
 > The 15-type extension (`tinydb-types` change) adds `VARCHAR(N)`, `CHAR(N)`, `DECIMAL(p, s)`, `DOUBLE`, `REAL`, `BOOLEAN`, `INTEGER`, `SMALLINT`, `BIGINT`, `DATE`, `TIME`, `TIMESTAMP` — see [§ Types](#types).
 >
@@ -24,6 +24,55 @@ Notes on the grammar shown above:
 - `INSERT` requires an explicit column list (no positional shorthand).
 - `WHERE` accepts only `column = literal`.
 - `SELECT` columns may be `*` or a comma-separated list; multi-row results come back as immutable `Row` objects accessed by column name or unpacking.
+
+## ACID
+
+Each `execute()` call runs inside an implicit transaction (autocommit): a successful statement commits to disk via `fsync`, and a failed statement auto-rolls-back so the database never holds a half-applied mutation. Wrap multiple statements in an explicit `BEGIN` ... `COMMIT` (or `ROLLBACK`) block to control them as a single atomic unit.
+
+Guarantees provided:
+
+- **Atomicity** — a multi-row INSERT/UPDATE/DELETE either commits every row or none. A failure on any row (constraint violation, type mismatch, etc.) rolls back the entire statement.
+- **Durability** — `COMMIT` performs an `fsync(main)` after writing the WAL commit record. A power loss or `kill -9` after a successful COMMIT leaves the committed data intact.
+- **Crash recovery** — on open, the WAL is replayed: committed transactions are re-applied to the main file; uncommitted transactions are discarded.
+
+Not provided (see [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) § tinydb-acid):
+
+- **Isolation / concurrency** — single-Executor, single-process. Concurrent transactions from multiple processes or threads are not supported.
+
+Usage:
+
+```python
+import tinydb
+
+# Autocommit: every execute() is its own implicit transaction.
+with tinydb.Database("data.db") as db:
+    db.execute("CREATE TABLE accounts(id INT PRIMARY KEY, balance INT)")
+    db.execute("INSERT INTO accounts(id, balance) VALUES (1, 100)")
+    # The next INSERT collides on PK — the entire statement rolls back
+    # atomically; no partial state is left behind.
+    try:
+        db.execute("INSERT INTO accounts(id, balance) VALUES (2, 50), (1, 25)")
+    except tinydb.errors.ConstraintViolation:
+        pass  # accounts still has only (1, 100)
+
+# Explicit BEGIN ... COMMIT / ROLLBACK
+with tinydb.Database("data.db") as db:
+    db.execute("BEGIN")
+    db.execute("INSERT INTO accounts(id, balance) VALUES (2, 50)")
+    db.execute("INSERT INTO accounts(id, balance) VALUES (3, 75)")
+    db.execute("COMMIT")   # both rows visible after this point
+    # Or: db.execute("ROLLBACK") to discard both rows
+
+    db.execute("BEGIN")
+    db.execute("DELETE FROM accounts WHERE id = 2")
+    db.execute("ROLLBACK")  # id=2 is back
+```
+
+Schema upgrade notes:
+
+- v3-schema `.db` files (`tinydb-acid`) are the current on-disk format.
+- v2-schema files (from `tinydb-engine-v2`) auto-upgrade on open if no `<db>.wal` sidecar is present.
+- v2-schema files WITH a WAL sidecar raise `SchemaMismatch` and require explicit migration.
 
 ## Run the demo
 

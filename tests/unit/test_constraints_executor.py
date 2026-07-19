@@ -134,17 +134,30 @@ def test_executor_insert_duplicate_column_rejected(tmp_path):
 
 
 @pytest.mark.integration
-def test_executor_insert_multi_row_partial_failure_keeps_successful_rows(tmp_path):
+def test_executor_insert_multi_row_partial_failure_atomic_no_rows_committed(tmp_path):
+    """Atomic semantics: a multi-row INSERT that fails on any row commits nothing.
+
+    Per `tinydb-acid` plan: multi-row INSERT runs under an implicit autocommit
+    transaction. A failure on any row (here: PK collision on the second row)
+    rolls back the entire statement — the row already written earlier in the
+    SAME INSERT (the third SQL tuple) is discarded along with the failing one.
+    Rows already committed by PREVIOUS statements (id=1, id=2) are unaffected
+    because they ran in their own implicit transactions.
+    """
     with Database(str(tmp_path / "mr.db")) as db:
         db.execute("CREATE TABLE t(id INT PRIMARY KEY, name TEXT)")
+        # First INSERT runs in its own autocommit txn and commits id=1, id=2.
         db.execute(
             "INSERT INTO t(id, name) VALUES (1, 'a'), (2, 'b')"
         )
-        # Third row collides on PK; first two must remain.
+        # Second INSERT collides on PK (row id=1 already exists). All three
+        # rows in this statement (3, 1, 4) must be discarded atomically.
         with pytest.raises(ConstraintViolation) as exc_info:
             db.execute(
                 "INSERT INTO t(id, name) VALUES (3, 'c'), (1, 'd'), (4, 'e')"
             )
         assert exc_info.value.kind == "duplicate_pk"
         rows = db.execute("SELECT * FROM t")
-    assert sorted(r.id for r in rows) == [1, 2, 3]
+    # Only rows from prior committed statements remain — no partial state
+    # from the rolled-back INSERT.
+    assert sorted(r.id for r in rows) == [1, 2]

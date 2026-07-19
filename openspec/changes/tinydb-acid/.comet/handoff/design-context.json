@@ -1,0 +1,13 @@
+{
+  "change": "tinydb-acid",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "160aca09dd07d92dbe22451e57315076d974f4f835ac7b87a4e89ddf7e873dbf",
+  "files": [
+    { "path": "openspec/changes/tinydb-acid/proposal.md", "sha256": "a4e050eee8cd3c126a4257e46d0db94333f6c092b319995c59d01c9aa1668954" },
+    { "path": "openspec/changes/tinydb-acid/design.md", "sha256": "2932e2582ac5b9e1abd44234cee235dba381db7d3ee85e1cc680ca5f6d35fa61" },
+    { "path": "openspec/changes/tinydb-acid/tasks.md", "sha256": "c07315682dfda1c4bd7bab56591b9de06c94ef5d762ec3b608cd8e6be181eaec" }
+  ]
+}
