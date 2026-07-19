@@ -1,27 +1,35 @@
-"""Slotted-page single-file storage with 4KB pages.
+"""Slotted-page single-file storage with 4KB pages + WAL integration.
 
 Page 0 is reserved for the file header (magic + schema version).
 Page 1 will be reserved for the catalog (Task 12).
 Page 2+ are available for table data.
+
+Schema v3 (Task 2 of tinydb-acid): adds inline WAL integration. The schema
+byte at offset 8 is now 0x03; on first open of a v2 file (byte 8 = 0x02)
+with no WAL residue, the header is bumped in place. v2 files with WAL
+residue require an explicit migration path and raise SchemaMismatch.
 """
 import mmap
 import os
 
-from tinydb.errors import InvalidDatabaseFile, UnsupportedSchemaVersion
+from tinydb.errors import InvalidDatabaseFile, SchemaMismatch, UnsupportedSchemaVersion
+from tinydb.wal import Wal
 
-MAGIC = b'TINYDB\x00\x02'  # 8 bytes; version byte at offset 7
-MAGIC_PREFIX = b'TINYDB\x00'  # first 7 bytes shared across v1/v2 magic
-SCHEMA_VERSION = 0x02  # 1 byte
+MAGIC = b'TINYDB\x00\x03'  # 8 bytes; version byte at offset 7
+MAGIC_PREFIX = b'TINYDB\x00'  # first 7 bytes shared across v1/v2/v3 magic
+SCHEMA_VERSION = 0x03  # 1 byte
 PAGE_SIZE = 4096
 FREE_LIST_HEAD_OFFSET = 9  # u32 at bytes 9-12
 HEADER_RESERVED = PAGE_SIZE - len(MAGIC) - 1 - 4  # 4083 bytes of zeros after free_list_head
 
 
 class Pager:
-    """File-backed or :memory: page manager.
+    """File-backed or :memory: page manager with WAL integration (schema v3).
 
     Task 7 implements file header (page 0: magic + schema version).
     Page alloc/read/write/close arrive in Task 8.
+    Task 2 of tinydb-acid: bumps schema_version to 0x03 and exposes WAL
+    integration methods (``wal_append_*``, ``write_main_page``, ``fsync_main``).
     """
 
     def __init__(self, path: str):
@@ -32,12 +40,16 @@ class Pager:
         self._mem_pages: dict[int, bytearray] = {}
         self._next_page_id = 2
         self._free_list_head: int = 0  # page id of free list head, 0 = empty
+        # WAL integration (Task 2). Lazy-initialized via ``_get_or_open_wal``.
+        self._wal: "Wal | None" = None
+        self._wal_path: str | None = None
 
         if self._is_memory:
             page = self._alloc_page(0)
             self._init_page0(page)
         else:
             self._open_file()
+            self._init_wal()
 
     def _open_file(self) -> None:
         """Open or create the database file; validate header on existing files."""
@@ -65,7 +77,7 @@ class Pager:
         else:
             # Existing file: validate header. The first 7 bytes (MAGIC_PREFIX)
             # are shared across versions; the version byte at offset 7 picks
-            # the format. We accept v1 and transparently upgrade to v2.
+            # the format. Auto-upgrade v1 -> v3 and v2 (no-WAL) -> v3 in place.
             self._file.seek(0)
             header = self._file.read(len(MAGIC) + 1)
             if not header.startswith(MAGIC_PREFIX):
@@ -76,25 +88,45 @@ class Pager:
                 )
             version_byte = header[len(MAGIC_PREFIX)]
             if version_byte == 0x01:
-                # Auto-upgrade v1 -> v2: rewrite magic version byte + schema_version +
+                # Auto-upgrade v1 -> v3: rewrite magic version byte + schema_version +
                 # free_list_head in place. Note: the file was opened in "a+b" mode
                 # above, which always appends on existing files — so we close and
                 # reopen in "r+b" to allow seek+write at arbitrary offsets.
                 self._file.close()
                 self._file = open(self._path, "r+b")
                 self._file.seek(len(MAGIC_PREFIX))
-                self._file.write(bytes([0x02]))  # magic version byte
-                self._file.write(bytes([SCHEMA_VERSION]))
+                self._file.write(bytes([0x03]))  # magic version byte -> v3
+                self._file.write(bytes([SCHEMA_VERSION]))  # schema_version = 0x03
                 self._file.write(b"\x00\x00\x00\x00")  # free_list_head = 0
                 self._file.flush()
-            elif version_byte != 0x02:
-                self._file.close()
-                self._file = None
-                raise UnsupportedSchemaVersion(
-                    f"schema_version={version_byte} not supported (expected {SCHEMA_VERSION})"
-                )
-            else:
-                # v2 file: validate schema_version
+            elif version_byte == 0x02:
+                # v2 file: check schema byte. If still 0x02, either auto-upgrade
+                # (no WAL residue) or raise SchemaMismatch (WAL residue present).
+                schema_version = header[len(MAGIC_PREFIX) + 1]
+                if schema_version == SCHEMA_VERSION:
+                    pass  # Already v3 — fall through.
+                elif schema_version == 0x02:
+                    wal_path = self._path + ".wal"
+                    if os.path.exists(wal_path):
+                        self._file.close()
+                        self._file = None
+                        raise SchemaMismatch(
+                            f"db file {self._path!r} is schema 0x02 with WAL residue; "
+                            f"call migrate_v2_to_v3(path) before opening"
+                        )
+                    # No WAL residue: safe to bump header byte 8 to 0x03 in place.
+                    self._file.close()
+                    self._file = open(self._path, "r+b")
+                    self._file.seek(len(MAGIC_PREFIX) + 1)
+                    self._file.write(bytes([SCHEMA_VERSION]))  # 0x02 -> 0x03
+                    self._file.flush()
+                else:
+                    self._file.close()
+                    self._file = None
+                    raise UnsupportedSchemaVersion(
+                        f"schema_version={schema_version} not supported (expected {SCHEMA_VERSION})"
+                    )
+            elif version_byte == 0x03:
                 schema_version = header[len(MAGIC_PREFIX) + 1]
                 if schema_version != SCHEMA_VERSION:
                     self._file.close()
@@ -102,6 +134,21 @@ class Pager:
                     raise UnsupportedSchemaVersion(
                         f"schema_version={schema_version} not supported (expected {SCHEMA_VERSION})"
                     )
+            else:
+                self._file.close()
+                self._file = None
+                raise UnsupportedSchemaVersion(
+                    f"magic version={version_byte} not supported (expected 0x03)"
+                )
+
+        # The file was opened in "a+b" (so creation on first open works), but
+        # POSIX append mode forces every write to the end of file regardless
+        # of seek(). We need ``r+b`` so :meth:`write_main_page` honors its
+        # seek offsets. Skip the reopen for existing files that were already
+        # upgraded above (their close+reopen left them in "r+b" mode).
+        if self._file is not None and "a" in str(self._file.mode):
+            self._file.close()
+            self._file = open(self._path, "r+b")
 
         # mmap the file for read/write
         self._file.seek(0)
@@ -150,7 +197,12 @@ class Pager:
         return 1
 
     def close(self) -> None:
-        """Release mmap and file handle."""
+        """Release mmap, file handle, and any open WAL handle."""
+        if self._wal is not None:
+            try:
+                self._wal.close()
+            finally:
+                self._wal = None
         if self._mmap is not None:
             try:
                 self._mmap.close()
@@ -166,6 +218,132 @@ class Pager:
             self._mmap.flush()
         if self._file is not None and not self._file.closed:
             self._file.flush()
+
+    # ------------------------------------------------------------------
+    # WAL integration (Task 2 of tinydb-acid).
+    # ------------------------------------------------------------------
+    def _init_wal(self) -> None:
+        """Initialize WAL handle (no-op for :memory:).
+
+        Schema v3 contract: if the WAL file is present alongside a v3 main
+        file, run crash recovery on open. Recovery is supplied by
+        ``tinydb.recovery`` which arrives in Task 5; until then this is a
+        no-op (ImportError-tolerant).
+        """
+        if self._is_memory:
+            return
+        self._wal_path = self._path + ".wal"
+        wal_exists = os.path.exists(self._wal_path)
+        if not wal_exists:
+            return
+        # Run recovery against the existing WAL. ``recovery`` is added in
+        # Task 5; missing-import is tolerated so Task 2 is independently
+        # testable.
+        try:
+            from tinydb.recovery import Recovery
+        except ImportError:
+            return
+        wal = Wal(self._wal_path)
+        Recovery.replay(self._path, wal)
+        # After recovery, the WAL may be truncated to drop everything below
+        # the oldest still-uncommitted transaction. If replay already
+        # truncated, the file is shortened — leave the handle open so the
+        # Pager can keep appending.
+        self._wal = wal
+
+    def _read_header_bytes(self) -> bytes:
+        """Read the first 9 bytes (magic + schema) from ``self._fd``.
+
+        Used by SchemaMismatch paths and v2 auto-upgrade detection.
+        """
+        if self._file is None:
+            raise RuntimeError("Pager not opened against a file")
+        self._file.seek(0)
+        return self._file.read(len(MAGIC) + 1)
+
+    def _upgrade_v2_header_to_v3(self) -> None:
+        """Bump the on-disk schema byte from 0x02 to 0x03 in place.
+
+        Caller must have already verified byte 8 == 0x02 and confirmed
+        there is no WAL residue. We close + reopen in "r+b" so we can
+        seek+write anywhere (the original handle was opened in "a+b"
+        which appends).
+        """
+        if self._file is None:
+            raise RuntimeError("Pager not opened against a file")
+        self._file.close()
+        self._file = open(self._path, "r+b")
+        self._file.seek(len(MAGIC_PREFIX) + 1)
+        self._file.write(bytes([SCHEMA_VERSION]))  # 0x02 -> 0x03
+        self._file.flush()
+
+    def _get_or_open_wal(self) -> "Wal":
+        """Lazily open the WAL handle (file or in-memory).
+
+        File-mode path: the WAL is opened in append mode by ``Wal.__init__``.
+        In-memory mode: a fresh ``Wal(None)`` is created.
+        """
+        if self._wal is None:
+            if self._is_memory:
+                self._wal = Wal(None)
+            else:
+                self._wal = Wal(self._wal_path)
+        return self._wal
+
+    def wal_append_page(self, txn_id: int, page_id: int, data: bytes) -> None:
+        """Append a PAGE_WRITE record to the WAL (kind=1)."""
+        self._get_or_open_wal().append(txn_id, 1, page_id, data)
+
+    def wal_append_commit(self, txn_id: int) -> None:
+        """Append a COMMIT record to the WAL (kind=2)."""
+        self._get_or_open_wal().append(txn_id, 2)
+
+    def wal_append_rollback(self, txn_id: int) -> None:
+        """Append a ROLLBACK record to the WAL (kind=3)."""
+        self._get_or_open_wal().append(txn_id, 3)
+
+    def wal_truncate_before(self, txn_id: int) -> None:
+        """Drop all WAL records older than ``txn_id`` and flush main file.
+
+        Called after the checkpoints have been written; truncation lets the
+        WAL stay bounded in size even on long-lived processes.
+        """
+        wal = self._get_or_open_wal()
+        wal.truncate_before(txn_id)
+        # Mirror flush so the (rewritten) WAL bytes are durable alongside the
+        # main file. ``flush`` covers both mmap + the underlying file handle;
+        # for in-memory WAL we don't need separate fsync.
+        self.flush()
+
+    def write_main_page(self, page_id: int, data: bytes) -> None:
+        """Write ``data`` to the main file at the slot for ``page_id``.
+
+        Unlike :meth:`write_page`, this bypasses ``len(data) == PAGE_SIZE``
+        so it can carry partial writes (PAGE_WRITE records in the WAL may
+        contain < PAGE_SIZE if the logging layer skipped unchanged halves —
+        see Task 3+).
+        """
+        if self._is_memory:
+            if len(data) != PAGE_SIZE:
+                raise ValueError(
+                    f"page data must be {PAGE_SIZE} bytes, got {len(data)}"
+                )
+            if page_id not in self._mem_pages:
+                self._mem_pages[page_id] = bytearray(PAGE_SIZE)
+            self._mem_pages[page_id][:] = data
+            return
+        if self._file is None:
+            raise RuntimeError("Pager not opened against a file")
+        self._file.seek(page_id * PAGE_SIZE)
+        self._file.write(data)
+        self._file.flush()
+
+    def fsync_main(self) -> None:
+        """fsync the main file to disk (durability barrier for WAL+main)."""
+        if self._file is None:
+            return
+        self._file.flush()
+        os.fsync(self._file.fileno())
 
     def alloc_page(self) -> int:
         """Allocate a page. Consults free list first; extends file only if list is empty."""

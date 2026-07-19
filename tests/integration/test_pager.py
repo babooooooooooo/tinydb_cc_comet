@@ -73,8 +73,9 @@ def test_pager_memory_mode_no_file_created():
 @pytest.mark.integration
 @pytest.mark.spec_id("REQ-PAGER-001-SCN-05")
 def test_pager_constants():
-    assert MAGIC == b'TINYDB\x00\x02'
-    assert SCHEMA_VERSION == 0x02
+    # v3 (tinydb-acid Task 2): MAGIC ends in 0x03 and schema_version is 0x03.
+    assert MAGIC == b'TINYDB\x00\x03'
+    assert SCHEMA_VERSION == 0x03
     assert PAGE_SIZE == 4096
 
 
