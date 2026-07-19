@@ -178,3 +178,9 @@ class Wal:
         if self._file is not None:
             self._file.close()
             self._file = None
+
+    def __enter__(self) -> "Wal":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()

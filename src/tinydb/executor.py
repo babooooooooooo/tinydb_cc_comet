@@ -18,7 +18,6 @@ txn.
 import copy
 from collections import defaultdict
 from typing import Any, Optional, Union
-from functools import cmp_to_key
 
 from tinydb.catalog import Catalog, TableInfo
 from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
@@ -47,88 +46,7 @@ from tinydb.type_system import (
 _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
 
 
-class _IndexPager:
-    """Wrap a Pager to record every page the IndexManager/BTree allocates.
-
-    B+tree splits allocate new pages via ``self.pager.alloc_page()`` inside
-    ``BTree.insert`` / ``BTree._insert_into_parent`` — pages that the
-    Executor's data-page chain would happily walk into and corrupt on the
-    next ``PageFull``-driven ``pid += 1`` step. By tracking every page id
-    the index side hands out, :meth:`Executor._alloc_data_page` (and the
-    skip loop in :meth:`Executor._insert_inline_only`) can guarantee the
-    data chain never collides with a B+tree node.
-
-    Forwarded methods: ``read_page``, ``write_page``, ``flush``, ``close``,
-    ``alloc_page``, ``free_page`` (the last two update the tracker).
-
-    Transaction routing (tinydb-acid Task 6 follow-up): when an
-    ``executor`` back-reference is supplied, every read/write/free flows
-    through :class:`Executor`'s ``_txn_*`` helpers so B+tree writes
-    participate in the active transaction (WAL append + ``_page_buffer``
-    shadow). Without this routing the B+tree leaf would mutate the main
-    file directly inside a BEGIN block, leaving a stale entry after
-    ROLLBACK. The executor parameter is optional for backward
-    compatibility with unit tests that construct an ``_IndexPager``
-    standalone.
-    """
-
-    def __init__(self, pager, executor=None):
-        self._pager = pager
-        self._executor = executor
-        self._allocated: set[int] = set()
-
-    def read_page(self, page_id: int) -> bytes:
-        if self._executor is not None:
-            return self._executor._txn_read_page(page_id)
-        return self._pager.read_page(page_id)
-
-    def write_page(self, page_id: int, data: bytes) -> None:
-        if self._executor is not None:
-            self._executor._txn_write_page(page_id, data)
-            return
-        self._pager.write_page(page_id, data)
-
-    def alloc_page(self) -> int:
-        pid = self._pager.alloc_page()
-        self._allocated.add(pid)
-        return pid
-
-    def free_page(self, page_id: int) -> None:
-        # BTree never frees pages, but keep the wrapper symmetric. Routes
-        # through the txn layer so DROP TABLE inside a BEGIN block can
-        # roll back the free-list head update on ROLLBACK.
-        if self._executor is not None:
-            self._executor._txn_free_page(page_id)
-        else:
-            self._pager.free_page(page_id)
-        self._allocated.discard(page_id)
-
-    def flush(self) -> None:
-        self._pager.flush()
-
-    def close(self) -> None:
-        self._pager.close()
-
-    def __deepcopy__(self, memo):
-        """Deep-copy an _IndexPager sharing the underlying Pager + Executor.
-
-        ``_pager`` ultimately references a ``BufferedRandom`` file handle
-        (``Pager._file``) that ``copy.deepcopy`` cannot pickle. Both the
-        Pager and the Executor are process-singleton state; sharing the
-        references is correct because ``Executor._snapshot_state`` only
-        needs the ``_allocated`` set to be preserved (so the rollback
-        restore still tracks which pages are owned by index B+trees).
-        """
-        new = _IndexPager.__new__(_IndexPager)
-        new._pager = self._pager
-        new._executor = self._executor
-        new._allocated = set(self._allocated)
-        memo[id(self)] = new
-        return new
-
-    @property
-    def allocated(self) -> set[int]:
-        return set(self._allocated)
+from tinydb._index_pager import IndexPager as _IndexPager
 
 
 def eval_expr(expr: Any, row: list, schema: list) -> bool:
@@ -352,34 +270,23 @@ class Executor:
     def _snapshot_state(self) -> dict:
         """Capture the Executor's mutable state for ROLLBACK restore.
 
-        Deep-copies the catalog (TableInfo graph) and the per-table data
-        page list; shallow-copies the IndexManager's ``_indexes`` dict
-        but deep-copies the BTree wrappers themselves so BTree.pager
-        pointers and root_page_id stay correct. The page contents are
-        NOT snapshotted — the Pager's main file is untouched during the
-        txn, so discarding ``_page_buffer`` is sufficient to revert
-        page-level state.
+        Delegates to :func:`tinydb._executor_snapshot.snapshot_state`; this
+        module-level helper lives in ``_executor_snapshot.py`` to keep
+        ``executor.py`` under its line budget (Risk R7).
         """
-        return {
-            "catalog": copy.deepcopy(self.catalog),
-            "table_data_pages": copy.deepcopy(self._table_data_pages),
-            "indexes": copy.deepcopy(self.index_manager._indexes),
-        }
+        from tinydb._executor_snapshot import snapshot_state
+
+        return snapshot_state(self)
 
     def _restore_state(self, snap: dict) -> None:
         """Replace the Executor's mutable state with ``snap``.
 
-        Also updates ``Database.catalog`` (if back-referenced) so the
-        Database wrapper sees the reverted catalog without a separate
-        reopen. The previously-live catalog and indexes are dropped;
-        Python GC reclaims them along with the WAL/buffered pages.
+        Delegates to :func:`tinydb._executor_snapshot.restore_state`; see
+        that module for the restore contract.
         """
-        self.catalog = snap["catalog"]
-        self._table_data_pages = snap["table_data_pages"]
-        self.index_manager._indexes = snap["indexes"]
-        db = getattr(self, "_database_ref", None)
-        if db is not None:
-            db.catalog = self.catalog
+        from tinydb._executor_snapshot import restore_state
+
+        restore_state(self, snap)
 
     def _exec_begin(self, stmt: Begin) -> list:
         """Open an explicit transaction; reject nested BEGIN."""
@@ -560,153 +467,14 @@ class Executor:
     def _exec_drop_table(self, stmt: DropTable) -> list:
         """Drop a table and reclaim its data + index pages via the free list.
 
-        Walks the table's contiguous data page chain (skipping any page id
-        owned by a B+tree wrapper) plus any per-page overflow chains for
-        spilled rows; frees them all. Then walks every B+tree index for
-        the table's PK + UNIQUE columns, frees their nodes via the per-
-        BTree ``_IndexPager`` wrapper (which clears the wrapper's
-        ``_allocated`` set), and finally forgets the B+trees in
-        :class:`IndexManager`. The catalog is persisted inline (single
-        page) to stay consistent with ``_exec_create_table``.
-
-        Task 8 of ``tinydb-engine-v2`` (DROP TABLE reclamation).
+        Thin delegator over :func:`tinydb._executor_drop.exec_drop_table`;
+        the implementation lives in ``_executor_drop.py`` to keep
+        ``executor.py`` under its line budget. See that module's docstring
+        for the full reclamation contract.
         """
-        ti = self.catalog.get_table(stmt.name)
-        if ti is None:
-            raise ExecutionError(f"table {stmt.name!r} does not exist")
+        from tinydb._executor_drop import exec_drop_table
 
-        # Collect page ids BEFORE removing from catalog (we need ``ti``).
-        data_pids = self._collect_table_data_pages(ti)
-        index_pids = self._collect_index_pages(ti)
-
-        # Drop from catalog first so subsequent persistence writes a
-        # consistent catalog. The page ids are already captured above.
-        self.catalog.drop_table(stmt.name)
-        # Drop the per-table data page list so a future CREATE TABLE with
-        # the same name starts with a fresh entry (no stale page ids).
-        self._table_data_pages.pop(stmt.name, None)
-
-        # Free data pages via the txn layer so a ROLLBACK of this DROP
-        # restores the free-list head. ``Pager.free_page`` modifies
-        # page 0's free_list_head and the freed page's first 4 bytes
-        # directly; routing through ``_txn_free_page`` writes both to
-        # the WAL + page buffer so they participate in the txn.
-        for pid in data_pids:
-            self._txn_free_page(pid)
-
-        # Free index pages. When a BTree's pager is an ``_IndexPager``
-        # wrapper (the Database-installed path), use the wrapper's
-        # ``free_page`` so its ``_allocated`` tracking is cleared; this
-        # prevents phantom "owned" entries from polluting the Executor's
-        # collision avoidance after the BTree is forgotten. When no
-        # wrapper is present (e.g., standalone Executor in unit tests),
-        # fall back to freeing via the raw pager.
-        for col in ti.columns:
-            if not (col.primary_key or col.unique):
-                continue
-            bt = self.index_manager.get_btree(stmt.name, col.name)
-            if bt is None:
-                continue
-            wrapper = bt.pager if type(bt.pager).__name__ == "_IndexPager" else None
-            if wrapper is not None:
-                for pid in list(wrapper._allocated):
-                    wrapper.free_page(pid)
-            else:
-                for pid in index_pids:
-                    self.pager.free_page(pid)
-
-        # Forget B+trees for this table. After this the IndexManager has
-        # no record of the dropped table; the corresponding wrapper
-        # instances are left in ``self._index_pagers`` with empty
-        # ``_allocated`` sets (harmless).
-        self.index_manager.forget_table(stmt.name)
-
-        # Persist catalog. We use the inline format ``write_page(1,
-        # to_bytes())`` to stay consistent with ``_exec_create_table`` and
-        # ``_insert_inline_only`` (which both write inline format). The
-        # chain-format writer ``Pager.write_catalog_chain`` is reserved
-        # for future multi-page overflow support; mixing the two
-        # formats breaks ``Catalog.from_bytes`` on subsequent opens.
-        self._txn_write_page(1, self.catalog.to_bytes())
-        self.pager.flush()
-        return []
-
-    def _collect_table_data_pages(self, ti: TableInfo) -> list[int]:
-        """Return every page id used by ``ti``'s data chain + spill chains.
-
-        Walks the range ``[ti.root_page_id, ti.next_page_id]`` and collects
-        only DATA pages, skipping any page id that is currently tracked by
-        a B+tree ``_IndexPager`` wrapper. The data chain is NOT contiguous
-        in the presence of indexes — ``_insert_inline_only`` advances by
-        ``pid += 1`` while skipping index pages — so the catalog's
-        ``next_page_id`` may equal a page id owned by a B+tree.
-
-        For each data page, follows its ``overflow_next`` link to pick up
-        any overflow pages used for spilled rows. We defensively treat
-        both ``0`` and ``NULL_PAGE_ID`` as "no overflow chain" because
-        freshly-allocated data pages haven't had ``overflow_next``
-        initialized; we additionally require the target page to have
-        ``page_type == 2`` (overflow) before following it.
-        """
-        pids: list[int] = []
-        seen: set[int] = set()
-        if ti.root_page_id == 0 or ti.next_page_id < ti.root_page_id:
-            return pids
-        # Index page ids are owned by B+tree wrappers — they live in the
-        # address space between data pages and must not be freed as data.
-        index_pages = self._index_pages()
-        pid = ti.root_page_id
-        end = ti.next_page_id
-        while pid <= end:
-            if pid in index_pages:
-                pid += 1
-                continue
-            if pid not in seen:
-                seen.add(pid)
-                pids.append(pid)
-                # Follow the per-page overflow chain (bytes 4:8 of every
-                # data page hold the next overflow page id, 0 or
-                # ``NULL_PAGE_ID`` on the tail).
-                nxt = int.from_bytes(self._txn_read_page(pid)[4:8], "big")
-                while nxt > 0 and nxt != NULL_PAGE_ID and nxt not in seen:
-                    target_raw = self._txn_read_page(nxt)
-                    if target_raw[0] != 2:
-                        break
-                    seen.add(nxt)
-                    pids.append(nxt)
-                    nxt = int.from_bytes(target_raw[4:8], "big")
-            pid += 1
-        return pids
-
-    def _collect_index_pages(self, ti: TableInfo) -> list[int]:
-        """Return every page id used by every B+tree index for ``ti``.
-
-        Walks each indexed column's B+tree by iterative descent: pop a
-        page off the stack, deserialize it, and push internal-node
-        children until only leaves remain. Leaf pages are collected but
-        not descended into. Duplicate page ids (which can't occur in a
-        well-formed B+tree) are skipped defensively.
-        """
-        pids: list[int] = []
-        seen: set[int] = set()
-        for col in ti.columns:
-            if not (col.primary_key or col.unique):
-                continue
-            bt = self.index_manager.get_btree(ti.name, col.name)
-            if bt is None or bt.root_page_id is None:
-                continue
-            stack: list[int] = [bt.root_page_id]
-            while stack:
-                pid = stack.pop()
-                if pid in seen:
-                    continue
-                seen.add(pid)
-                pids.append(pid)
-                page = self._txn_read_page(pid)
-                if page[0] == NODE_TYPE_INTERNAL:
-                    node = InternalNode.deserialize(page)
-                    stack.extend(node.children)
-        return pids
+        return exec_drop_table(self, stmt)
 
     # --- DML: INSERT / SELECT / DELETE -------------------------------------
 
@@ -1182,41 +950,13 @@ class Executor:
     ) -> list[tuple[int, list[Any], int]]:
         """Stable multi-key sort by OrderByItem list.
 
-        Uses ``cmp_to_key`` to support arbitrary Python types (INT, TEXT,
-        FLOAT, BOOL) and mixed ASC/DESC. Python ``sorted`` is stable, so
-        equal keys preserve insertion order (which itself is page-slot order).
-
-        ``schema`` is the v2 form (3-tuple with type_params) so codec
-        dispatch honors parametric types (Task 17).
+        Delegates to :func:`tinydb._executor_sort.stable_sort`; the
+        implementation lives in ``_executor_sort.py`` to keep
+        ``executor.py`` under its line budget (Risk R7).
         """
-        name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
+        from tinydb._executor_sort import stable_sort
 
-        def cmp(r1: tuple, r2: tuple) -> int:
-            for it in items:
-                if it.column not in name_to_idx:
-                    raise ExecutionError(
-                        f"unknown column {it.column!r} in ORDER BY"
-                    )
-                i = name_to_idx[it.column]
-                v1, v2 = r1[1][i], r2[1][i]
-                col_type = schema[i][1]
-                col_params = schema[i][2] if len(schema[i]) >= 3 else ()
-                # codec_for is the canonical type check; surface type errors
-                # as ExecutionError (consistent with executor error model).
-                try:
-                    codec_for(col_type, col_params).validate(v1)
-                    codec_for(col_type, col_params).validate(v2)
-                except (TypeError, ValueError, OverflowError) as e:
-                    raise ExecutionError(
-                        f"column {it.column!r}: {e}"
-                    ) from e
-                if v1 < v2:
-                    return -1 if not it.descending else 1
-                if v1 > v2:
-                    return 1 if not it.descending else -1
-            return 0  # all keys equal; Python sorted is stable
-
-        return sorted(rows, key=cmp_to_key(cmp))
+        return stable_sort(rows, items, schema)
 
     def _exec_delete(self, stmt: Delete) -> list:
         """Delete rows matching the WHERE clause (or every row if no WHERE).
