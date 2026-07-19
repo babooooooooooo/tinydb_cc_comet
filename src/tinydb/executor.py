@@ -1,4 +1,4 @@
-"""AST -> storage executor. Owns Pager+Catalog; all I/O lives here. <= 400 lines.
+"""AST -> storage executor. Owns Pager+Catalog; all I/O lives here. <= 1280 lines.
 
 The Executor is the single bridge between parsed SQL statements and the
 on-disk storage layer (Pager + Catalog + SlottedPage). It dispatches each
@@ -6,7 +6,13 @@ AST node to a dedicated ``_exec_*`` method. DDL (CREATE/DROP TABLE) is
 fully implemented; DML (INSERT/SELECT/DELETE) is wired in and Task 19
 finishes SELECT projection/WHERE/DELETE tombstone on top of Task 18's
 INSERT + linear scan helper.
+
+tinydb-acid (Task 6): transaction routing. BEGIN/COMMIT/ROLLBACK drive a
+single-page-buffer per transaction so intra-txn reads see pending
+writes; autocommit wraps each non-control statement in an implicit
+single-statement txn so failure auto-rolls-back.
 """
+import copy
 from collections import defaultdict
 from typing import Any, Optional, Union
 from functools import cmp_to_key
@@ -16,9 +22,11 @@ from tinydb.errors import ConstraintViolation, ExecutionError, PageFull
 from tinydb.index_manager import IndexManager
 from tinydb.pager import Pager
 from tinydb.parser import (
+    Begin, Commit, Rollback,
     CreateTable, DropTable, Insert, Select, Delete, Update,
     EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
 )
+from tinydb.transaction import Transaction
 from tinydb.row_codec import decode_row, encode_row
 from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
@@ -76,6 +84,22 @@ class _IndexPager:
 
     def close(self) -> None:
         self._pager.close()
+
+    def __deepcopy__(self, memo):
+        """Deep-copy an _IndexPager sharing the underlying Pager.
+
+        ``_pager`` ultimately references a ``BufferedRandom`` file handle
+        (``Pager._file``) that ``copy.deepcopy`` cannot pickle. The Pager is
+        process-singleton state; sharing the reference is correct because
+        ``Executor._snapshot_state`` only needs the ``_allocated`` set to
+        be preserved (so the rollback restore still tracks which pages are
+        owned by index B+trees).
+        """
+        new = _IndexPager.__new__(_IndexPager)
+        new._pager = self._pager
+        new._allocated = set(self._allocated)
+        memo[id(self)] = new
+        return new
 
     @property
     def allocated(self) -> set[int]:
@@ -178,6 +202,28 @@ class Executor:
         # Keyed by table name; absent entries are lazily initialized from
         # ``ti.root_page_id``. Cleared by ``_exec_drop_table``.
         self._table_data_pages: dict[str, list[int]] = {}
+        # tinydb-acid (Task 6): transaction routing state.
+        # ``_current_txn`` is None outside a BEGIN block; ``_next_txn_id``
+        # increments monotonically so every Transaction has a unique id
+        # for WAL bookkeeping. ``_page_buffer`` overlays the Pager's
+        # main-file reads with pending in-memory writes so intra-txn
+        # INSERTs see each other (a bare ``self.pager.read_page`` would
+        # still see the pre-txn contents because the main file is only
+        # flushed at COMMIT time).
+        self._current_txn: Optional[Transaction] = None
+        self._next_txn_id: int = 1
+        self._page_buffer: dict[int, bytes] = {}
+        # Snapshot of catalog + per-table data pages + index manager
+        # used to revert in-memory state on ROLLBACK. The Pager's main
+        # file is untouched until COMMIT, so we only need to revert the
+        # mutable Python objects the Executor owns.
+        self._txn_snapshot: Optional[dict] = None
+        # Hand the Pager a callable that returns the active txn id at
+        # write time. Currently advisory (no caller yet); reserved for
+        # future write paths that need to attribute writes to a txn.
+        self.pager._current_txn_id_ref = (
+            lambda: self._current_txn.id if self._current_txn else None
+        )
 
     def register_index_pager(self, wrapper: "_IndexPager") -> None:
         """Track an _IndexPager so its allocated pages are skipped on data-chain extensions."""
@@ -199,25 +245,167 @@ class Executor:
     # --- public dispatch ----------------------------------------------------
 
     def execute(
-        self, stmt: Union[CreateTable, DropTable, Insert, Select, Delete, Update],
+        self, stmt: Any,
     ) -> Union[list, list[list[Any]]]:
-        """Dispatch ``stmt`` to its ``_exec_*`` handler.
+        """Top-level dispatch: route txn-control vs. data statements.
 
-        Returns the handler's result (DDL returns ``[]``; DML returns row
-        lists). Unknown AST types raise ``ExecutionError``.
+        BEGIN / COMMIT / ROLLBACK bypass the autocommit wrapper because
+        they manage ``self._current_txn`` directly. Everything else goes
+        through ``_exec_in_txn`` which auto-opens an implicit txn when
+        no explicit one is open.
         """
-        dispatch = {
-            CreateTable: self._exec_create_table,
-            DropTable:   self._exec_drop_table,
-            Insert:      self._exec_insert,
-            Select:      self._exec_select,
-            Delete:      self._exec_delete,
-            Update:      self._exec_update,
+        if isinstance(stmt, Begin):
+            return self._exec_begin(stmt)
+        if isinstance(stmt, Commit):
+            return self._exec_commit(stmt)
+        if isinstance(stmt, Rollback):
+            return self._exec_rollback(stmt)
+        return self._exec_in_txn(stmt)
+
+    # --- transaction routing (Task 6) ---------------------------------------
+
+    def _txn_write_page(self, page_id: int, data: bytes) -> None:
+        """Write ``data`` to ``page_id``: WAL+buffer inside a txn, main outside.
+
+        Inside a txn: ``Transaction.write_page`` appends a PAGE_WRITE
+        record to the WAL and buffers the page so subsequent reads
+        (``_txn_read_page``) see the new state. The Pager's main file
+        stays untouched until :meth:`Transaction.commit` flushes the
+        buffered pages via ``Pager.write_main_page``.
+
+        Outside a txn (autocommit before its implicit BEGIN, or the
+        post-COMMIT fall-through): write straight to the main file —
+        there's no txn to buffer for.
+        """
+        if self._current_txn is not None:
+            self._current_txn.write_page(page_id, data)
+            self._page_buffer[page_id] = data
+        else:
+            self.pager.write_page(page_id, data)
+
+    def _txn_read_page(self, page_id: int) -> bytes:
+        """Read ``page_id``: buffer override inside a txn, main otherwise.
+
+        Mirrors :meth:`_txn_write_page` — intra-txn writes are buffered
+        in ``_page_buffer`` and must shadow subsequent reads so two
+        INSERTs inside the same txn both land in the right slot.
+        """
+        if self._page_buffer and page_id in self._page_buffer:
+            return self._page_buffer[page_id]
+        return self.pager.read_page(page_id)
+
+    def _snapshot_state(self) -> dict:
+        """Capture the Executor's mutable state for ROLLBACK restore.
+
+        Deep-copies the catalog (TableInfo graph) and the per-table data
+        page list; shallow-copies the IndexManager's ``_indexes`` dict
+        but deep-copies the BTree wrappers themselves so BTree.pager
+        pointers and root_page_id stay correct. The page contents are
+        NOT snapshotted — the Pager's main file is untouched during the
+        txn, so discarding ``_page_buffer`` is sufficient to revert
+        page-level state.
+        """
+        return {
+            "catalog": copy.deepcopy(self.catalog),
+            "table_data_pages": copy.deepcopy(self._table_data_pages),
+            "indexes": copy.deepcopy(self.index_manager._indexes),
         }
-        handler = dispatch.get(type(stmt))
-        if handler is None:
-            raise ExecutionError(f"unsupported statement: {type(stmt).__name__}")
-        return handler(stmt)
+
+    def _restore_state(self, snap: dict) -> None:
+        """Replace the Executor's mutable state with ``snap``.
+
+        Also updates ``Database.catalog`` (if back-referenced) so the
+        Database wrapper sees the reverted catalog without a separate
+        reopen. The previously-live catalog and indexes are dropped;
+        Python GC reclaims them along with the WAL/buffered pages.
+        """
+        self.catalog = snap["catalog"]
+        self._table_data_pages = snap["table_data_pages"]
+        self.index_manager._indexes = snap["indexes"]
+        db = getattr(self, "_database_ref", None)
+        if db is not None:
+            db.catalog = self.catalog
+
+    def _exec_begin(self, stmt: Begin) -> list:
+        """Open an explicit transaction; reject nested BEGIN."""
+        if self._current_txn is not None:
+            raise ExecutionError("nested BEGIN not allowed")
+        self._current_txn = Transaction(self._next_txn_id, self.pager)
+        self._next_txn_id += 1
+        self._txn_snapshot = self._snapshot_state()
+        return []
+
+    def _exec_commit(self, stmt: Commit) -> list:
+        """Commit the active transaction; reject bare COMMIT."""
+        if self._current_txn is None:
+            raise ExecutionError("COMMIT without BEGIN")
+        self._current_txn.commit()
+        self._current_txn = None
+        # Drop the buffered pages — they were flushed to main file by
+        # ``Transaction.commit`` so subsequent reads must come from disk.
+        self._page_buffer.clear()
+        self._txn_snapshot = None
+        return []
+
+    def _exec_rollback(self, stmt: Rollback) -> list:
+        """Roll back the active transaction; reject bare ROLLBACK."""
+        if self._current_txn is None:
+            raise ExecutionError("ROLLBACK without BEGIN")
+        self._current_txn.rollback()
+        self._current_txn = None
+        # Discard buffered writes (WAL truncated by ``txn.rollback``) and
+        # restore the catalog + table_data_pages + indexes snapshot so
+        # the in-memory state matches the un-flushed main file.
+        self._page_buffer.clear()
+        if self._txn_snapshot is not None:
+            self._restore_state(self._txn_snapshot)
+            self._txn_snapshot = None
+        return []
+
+    def _exec_in_txn(self, stmt: Any) -> Union[list, list[list[Any]]]:
+        """Run ``stmt`` inside a txn: explicit BEGIN or implicit autocommit.
+
+        Autocommit semantics: when no txn is open we open one, run the
+        statement, and auto-commit on success / auto-rollback on
+        exception. This way a single failed INSERT leaves no half-
+        applied writes in the main file (the page buffer is discarded
+        on rollback, the WAL is truncated, and the in-memory catalog
+        snapshot is restored).
+        """
+        auto = self._current_txn is None
+        if auto:
+            self._current_txn = Transaction(self._next_txn_id, self.pager)
+            self._next_txn_id += 1
+            self._txn_snapshot = self._snapshot_state()
+        try:
+            result = self._exec_stmt(stmt)
+        except Exception:
+            try:
+                self._current_txn.rollback()
+            finally:
+                self._current_txn = None
+            # Drop buffered pages and restore in-memory snapshot.
+            self._page_buffer.clear()
+            if self._txn_snapshot is not None:
+                self._restore_state(self._txn_snapshot)
+                self._txn_snapshot = None
+            raise
+        if auto:
+            self._current_txn.commit()
+            self._current_txn = None
+            self._page_buffer.clear()
+            self._txn_snapshot = None
+        return result
+
+    def _exec_stmt(self, stmt: Any) -> Union[list, list[list[Any]]]:
+        """Dispatch a non-txn-control statement to its ``_exec_*`` handler."""
+        if isinstance(stmt, CreateTable): return self._exec_create_table(stmt)
+        if isinstance(stmt, DropTable):   return self._exec_drop_table(stmt)
+        if isinstance(stmt, Insert):      return self._exec_insert(stmt)
+        if isinstance(stmt, Select):      return self._exec_select(stmt)
+        if isinstance(stmt, Delete):      return self._exec_delete(stmt)
+        if isinstance(stmt, Update):      return self._exec_update(stmt)
+        raise ExecutionError(f"unsupported statement: {type(stmt).__name__}")
 
     # --- DDL: CREATE / DROP TABLE ------------------------------------------
 
@@ -252,7 +440,7 @@ class Executor:
 
         root_id = self.pager.alloc_page()
         page = SlottedPage.empty(root_id)
-        self.pager.write_page(root_id, page.to_bytes())
+        self._txn_write_page(root_id, page.to_bytes())
 
         # MVP: next_page_id == root_page_id.
         self.catalog.create_table(
@@ -275,7 +463,7 @@ class Executor:
         # tables; mid-session CREATE TABLE has to do it here.
         self._on_table_created(stmt.name)
 
-        self.pager.write_page(1, self.catalog.to_bytes())
+        self._txn_write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
 
@@ -359,7 +547,7 @@ class Executor:
         # chain-format writer ``Pager.write_catalog_chain`` is reserved
         # for future multi-page overflow support; mixing the two
         # formats breaks ``Catalog.from_bytes`` on subsequent opens.
-        self.pager.write_page(1, self.catalog.to_bytes())
+        self._txn_write_page(1, self.catalog.to_bytes())
         self.pager.flush()
         return []
 
@@ -399,9 +587,9 @@ class Executor:
                 # Follow the per-page overflow chain (bytes 4:8 of every
                 # data page hold the next overflow page id, 0 or
                 # ``NULL_PAGE_ID`` on the tail).
-                nxt = int.from_bytes(self.pager.read_page(pid)[4:8], "big")
+                nxt = int.from_bytes(self._txn_read_page(pid)[4:8], "big")
                 while nxt > 0 and nxt != NULL_PAGE_ID and nxt not in seen:
-                    target_raw = self.pager.read_page(nxt)
+                    target_raw = self._txn_read_page(nxt)
                     if target_raw[0] != 2:
                         break
                     seen.add(nxt)
@@ -434,7 +622,7 @@ class Executor:
                     continue
                 seen.add(pid)
                 pids.append(pid)
-                page = self.pager.read_page(pid)
+                page = self._txn_read_page(pid)
                 if page[0] == NODE_TYPE_INTERNAL:
                     node = InternalNode.deserialize(page)
                     stack.extend(node.children)
@@ -631,13 +819,13 @@ class Executor:
         for pid in data_pages:
             if pid in index_pages:
                 continue
-            raw = self.pager.read_page(pid)
+            raw = self._txn_read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             try:
                 sid = page.insert(row_bytes)
             except PageFull:
                 continue
-            self.pager.write_page(pid, page.to_bytes())
+            self._txn_write_page(pid, page.to_bytes())
             self.pager.flush()
             return (pid, sid)
         # All current pages full (or empty list); allocate a fresh page and
@@ -646,11 +834,11 @@ class Executor:
         new_pid = self._alloc_data_page()
         data_pages.append(new_pid)
         ti.next_page_id = new_pid
-        self.pager.write_page(1, self.catalog.to_bytes())
+        self._txn_write_page(1, self.catalog.to_bytes())
         self.pager.flush()
-        page = SlottedPage.from_bytes(new_pid, self.pager.read_page(new_pid))
+        page = SlottedPage.from_bytes(new_pid, self._txn_read_page(new_pid))
         sid = page.insert(row_bytes)
-        self.pager.write_page(new_pid, page.to_bytes())
+        self._txn_write_page(new_pid, page.to_bytes())
         self.pager.flush()
         return (new_pid, sid)
 
@@ -710,12 +898,12 @@ class Executor:
         rest = row_bytes[_CHUNK_SIZE:]
         pid_first, sid_first = self._insert_inline_only(ti, first_chunk)
         # Mark SPILL_START on the slot that now holds the first chunk.
-        page = SlottedPage.from_bytes(pid_first, self.pager.read_page(pid_first))
+        page = SlottedPage.from_bytes(pid_first, self._txn_read_page(pid_first))
         page.slots[sid_first].flags |= FLAG_SPILL_START
-        self.pager.write_page(pid_first, page.to_bytes())
+        self._txn_write_page(pid_first, page.to_bytes())
         # Chain overflow pages; nxt placeholder is patched on the next iteration
         # (or stays NULL_PAGE_ID on the final page).
-        prev_pid, prev_buf = pid_first, bytearray(self.pager.read_page(pid_first))
+        prev_pid, prev_buf = pid_first, bytearray(self._txn_read_page(pid_first))
         while rest:
             chunk = rest[:_CHUNK_SIZE]
             rest = rest[_CHUNK_SIZE:]
@@ -726,9 +914,9 @@ class Executor:
             ov_buf[2:4] = (PAGE_SIZE - len(chunk)).to_bytes(2, "big")
             ov_buf[4:8] = nxt.to_bytes(4, "big")
             ov_buf[HEADER_SIZE:HEADER_SIZE + len(chunk)] = chunk
-            self.pager.write_page(ov_pid, bytes(ov_buf))
+            self._txn_write_page(ov_pid, bytes(ov_buf))
             prev_buf[4:8] = ov_pid.to_bytes(4, "big")
-            self.pager.write_page(prev_pid, bytes(prev_buf))
+            self._txn_write_page(prev_pid, bytes(prev_buf))
             prev_pid, prev_buf = ov_pid, ov_buf
         self.pager.flush()
         return (pid_first, sid_first)
@@ -736,24 +924,24 @@ class Executor:
     def _read_overflow_chain(self, start_pid: int) -> bytes:
         """Follow ``overflow_next`` from ``start_pid``; concatenate raw[16:] per page."""
         chunks: list[bytes] = []
-        pid = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
+        pid = int.from_bytes(self._txn_read_page(start_pid)[4:8], "big")
         while pid != NULL_PAGE_ID:
-            raw = self.pager.read_page(pid)
+            raw = self._txn_read_page(pid)
             chunks.append(raw[HEADER_SIZE:])
             pid = int.from_bytes(raw[4:8], "big")
         return b"".join(chunks)
 
     def _free_overflow_chain(self, start_pid: int) -> None:
         """Mark every overflow page in the chain free (``page_type=0``); guard page_type==2."""
-        nxt = int.from_bytes(self.pager.read_page(start_pid)[4:8], "big")
+        nxt = int.from_bytes(self._txn_read_page(start_pid)[4:8], "big")
         while nxt != NULL_PAGE_ID:
             pid = nxt
-            ov = bytearray(self.pager.read_page(pid))
+            ov = bytearray(self._txn_read_page(pid))
             if ov[0] != 2:
                 raise RuntimeError(f"overflow chain corruption: page {pid} page_type={ov[0]}, expected 2")
             nxt = int.from_bytes(ov[4:8], "big")
             ov[0] = 0
-            self.pager.write_page(pid, bytes(ov))
+            self._txn_write_page(pid, bytes(ov))
 
     def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
@@ -778,7 +966,7 @@ class Executor:
         for pid in data_pages:
             if pid in index_pages:
                 continue
-            raw = self.pager.read_page(pid)
+            raw = self._txn_read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             for sid in range(page.num_slots):
                 slot = page.slots[sid]
@@ -978,12 +1166,12 @@ class Executor:
                 to_delete.append((pid, sid, vals))
 
         for pid, sid, vals in to_delete:
-            raw = self.pager.read_page(pid)
+            raw = self._txn_read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             if page.slots[sid].flags & FLAG_SPILL_START:
                 self._free_overflow_chain(pid)
             page.delete(sid)
-            self.pager.write_page(pid, page.to_bytes())
+            self._txn_write_page(pid, page.to_bytes())
             # Tombstone the B+tree entry for every indexed column.
             self._unindex_row(ti, vals)
         if to_delete:
@@ -1043,7 +1231,7 @@ class Executor:
         #    a live slot. In-place updates keep the same (pid, sid); the
         #    fallback path (delete + reinsert or chain) gets a NEW (pid, sid).
         for pid, sid_vals_list in by_page.items():
-            page = SlottedPage.from_bytes(pid, self.pager.read_page(pid))
+            page = SlottedPage.from_bytes(pid, self._txn_read_page(pid))
             pending_chain_inserts: list[tuple[list, list, bytes]] = []
             for sid, vals in sid_vals_list:
                 old_vals = list(vals)
@@ -1078,7 +1266,7 @@ class Executor:
                     pending_chain_inserts.append((old_vals, new_vals, new_bytes))
 
             # Flush this page before chain inserts (may advance next_page_id).
-            self.pager.write_page(pid, page.to_bytes())
+            self._txn_write_page(pid, page.to_bytes())
             for old_vals, new_vals, new_bytes in pending_chain_inserts:
                 new_pid, new_sid = self._insert_row_into_chain(ti, new_bytes)
                 # Old slot is tombstoned (different page now); delete old
@@ -1184,7 +1372,7 @@ class Executor:
         (defensive — should not happen with correct maintenance).
         """
         page_id, slot_id = slot_ref
-        raw = self.pager.read_page(page_id)
+        raw = self._txn_read_page(page_id)
         page = SlottedPage.from_bytes(page_id, raw)
         slot = page.slots[slot_id]
         if slot.flags & FLAG_TOMBSTONE:

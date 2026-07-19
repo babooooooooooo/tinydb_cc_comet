@@ -128,6 +128,22 @@ class BTree:
     pager: object  # Pager
     root_page_id: int | None
 
+    def __deepcopy__(self, memo):
+        """Deep-copy a BTree without copying the pager.
+
+        ``pager`` holds a chain of references to a ``BufferedRandom`` file
+        handle (``Pager._file``) which ``copy.deepcopy`` cannot pickle. The
+        pager is process-singleton state owned by the Executor and Pager,
+        not part of the BTree's per-instance state; reusing the same pager
+        reference in the copy is correct for ``Executor._snapshot_state``
+        rollback restores.
+        """
+        new = BTree.__new__(BTree)
+        new.pager = self.pager
+        new.root_page_id = self.root_page_id
+        memo[id(self)] = new
+        return new
+
     def _descend_to_leaf(self, key: bytes) -> tuple[int, "LeafNode"]:
         pid = self.root_page_id
         page = self.pager.read_page(pid)
