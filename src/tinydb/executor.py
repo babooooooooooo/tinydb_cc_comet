@@ -27,6 +27,7 @@ from tinydb.parser import (
     Begin, Commit, Rollback,
     CreateTable, DropTable, Insert, Select, Delete, Update,
     EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
+    AggregateCall, SelectItem,
 )
 from tinydb.transaction import Transaction
 from tinydb.row_codec import decode_row, encode_row
@@ -107,6 +108,328 @@ def _python_type_to_db_type(value: object) -> str:
     if isinstance(value, str):
         return "TEXT"
     return type(value).__name__
+
+
+# --- tinydb-aggregation: aggregation core -----------------------------------
+
+
+def _agg_count_star(rows, col_idx, schema):
+    """COUNT(*): count all rows including NULL columns (D2)."""
+    return len(rows)
+
+
+def _agg_count_expr(rows, col_idx, schema):
+    """COUNT(expr): skip rows where col_idx value is None."""
+    return sum(1 for r in rows if r[col_idx] is not None)
+
+
+def _agg_sum(rows, col_idx, schema):
+    """SUM: skip NULL; preserve input type (int+int=int, float+float=float)."""
+    total = None
+    for r in rows:
+        v = r[col_idx]
+        if v is None:
+            continue
+        total = v if total is None else total + v
+    return total
+
+
+def _agg_avg(rows, col_idx, schema):
+    """AVG: skip NULL; force float result (D4)."""
+    s = 0.0
+    n = 0
+    for r in rows:
+        v = r[col_idx]
+        if v is None:
+            continue
+        s += float(v)
+        n += 1
+    return (s / n) if n else None
+
+
+def _agg_min(rows, col_idx, schema):
+    """MIN: skip NULL; comparable types (int/float/text)."""
+    best = None
+    for r in rows:
+        v = r[col_idx]
+        if v is None:
+            continue
+        if best is None or v < best:
+            best = v
+    return best
+
+
+def _agg_max(rows, col_idx, schema):
+    """MAX: skip NULL; comparable types (int/float/text)."""
+    best = None
+    for r in rows:
+        v = r[col_idx]
+        if v is None:
+            continue
+        if best is None or v > best:
+            best = v
+    return best
+
+
+_AGG_FUNCS = {
+    "COUNT": _agg_count_star,    # default; COUNT(expr) handled by dispatcher
+    "SUM":   _agg_sum,
+    "AVG":   _agg_avg,
+    "MIN":   _agg_min,
+    "MAX":   _agg_max,
+}
+
+
+def _resolve_aggregate_arg(agg: AggregateCall) -> tuple:
+    """Return ``('*' | ('column', colname), col_idx)``.
+
+    ``col_name`` is None for ``COUNT(*)``; the executor dispatches to
+    ``_agg_count_star`` in that case. For ``COUNT(expr)`` /
+    ``SUM/AVG/MIN/MAX(col)`` the second element is the column name so the
+    caller can look up its index in the schema.
+    """
+    if agg.arg == "*":
+        return ("*", None)
+    if (
+        not isinstance(agg.arg, tuple)
+        or len(agg.arg) != 2
+        or agg.arg[0] != "column"
+    ):
+        raise ExecutionError(
+            f"aggregate function {agg.func} requires a column reference",
+        )
+    return ("column", agg.arg[1])
+
+
+def _aggregate_default_alias(agg: AggregateCall) -> str:
+    """Default aggregate alias per design doc."""
+    if agg.arg == "*":
+        return "count"
+    if (
+        isinstance(agg.arg, tuple)
+        and len(agg.arg) == 2
+        and agg.arg[0] == "column"
+    ):
+        return f"{agg.func.lower()}_{agg.arg[1]}"
+    return f"{agg.func.lower()}"
+
+
+def _build_row_col_index(row) -> dict:
+    """Map ``row.columns[i] -> i`` for O(1) lookup by name."""
+    return {n: i for i, n in enumerate(row.columns)}
+
+
+def _compare(val, op: str, lit) -> bool:
+    """NULL-safe comparison used by HAVING/ORDER.
+
+    SQL three-valued logic: ``NULL <op> anything`` is UNKNOWN -> False.
+    Supports ``= > < >= <= !=``. Unknown ops raise :class:`ExecutionError`.
+    """
+    if val is None:
+        return False
+    if op == "=":
+        return val == lit
+    if op == ">":
+        return val > lit
+    if op == "<":
+        return val < lit
+    if op == ">=":
+        return val >= lit
+    if op == "<=":
+        return val <= lit
+    if op == "!=":
+        return val != lit
+    raise ExecutionError(f"operator {op!r} not supported")
+
+
+def apply_aggregation(raw_rows: list, stmt, schema) -> list:
+    """Group ``raw_rows`` by ``stmt.group_by`` cols, then compute aggregates per group.
+
+    Returns ``list[Row]`` where each Row has columns::
+
+        [*group_by_cols, *aggregate_aliases]
+
+    Per design doc:
+      - If ``stmt.group_by`` is empty: a single group (refinement #2 - even
+        empty input still produces one row, matching standard SQL semantics).
+      - If ``stmt.group_by`` is non-empty: 0+ groups (empty input -> ``[]``).
+    """
+    from tinydb.database import Row  # local import to avoid cycle
+
+    key_cols = stmt.group_by
+    # schema is the v2 form [(name, type, type_params), ...]; we only need the name.
+    name_to_idx = {n: i for i, (n, *_) in enumerate(schema)}
+
+    # Validate GROUP BY columns exist up front so an unknown column surfaces
+    # before any partial grouping work.
+    for c in key_cols:
+        if c not in name_to_idx:
+            raise ExecutionError(f"unknown column {c!r}")
+
+    # 1) Group rows. Empty key_cols -> single sentinel group ``()`` so the
+    # downstream loop still runs once even when raw_rows is empty.
+    groups: dict = {}
+    if key_cols:
+        for row in raw_rows:
+            key = tuple(row[name_to_idx[c]] for c in key_cols)
+            groups.setdefault(key, []).append(row)
+    else:
+        groups[()] = raw_rows
+
+    # 2) Aggregate per group; build one output Row per group.
+    out_rows = []
+    for key, group_rows in groups.items():
+        values: list = []
+        columns: list = []
+        # Group-by key columns come first, preserving GROUP BY order.
+        for col, val in zip(key_cols, key):
+            columns.append(col)
+            values.append(val)
+        for si in stmt.select_items:
+            if si.kind != "aggregate":
+                continue
+            agg = si.aggregate
+            _, col_name = _resolve_aggregate_arg(agg)
+            col_idx = None if col_name is None else name_to_idx.get(col_name)
+            if col_name is not None and col_idx is None:
+                raise ExecutionError(f"unknown column {col_name!r}")
+            if agg.func == "COUNT" and agg.arg == "*":
+                val = _agg_count_star(group_rows, col_idx, schema)
+            elif agg.func == "COUNT":
+                val = _agg_count_expr(group_rows, col_idx, schema)
+            else:
+                val = _AGG_FUNCS[agg.func](group_rows, col_idx, schema)
+            # Default alias: ``count`` for COUNT(*) (no column), otherwise
+            # ``<func>_<colname>`` matching design doc.
+            if agg.arg == "*":
+                alias = si.alias or "count"
+            else:
+                alias = si.alias or f"{agg.func.lower()}_{col_name}"
+            columns.append(alias)
+            values.append(val)
+        out_rows.append(Row(values=tuple(values), columns=tuple(columns)))
+    return out_rows
+
+
+def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> list:
+    """Filter aggregate rows by ``HAVING`` expression.
+
+    ``having_expr`` is one of:
+      - ``None`` - passthrough, returns ``rows`` unchanged.
+      - ``AggregateCall`` - inline aggregate form is not supported here;
+        callers must put the aggregate in the SELECT list and reference
+        its alias from HAVING. We raise so misuse surfaces immediately.
+      - ``(col, op, lit)`` tuple - filter rows by comparing the resolved
+        column value against ``lit``.
+
+    Three-stage column resolution (alias wins):
+      1. ``col`` in ``agg_aliases`` AND in row.columns -> alias
+      2. ``col`` in ``group_cols``  AND in row.columns -> group column
+      3. else ``ExecutionError("unknown column 'X' in HAVING")``
+    """
+    if having_expr is None:
+        return rows
+    if isinstance(having_expr, AggregateCall):
+        raise ExecutionError(
+            "HAVING with inline aggregate not supported; "
+            "use the SELECT-list alias instead",
+        )
+
+    col, op, lit = having_expr
+    if not rows:
+        return rows
+
+    name_to_idx = _build_row_col_index(rows[0])
+
+    # Three-stage resolution: alias -> group col -> raise.
+    if col in agg_aliases and col in name_to_idx:
+        src_idx = name_to_idx[col]
+    elif col in group_cols and col in name_to_idx:
+        src_idx = name_to_idx[col]
+    else:
+        raise ExecutionError(f"unknown column {col!r} in HAVING")
+
+    out = []
+    for row in rows:
+        val = row.values[src_idx]
+        if _compare(val, op, lit):
+            out.append(row)
+    return out
+
+
+def _project_aggregate_row(row, stmt, schema) -> "Row":
+    """Project aggregate Row to SELECT list shape.
+
+    - SELECT *: pass through row unchanged.
+    - Otherwise: for each select_item, look up the corresponding column in row.
+
+    Raises ExecutionError if SELECT references a column not present in the
+    aggregate row (E3).
+    """
+    from tinydb.database import Row
+
+    if any(si.kind == "star" for si in stmt.select_items):
+        return row
+
+    name_to_idx_row = _build_row_col_index(row)
+    out_cols: list = []
+    out_vals: list = []
+
+    for si in stmt.select_items:
+        if si.kind == "star":
+            continue
+        if si.kind == "aggregate":
+            src_name = si.alias or _aggregate_default_alias(si.aggregate)
+            if src_name not in name_to_idx_row:
+                raise ExecutionError(f"missing aggregate column {src_name!r}")
+            out_cols.append(src_name)
+            out_vals.append(row.values[name_to_idx_row[src_name]])
+        else:  # column
+            if si.name not in name_to_idx_row:
+                raise ExecutionError(
+                    f"column {si.name!r} must appear in GROUP BY clause or in an aggregate function",
+                )
+            out_cols.append(si.alias or si.name)
+            out_vals.append(row.values[name_to_idx_row[si.name]])
+    return Row(values=tuple(out_vals), columns=tuple(out_cols))
+
+
+def _neg_for_sort(v):
+    """Negate numeric values for DESC ordering (works for int and float)."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return -v
+    return v
+
+
+def apply_order_limit_phase1(rows: list, order_by, agg_aliases, group_cols) -> list:
+    """Phase1 minimal ORDER BY: only IDENT keys, must be in GROUP BY cols or aliases."""
+    if not rows or not order_by:
+        return rows
+    name_to_idx = _build_row_col_index(rows[0])
+
+    keys = []
+    for ob in order_by:
+        col = ob.column
+        if col in agg_aliases or col in group_cols:
+            if col not in name_to_idx:
+                raise ExecutionError(f"ORDER BY column {col!r} not found in result")
+            keys.append((col, name_to_idx[col], ob.descending))
+        else:
+            raise ExecutionError(
+                f"ORDER BY column {col!r} must be a GROUP BY column or aggregate alias",
+            )
+
+    def sort_key(row):
+        parts = []
+        for col, idx, desc in keys:
+            v = row.values[idx]
+            if v is None:
+                parts.append(((1, 0) if desc else (0, 0)))
+            else:
+                parts.append(((0, v) if not desc else (0, _neg_for_sort(v))))
+        return tuple(parts)
+
+    return sorted(rows, key=sort_key)
 
 
 class Executor:
@@ -828,10 +1151,10 @@ class Executor:
                 results.append((sid, decode_row(row_bytes, ti.schema_v2), pid))
         return results
 
-    def _exec_select(self, stmt: Select) -> list[list[Any]]:
-        """Read rows from a table, applying WHERE filter, ORDER BY, OFFSET, LIMIT, projection.
+    def _exec_select(self, stmt: Select):
+        """Read rows from a table, with optional WHERE / GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET / projection.
 
-        Engine-v1 semantics:
+        Engine-v1 semantics (legacy / non-aggregate path):
           * WHERE supports the full Expr AST (EqualsExpr | AndExpr | OrExpr |
             NotExpr) via ``eval_expr``. AND/OR short-circuit on the first
             decisive branch (Python ``and``/``or``).
@@ -843,9 +1166,23 @@ class Executor:
           * Chain order: filter -> order_by -> offset -> limit -> project.
           * ORDER BY uses Python stable sort with multi-key comparator.
           * Negative LIMIT/OFFSET raise ExecutionError.
+          * B+tree fast path: single-equality WHERE on an indexed column.
 
-        Returns ``list[list]`` of decoded values — Task 20 wraps each row in
-        a ``Row`` object; until then the raw lists are the public contract.
+        tinydb-aggregation 5-phase pipeline (aggregate path):
+          Phase 1: WHERE filter on raw rows.
+          Phase 2: GROUP BY + aggregate.
+          Phase 3: HAVING filter on aggregate rows.
+          Phase 4: ORDER BY + LIMIT + OFFSET.
+          Phase 5: Project to SELECT list shape.
+
+        The aggregate path is taken iff ``stmt.aggregate_aliases`` is
+        non-empty OR ``stmt.group_by`` is non-empty. Empty raw input on the
+        aggregate path with no GROUP BY yields one row (standard SQL
+        refinement); with GROUP BY it yields zero rows.
+
+        Returns ``list[Row]`` on the aggregate path and ``list[list[Any]]``
+        on the legacy path. ``database.py`` wraps both into ``Row`` based
+        on the parser's projected column names (``stmt.columns``).
         """
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
@@ -860,9 +1197,16 @@ class Executor:
         if stmt.limit is not None and stmt.limit < 0:
             raise ExecutionError(f"LIMIT must be non-negative, got {stmt.limit}")
 
+        # --- Detect aggregate path -----------------------------------------
+        # Both ``aggregate_aliases`` (set when any SelectItem.kind == 'aggregate')
+        # and ``group_by`` (non-empty GROUP BY clause) trigger the aggregate path.
+        uses_agg = bool(stmt.aggregate_aliases)
+        uses_group = bool(stmt.group_by)
+        aggregate_path = uses_agg or uses_group
+
         # Validate ORDER BY columns up front so an unknown column surfaces
-        # before sort (which would otherwise never check on a 1-row table).
-        if stmt.order_by:
+        # before sort. Aggregate-path order_by is validated in apply_order_limit_phase1.
+        if stmt.order_by and not aggregate_path:
             name_to_idx_sort = {n: i for i, (n, _, *_) in enumerate(schema)}
             for it in stmt.order_by:
                 if it.column not in name_to_idx_sort:
@@ -872,22 +1216,25 @@ class Executor:
 
         # Named-column projection: validate all column names up front so an
         # unknown column surfaces before we return any partial result.
+        # Aggregation paths validate projection via _project_aggregate_row.
         proj_idx: list[int] = []
-        if stmt.columns != ("*",):
+        if stmt.columns != ("*",) and not aggregate_path:
             name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
             for cname in stmt.columns:
                 if cname not in name_to_idx:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        # --- B+tree fast path ------------------------------------------------
+        # --- B+tree fast path (non-aggregate only) -------------------------
         # Single-equality WHERE on an indexed column short-circuits the full
         # scan: encode the literal with the column's codec, look it up in the
         # per-(table,col) B+tree, and read at most one row by (page_id,
         # slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
-        # INDEX MAINTENANCE DEPENDENCY: this returns [] if the key is not in
-        # the index, so INSERT/DELETE/UPDATE must keep indexes in sync.
-        if stmt.where is not None and self._is_single_eq_on_indexed(stmt.where, ti):
+        if (
+            not aggregate_path
+            and stmt.where is not None
+            and self._is_single_eq_on_indexed(stmt.where, ti)
+        ):
             col_name, lit_value = self._parse_single_eq(stmt.where)
             if col_name is not None:
                 col_obj = next((c for c in ti.columns if c.name == col_name), None)
@@ -919,7 +1266,39 @@ class Executor:
                                 results.append([vals[i] for i in proj_idx])
                         return results
 
-        # filter + collect (sid, vals, pid) for stable sort
+        # --- Aggregate path (5-phase pipeline) -----------------------------
+        if aggregate_path:
+            if not stmt.select_items:
+                raise ExecutionError(
+                    "SELECT * with GROUP BY requires explicit select_items",
+                )
+            # Phase 1: WHERE filter on raw rows.
+            raw_rows: list[list[Any]] = []
+            for _sid, vals, _pid in self._scan_table(ti):
+                if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
+                    continue
+                raw_rows.append(list(vals))
+            # Phase 2: GROUP BY + aggregate
+            agg_rows = apply_aggregation(raw_rows, stmt, schema)
+            # Phase 3: HAVING
+            if stmt.having is not None:
+                agg_rows = apply_having(
+                    agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
+                    schema,
+                )
+            # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
+            if stmt.order_by:
+                agg_rows = apply_order_limit_phase1(
+                    agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
+                )
+            if stmt.offset:
+                agg_rows = agg_rows[stmt.offset:]
+            if stmt.limit is not None:
+                agg_rows = agg_rows[:stmt.limit]
+            # Phase 5: project to SELECT list shape; returns Row objects.
+            return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
+
+        # --- Legacy / non-aggregate path ----------------------------------
         rows: list[tuple[int, list[Any], int]] = []
         for sid, vals, pid in self._scan_table(ti):
             if stmt.where is not None and not eval_expr(stmt.where, vals, schema):

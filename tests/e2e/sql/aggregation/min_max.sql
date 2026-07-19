@@ -1,0 +1,7 @@
+CREATE TABLE t(id INT, x INT);
+INSERT INTO t(id, x) VALUES (1, 5);
+INSERT INTO t(id, x) VALUES (2, 1);
+INSERT INTO t(id, x) VALUES (3, 9);
+INSERT INTO t(id, x) VALUES (4, 3);
+INSERT INTO t(id, x) VALUES (5, 7);
+SELECT MIN(x), MAX(x) FROM t

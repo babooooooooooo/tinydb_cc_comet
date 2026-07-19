@@ -23,6 +23,10 @@ SUPPORTED_TYPES = {
     "INTEGER", "BOOLEAN",
 }
 SUPPORTED_OPS = {"="}
+# tinydb-aggregation (T3): HAVING/ORDER compare-side operators include
+# the full SQL six-operator set so the aggregation pipeline can evaluate
+# range predicates on aggregate aliases / group columns.
+_HAVING_OPS = {"=", ">", "<", ">=", "<=", "!="}
 _LITERAL_TYPES = ("INT", "FLOAT", "TEXT", "BOOL")
 _DATETIME_KEYWORDS = ("DATE", "TIME", "TIMESTAMP")
 
@@ -104,6 +108,10 @@ class Select:
 
     Engine-v1 upgrade: columns is tuple, where holds Expr, order_by/limit/offset
     default to empty/None for backward compatibility with MVP instances.
+
+    tinydb-aggregation extension: select_items / group_by / having /
+    aggregate_aliases trigger the 5-phase aggregation pipeline in the
+    executor when ``aggregate_aliases`` or ``group_by`` is non-empty.
     """
 
     table: str
@@ -112,6 +120,11 @@ class Select:
     order_by: tuple = ()              # tuple[OrderByItem, ...]
     limit: Optional[int] = None
     offset: Optional[int] = None
+    # --- tinydb-aggregation (T2) ---
+    select_items: tuple = ()           # tuple[SelectItem, ...]
+    group_by: tuple = ()               # tuple[str, ...]
+    having: Optional[object] = None    # AggregateCall | tuple[col, op, lit] | None
+    aggregate_aliases: tuple = ()      # tuple[str, ...]
     line: int = 0
     col: int = 0
 
@@ -169,6 +182,42 @@ class OrderByItem:
 
     column: str
     descending: bool = False
+
+
+# --- tinydb-aggregation AST nodes -------------------------------------------
+
+
+@dataclass(frozen=True)
+class AggregateCall:
+    """SQL aggregate function call: COUNT / SUM / AVG / MIN / MAX.
+
+    `arg` is the sentinel string ``"*"`` for ``COUNT(*)``; otherwise it is an
+    ``Expr`` tuple (typically ``("column", "colname")`` for phase 1).
+    `alias` carries the explicit ``AS ident`` if present, else ``None`` so the
+    caller can default it (``count``, ``sum_x`` etc.).
+    """
+
+    func: str                          # one of COUNT/SUM/AVG/MIN/MAX
+    arg: object                        # '*' (sentinel str) for COUNT(*), else Expr tuple
+    alias: Optional[str] = None        # explicit 'AS ident'; None -> defaulted
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class SelectItem:
+    """A single item in the SELECT projection list.
+
+    One of:
+      - kind='star'         (SELECT *)
+      - kind='column'       (IDENT [AS alias])
+      - kind='aggregate'    (AggregateCall)
+    """
+
+    kind: str                          # 'star' | 'column' | 'aggregate'
+    name: Optional[str] = None         # column name (column kind)
+    alias: Optional[str] = None        # explicit alias (column kind, or aggregate alias)
+    aggregate: Optional[AggregateCall] = None  # aggregate detail (aggregate kind)
 
 
 # --- engine-v1 UPDATE statement ----------------------------------------------
@@ -596,23 +645,11 @@ class _Parser:
     def _parse_select(self) -> Select:
         kw = self.expect_keyword("SELECT")
 
-        cols: list = []
-        if self.peek().type == "PUNCT" and self.peek().value == "*":
-            self.advance()
-            cols = ["*"]
-        else:
-            if self.peek().type == "EOF":
-                t = self.peek()
-                raise ParseError(t.line, t.col, "expected column or *")
-            while True:
-                ct = self.peek()
-                if ct.type != "IDENT":
-                    raise ParseError(ct.line, ct.col, "expected column or *")
-                cols.append(self.advance().value)
-                if self.peek().type == "PUNCT" and self.peek().value == ",":
-                    self.advance()
-                    continue
-                break
+        # tinydb-aggregation (T3): parse projection items via the shared
+        # _parse_select_items helper so SELECT COUNT(*), SUM(x), cols, * are
+        # all uniformly supported. The legacy ``columns`` field is still
+        # populated for backward compatibility with database.Row wrapping.
+        items = self._parse_select_items()
 
         # `FROM` is mandatory; SELECT without FROM is invalid in the MVP.
         ft = self.peek()
@@ -626,14 +663,49 @@ class _Parser:
         table = self.advance().value
 
         where = self._parse_where()
+
+        # GROUP BY (optional, aggregation only)
+        group_by = ()
+        if self.peek().type == "KEYWORD" and self.peek().value == "GROUP":
+            self.expect_keyword("GROUP")
+            self.expect_keyword("BY")
+            group_by = self._parse_col_list()
+
+        # HAVING (optional, aggregation only)
+        having = None
+        if self.peek().type == "KEYWORD" and self.peek().value == "HAVING":
+            self.expect_keyword("HAVING")
+            having = self._parse_having_expr()
+
         order_by = self._parse_order_by()
         limit = self._parse_limit()
         offset = self._parse_offset()
 
+        # Cached alias list for the executor's HAVING/ORDER evaluation.
+        aggregate_aliases = tuple(
+            si.alias or _default_alias(si.aggregate)
+            for si in items if si.kind == "aggregate"
+        )
+
+        # Legacy columns field for backward compat / database.Row wrapping.
+        legacy_cols: list = []
+        for si in items:
+            if si.kind == "star":
+                legacy_cols = ["*"]
+                break
+            if si.kind == "aggregate":
+                legacy_cols.append(si.alias or _default_alias(si.aggregate))
+            else:
+                legacy_cols.append(si.name)
+
         return Select(
-            table=table, columns=tuple(cols), where=where,
+            table=table, columns=tuple(legacy_cols), where=where,
             order_by=order_by, limit=limit, offset=offset,
             line=kw.line, col=kw.col,
+            select_items=items,
+            group_by=group_by,
+            having=having,
+            aggregate_aliases=aggregate_aliases,
         )
 
     # --- ORDER BY / LIMIT / OFFSET ---------------------------------------
@@ -642,7 +714,10 @@ class _Parser:
         if not self._peek_kw("ORDER"):
             return ()
         self.advance()
-        self.expect_keyword("BY")
+        if not self._peek_kw("BY"):
+            tok = self.peek()
+            raise ParseError(tok.line, tok.col, "expected BY after ORDER")
+        self.advance()
         items: list = []
         while True:
             ct = self.peek()
@@ -671,6 +746,8 @@ class _Parser:
             raise ParseError(
                 t.line, t.col, "LIMIT must be a non-negative integer",
             )
+        if t.value < 0:
+            raise ParseError(t.line, t.col, "LIMIT must be non-negative")
         return int(t.value)
 
     def _parse_offset(self) -> Optional[int]:
@@ -755,10 +832,20 @@ class _Parser:
 
         Engine-v1 returns an Expr AST (EqualsExpr / AndExpr / OrExpr /
         NotExpr); the executor's eval_expr handles all four uniformly.
+
+        tinydb-aggregation (E1): WHERE cannot contain aggregate function
+        calls (use HAVING instead). Aggregate calls in HAVING/SELECT are
+        handled by the aggregation pipeline.
         """
         if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
             return None
         self.advance()
+        t = self.peek()
+        if t.type == "KEYWORD" and t.value in {"COUNT", "SUM", "AVG", "MIN", "MAX"}:
+            raise ParseError(
+                t.line, t.col,
+                f"aggregate function {t.value} not allowed in WHERE; use HAVING",
+            )
         return self._parse_expr()
 
     # --- expression precedence chain (OR < AND < NOT < primary) ----------
@@ -885,6 +972,151 @@ class _Parser:
                 kw.line, kw.col,
                 f"{kw.value} literal invalid: {text!r} ({e})",
             ) from e
+
+    # --- tinydb-aggregation helpers (T3/T4) --------------------------------
+
+    def _parse_select_items(self) -> tuple:
+        """Parse comma-separated SELECT projection items."""
+        items: list = []
+        seen_aliases: set = set()
+
+        # SELECT *
+        if self.peek().type == "PUNCT" and self.peek().value == "*":
+            self.advance()
+            items.append(SelectItem(kind="star"))
+            return tuple(items)
+
+        while True:
+            item = self._parse_select_item()
+            eff_alias = item.alias
+            if eff_alias is not None:
+                if eff_alias in seen_aliases:
+                    line = item.aggregate.line if item.aggregate else 0
+                    col = item.aggregate.col if item.aggregate else 0
+                    raise ParseError(line, col, f"duplicate alias {eff_alias!r}")
+                seen_aliases.add(eff_alias)
+            items.append(item)
+
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+        return tuple(items)
+
+    def _parse_select_item(self) -> SelectItem:
+        """Parse a single SELECT item (column, aggregate, or star)."""
+        t = self.peek()
+        if self._is_keyword(t, "COUNT", "SUM", "AVG", "MIN", "MAX"):
+            agg = self._parse_aggregate_call()
+            alias = None
+            if self._is_keyword(self.peek(), "AS"):
+                self.advance()
+                ident = self.peek()
+                if ident.type != "IDENT":
+                    raise ParseError(ident.line, ident.col, "expected alias after AS")
+                alias = self.advance().value
+            if alias is not None:
+                agg = AggregateCall(
+                    func=agg.func, arg=agg.arg, alias=alias,
+                    line=agg.line, col=agg.col,
+                )
+            return SelectItem(kind="aggregate", alias=alias, aggregate=agg)
+
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected column or aggregate function")
+        name = self.advance().value
+        alias = None
+        if self._is_keyword(self.peek(), "AS"):
+            self.advance()
+            ident = self.peek()
+            if ident.type != "IDENT":
+                raise ParseError(ident.line, ident.col, "expected alias after AS")
+            alias = self.advance().value
+        return SelectItem(kind="column", name=name, alias=alias)
+
+    def _parse_aggregate_call(self) -> AggregateCall:
+        """Parse COUNT(*) | (COUNT|SUM|AVG|MIN|MAX) '(' (IDENT | '*') ')'."""
+        func_tok = self.peek()
+        func = self.advance().value
+        self.expect("PUNCT", "(")
+        if self.peek().type == "PUNCT" and self.peek().value == "*":
+            self.advance()
+            arg: object = "*"
+        else:
+            col_tok = self.peek()
+            if col_tok.type != "IDENT":
+                raise ParseError(
+                    col_tok.line, col_tok.col,
+                    "expected column or * in aggregate",
+                )
+            arg = ("column", self.advance().value)
+        self.expect("PUNCT", ")")
+        return AggregateCall(func=func, arg=arg, line=func_tok.line, col=func_tok.col)
+
+    def _parse_col_list(self) -> tuple:
+        """Parse comma-separated IDENT list for GROUP BY."""
+        cols: list = []
+        while True:
+            t = self.peek()
+            if t.type != "IDENT":
+                raise ParseError(t.line, t.col, "expected column name in GROUP BY")
+            cols.append(self.advance().value)
+            if self.peek().type == "PUNCT" and self.peek().value == ",":
+                self.advance()
+                continue
+            break
+        return tuple(cols)
+
+    def _parse_having_expr(self):
+        """Parse HAVING clause: aggregate_call OR (IDENT op literal)."""
+        if self._is_keyword(self.peek(), "COUNT", "SUM", "AVG", "MIN", "MAX"):
+            return self._parse_aggregate_call()
+
+        ct = self.peek()
+        if ct.type != "IDENT":
+            raise ParseError(ct.line, ct.col, "expected column in HAVING")
+        cname = self.advance().value
+
+        op_tok = self.advance()
+        if op_tok.type != "PUNCT" or op_tok.value not in _HAVING_OPS:
+            op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
+            raise ParseError(
+                op_tok.line, op_tok.col,
+                f"operator {op_repr!r} not supported in HAVING",
+            )
+
+        lit = self.advance()
+        if lit.type not in _LITERAL_TYPES:
+            raise ParseError(lit.line, lit.col, "expected literal in HAVING")
+        return (cname, op_tok.value, lit.value)
+
+    def _is_keyword(self, t, *names: str) -> bool:
+        """Return True if ``t`` matches any of the named keywords.
+
+        Accepts the keyword as either a KEYWORD token (for grammar-level
+        reserved words) or an IDENT token whose uppercase value matches
+        (for non-reserved context-dependent keywords like AS / ASC / DESC).
+        """
+        for name in names:
+            if (
+                (t.type == "KEYWORD" and t.value == name)
+                or (t.type == "IDENT" and str(t.value).upper() == name)
+            ):
+                return True
+        return False
+
+
+def _default_alias(agg: AggregateCall) -> str:
+    """Default aggregate alias per design doc (T2)."""
+    if agg.arg == "*":
+        return "count"
+    if (
+        isinstance(agg.arg, tuple)
+        and len(agg.arg) == 2
+        and agg.arg[0] == "column"
+    ):
+        return f"{agg.func.lower()}_{agg.arg[1]}"
+    return f"{agg.func.lower()}"
 
 
 # --- Public entry ------------------------------------------------------------

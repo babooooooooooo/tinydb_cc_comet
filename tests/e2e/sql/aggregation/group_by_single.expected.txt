@@ -1,0 +1,8 @@
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+Row(dept='eng', count=2)
+Row(dept='sales', count=3)
