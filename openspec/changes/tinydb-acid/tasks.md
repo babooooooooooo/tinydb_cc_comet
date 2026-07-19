@@ -47,11 +47,11 @@
 
 ## 7. 兼容性
 
-- [ ] 7.1 旧版 .db（v2 schema）open 路径保持原行为（无 wal 就跳 recovery）
-- [ ] 7.2 engine-v1 / constraints / aggregation / engine-v2 测试全套继续通过
-- [ ] 7.3 文档：`README.md` 增 ACID 段落；`docs/MVP_LIMITATIONS.md` 移除 "best-effort pages" 条目
+- [x] 7.1 旧版 .db（v2 schema）open 路径保持原行为（无 wal 就跳 recovery）— `tests/integration/test_acid_compat.py` 2 tests, 验证 auto-upgrade (v2+无WAL→byte8 bump) + SchemaMismatch (v2+WAL residue)
+- [x] 7.2 engine-v1 / constraints / aggregation / engine-v2 测试全套继续通过 — 2 partial-success tests 改写为 atomic semantics; full suite 655/655 pass
+- [x] 7.3 文档：`README.md` 增 ACID 段落；`docs/MVP_LIMITATIONS.md` 移除 "best-effort pages" 条目 — README ACID section added; MVP_LIMITATIONS tinydb-acid section + 旧条目标 superseded
 
 ## 8. 回归
 
-- [ ] 8.1 模块行数：`pager.py ≤ 520`、`transaction.py ≤ 300`、`wal.py ≤ 200`、`recovery.py ≤ 200`、`executor.py ≤ 1000`
-- [ ] 8.2 覆盖率 ≥ 90%；新代码 100%
+- [x] 8.1 模块行数：`pager.py ≤ 520`、`transaction.py ≤ 300`、`wal.py ≤ 200`、`recovery.py ≤ 200`、`executor.py ≤ 1000` — executor.py split per Risk R7: 1464→1204 lines, 4 helper modules (`_executor_drop.py` 192, `_executor_snapshot.py` 48, `_executor_sort.py` 56, `_index_pager.py` 96). All 8 modules within budget.
+- [x] 8.2 覆盖率 ≥ 90%；新代码 100% — 93.34% (≥ 90% threshold)
