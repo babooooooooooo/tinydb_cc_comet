@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import os
 
-from tinydb.wal import Wal, WalCorruption
+from tinydb.wal import (
+    Wal,
+    WalCorruption,
+    HEADER_SIZE,
+    BEGIN,
+    PAGE_WRITE,
+    COMMIT,
+    ROLLBACK,
+    CHECKPOINT,
+)
 
 # Re-entry guard: ``Pager.__init__`` calls ``_init_wal`` which invokes
 # ``Recovery.replay`` whenever a WAL file is present. Without this guard,
@@ -31,16 +40,16 @@ class Recovery:
 
             try:
                 for txn_id, kind, page_id, data in wal.iter_records():
-                    if kind == 0:  # BEGIN
+                    if kind == BEGIN:
                         status[txn_id] = "active"
                         pending.setdefault(txn_id, {})
-                    elif kind == 1:  # PAGE_WRITE
+                    elif kind == PAGE_WRITE:
                         pending.setdefault(txn_id, {})[page_id] = data
-                    elif kind == 2:  # COMMIT
+                    elif kind == COMMIT:
                         status[txn_id] = "committed"
-                    elif kind == 3:  # ROLLBACK
+                    elif kind == ROLLBACK:
                         status[txn_id] = "rolled_back"
-                    # kind == 4 (CHECKPOINT) — skip
+                    # CHECKPOINT — skip
             except WalCorruption as e:
                 offset = getattr(e, "offset", 0)
                 _truncate_wal_to(main_path + ".wal", offset)
@@ -61,7 +70,7 @@ def _max_txn_id(pending: dict[int, dict[int, bytes]]) -> int:
 def _truncate_wal_to(wal_path: str, offset: int) -> None:
     if not os.path.exists(wal_path):
         return
-    keep = max(16, offset)  # always keep header
+    keep = max(HEADER_SIZE, offset)
     with open(wal_path, "r+b") as f:
         f.truncate(keep)
 
