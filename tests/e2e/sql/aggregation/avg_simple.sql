@@ -1,0 +1,5 @@
+CREATE TABLE t(id INT, x INT);
+INSERT INTO t(id, x) VALUES (1, 10);
+INSERT INTO t(id, x) VALUES (2, 20);
+INSERT INTO t(id, x) VALUES (3, 30);
+SELECT AVG(x) FROM t

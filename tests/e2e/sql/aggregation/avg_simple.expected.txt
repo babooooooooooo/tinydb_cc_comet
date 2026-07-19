@@ -1,0 +1,5 @@
+(no rows)
+(no rows)
+(no rows)
+(no rows)
+Row(avg_x=20.0)

@@ -27,6 +27,9 @@ KEYWORDS = {
     "DECIMAL",
     # --- tinydb-acid (Task 4): transaction control statements ---
     "BEGIN", "COMMIT", "ROLLBACK",
+    # --- tinydb-aggregation (T1): aggregate keywords ---
+    "COUNT", "SUM", "AVG", "MIN", "MAX",
+    "GROUP", "BY", "HAVING",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 
@@ -136,7 +139,8 @@ def tokenize(sql: str) -> list[Token]:
                 i, line, col = _advance(i, line, col, sql[k])
             continue
         # punctuation
-        if c in "(),;=*<>":
+        # --- tinydb-aggregation: '!' added so HAVING != is parseable as a PUNCT.
+        if c in "(),;=*<>!":
             tokens.append(Token("PUNCT", c, line, col))
             i, line, col = _advance(i, line, col, c)
             continue
