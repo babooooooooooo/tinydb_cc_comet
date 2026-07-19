@@ -1,4 +1,4 @@
-"""AST -> storage executor. Owns Pager+Catalog; all I/O lives here. <= 1280 lines.
+"""AST -> storage executor. Owns Pager+Catalog; all I/O lives here.
 
 The Executor is the single bridge between parsed SQL statements and the
 on-disk storage layer (Pager + Catalog + SlottedPage). It dispatches each
@@ -10,7 +10,10 @@ INSERT + linear scan helper.
 tinydb-acid (Task 6): transaction routing. BEGIN/COMMIT/ROLLBACK drive a
 single-page-buffer per transaction so intra-txn reads see pending
 writes; autocommit wraps each non-control statement in an implicit
-single-statement txn so failure auto-rolls-back.
+single-statement txn so failure auto-rolls-back. The ``_IndexPager``
+wrapper installed on every B+tree also routes reads/writes/frees
+through ``_txn_*`` helpers so B+tree updates participate in the active
+txn.
 """
 import copy
 from collections import defaultdict
@@ -57,16 +60,32 @@ class _IndexPager:
 
     Forwarded methods: ``read_page``, ``write_page``, ``flush``, ``close``,
     ``alloc_page``, ``free_page`` (the last two update the tracker).
+
+    Transaction routing (tinydb-acid Task 6 follow-up): when an
+    ``executor`` back-reference is supplied, every read/write/free flows
+    through :class:`Executor`'s ``_txn_*`` helpers so B+tree writes
+    participate in the active transaction (WAL append + ``_page_buffer``
+    shadow). Without this routing the B+tree leaf would mutate the main
+    file directly inside a BEGIN block, leaving a stale entry after
+    ROLLBACK. The executor parameter is optional for backward
+    compatibility with unit tests that construct an ``_IndexPager``
+    standalone.
     """
 
-    def __init__(self, pager):
+    def __init__(self, pager, executor=None):
         self._pager = pager
+        self._executor = executor
         self._allocated: set[int] = set()
 
     def read_page(self, page_id: int) -> bytes:
+        if self._executor is not None:
+            return self._executor._txn_read_page(page_id)
         return self._pager.read_page(page_id)
 
     def write_page(self, page_id: int, data: bytes) -> None:
+        if self._executor is not None:
+            self._executor._txn_write_page(page_id, data)
+            return
         self._pager.write_page(page_id, data)
 
     def alloc_page(self) -> int:
@@ -75,8 +94,13 @@ class _IndexPager:
         return pid
 
     def free_page(self, page_id: int) -> None:
-        # BTree never frees pages, but keep the wrapper symmetric.
-        self._pager.free_page(page_id)
+        # BTree never frees pages, but keep the wrapper symmetric. Routes
+        # through the txn layer so DROP TABLE inside a BEGIN block can
+        # roll back the free-list head update on ROLLBACK.
+        if self._executor is not None:
+            self._executor._txn_free_page(page_id)
+        else:
+            self._pager.free_page(page_id)
         self._allocated.discard(page_id)
 
     def flush(self) -> None:
@@ -86,17 +110,18 @@ class _IndexPager:
         self._pager.close()
 
     def __deepcopy__(self, memo):
-        """Deep-copy an _IndexPager sharing the underlying Pager.
+        """Deep-copy an _IndexPager sharing the underlying Pager + Executor.
 
         ``_pager`` ultimately references a ``BufferedRandom`` file handle
-        (``Pager._file``) that ``copy.deepcopy`` cannot pickle. The Pager is
-        process-singleton state; sharing the reference is correct because
-        ``Executor._snapshot_state`` only needs the ``_allocated`` set to
-        be preserved (so the rollback restore still tracks which pages are
-        owned by index B+trees).
+        (``Pager._file``) that ``copy.deepcopy`` cannot pickle. Both the
+        Pager and the Executor are process-singleton state; sharing the
+        references is correct because ``Executor._snapshot_state`` only
+        needs the ``_allocated`` set to be preserved (so the rollback
+        restore still tracks which pages are owned by index B+trees).
         """
         new = _IndexPager.__new__(_IndexPager)
         new._pager = self._pager
+        new._executor = self._executor
         new._allocated = set(self._allocated)
         memo[id(self)] = new
         return new
@@ -218,20 +243,22 @@ class Executor:
         # file is untouched until COMMIT, so we only need to revert the
         # mutable Python objects the Executor owns.
         self._txn_snapshot: Optional[dict] = None
-        # Hand the Pager a callable that returns the active txn id at
-        # write time. Currently advisory (no caller yet); reserved for
-        # future write paths that need to attribute writes to a txn.
-        self.pager._current_txn_id_ref = (
-            lambda: self._current_txn.id if self._current_txn else None
-        )
 
     def register_index_pager(self, wrapper: "_IndexPager") -> None:
         """Track an _IndexPager so its allocated pages are skipped on data-chain extensions."""
         self._index_pagers.append(wrapper)
 
     def _make_index_pager(self, pager) -> "_IndexPager":
-        """Build a fresh _IndexPager and register it for collision avoidance."""
-        wrapper = _IndexPager(pager)
+        """Build a fresh _IndexPager and register it for collision avoidance.
+
+        Passes ``self`` as the executor back-reference so the wrapper
+        routes every read/write/free through :meth:`_txn_read_page`,
+        :meth:`_txn_write_page`, and :meth:`_txn_free_page` — the
+        Executor's txn-aware entry points. Without this, B+tree writes
+        would mutate the main file inside a BEGIN block and leave stale
+        entries after ROLLBACK (Task 6 follow-up fix).
+        """
+        wrapper = _IndexPager(pager, executor=self)
         self.register_index_pager(wrapper)
         return wrapper
 
@@ -293,6 +320,34 @@ class Executor:
         if self._page_buffer and page_id in self._page_buffer:
             return self._page_buffer[page_id]
         return self.pager.read_page(page_id)
+
+    def _txn_free_page(self, page_id: int) -> None:
+        """Free ``page_id`` through the txn layer so ROLLBACK can revert it.
+
+        :meth:`Pager.free_page` writes two bytes-level mutations: the
+        freed page's first 4 bytes hold the old free-list head, and
+        page 0's ``free_list_head`` field is updated to point at the
+        freed page. Both mutations must go through the WAL+buffer so a
+        ROLLBACK of a DROP TABLE reverts the free-list head and the
+        freed page contents. Outside a txn (legacy autocommit DROP that
+        somehow bypasses the autocommit wrapper, or unit tests with
+        standalone Executors) we fall through to ``Pager.free_page``.
+        """
+        if self._current_txn is None:
+            self.pager.free_page(page_id)
+            return
+        # Read both pages through the txn layer so a previous buffered
+        # write (e.g., CREATE TABLE inside the same txn) is visible.
+        page0 = bytearray(self._txn_read_page(0))
+        freed = bytearray(self._txn_read_page(page_id))
+        # Pager stores free_list_head u32 at offset 9 of page 0.
+        old_head = int.from_bytes(page0[9:13], "big")
+        # Free chain: freed page's first 4 bytes -> old_head.
+        freed[0:4] = old_head.to_bytes(4, "big")
+        # Page 0 head -> newly freed page id.
+        page0[9:13] = page_id.to_bytes(4, "big")
+        self._txn_write_page(0, bytes(page0))
+        self._txn_write_page(page_id, bytes(freed))
 
     def _snapshot_state(self) -> dict:
         """Capture the Executor's mutable state for ROLLBACK restore.
@@ -371,6 +426,14 @@ class Executor:
         applied writes in the main file (the page buffer is discarded
         on rollback, the WAL is truncated, and the in-memory catalog
         snapshot is restored).
+
+        Cleanup robustness (Task 6 follow-up): all teardown steps
+        (clearing ``_current_txn``, ``_page_buffer``, and restoring
+        ``_txn_snapshot``) live inside a single ``finally`` block so
+        they run even if ``Transaction.rollback`` itself raises. If
+        rollback fails, the rollback error is surfaced with the
+        original statement error chained as ``__context__`` — a data
+        integrity concern that must not be silently swallowed.
         """
         auto = self._current_txn is None
         if auto:
@@ -379,17 +442,30 @@ class Executor:
             self._txn_snapshot = self._snapshot_state()
         try:
             result = self._exec_stmt(stmt)
-        except Exception:
+        except Exception as original_exc:
+            rollback_exc = None
             try:
                 self._current_txn.rollback()
+            except Exception as e:
+                rollback_exc = e
             finally:
+                # Cleanup MUST run regardless of rollback outcome —
+                # otherwise a rollback failure leaves the Executor in a
+                # half-state where the next statement sees a stale txn
+                # reference and a dirty page buffer.
                 self._current_txn = None
-            # Drop buffered pages and restore in-memory snapshot.
-            self._page_buffer.clear()
-            if self._txn_snapshot is not None:
-                self._restore_state(self._txn_snapshot)
-                self._txn_snapshot = None
-            raise
+                self._page_buffer.clear()
+                if self._txn_snapshot is not None:
+                    try:
+                        self._restore_state(self._txn_snapshot)
+                    finally:
+                        self._txn_snapshot = None
+            if rollback_exc is not None:
+                # Both the statement AND rollback failed. Surface the
+                # rollback error (more critical for data integrity) and
+                # chain the original statement error as context.
+                raise rollback_exc from original_exc
+            raise original_exc
         if auto:
             self._current_txn.commit()
             self._current_txn = None
@@ -510,9 +586,13 @@ class Executor:
         # the same name starts with a fresh entry (no stale page ids).
         self._table_data_pages.pop(stmt.name, None)
 
-        # Free data pages via the raw pager (data chain has no wrapper).
+        # Free data pages via the txn layer so a ROLLBACK of this DROP
+        # restores the free-list head. ``Pager.free_page`` modifies
+        # page 0's free_list_head and the freed page's first 4 bytes
+        # directly; routing through ``_txn_free_page`` writes both to
+        # the WAL + page buffer so they participate in the txn.
         for pid in data_pids:
-            self.pager.free_page(pid)
+            self._txn_free_page(pid)
 
         # Free index pages. When a BTree's pager is an ``_IndexPager``
         # wrapper (the Database-installed path), use the wrapper's
