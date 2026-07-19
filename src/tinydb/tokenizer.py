@@ -25,6 +25,8 @@ KEYWORDS = {
     "DATE", "TIME", "TIMESTAMP",
     # --- tinydb-types (Task 14: DECIMAL literal prefix) ---
     "DECIMAL",
+    # --- tinydb-acid (Task 4): transaction control statements ---
+    "BEGIN", "COMMIT", "ROLLBACK",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 
@@ -141,3 +143,16 @@ def tokenize(sql: str) -> list[Token]:
         raise TokenError(line, col, f"unexpected character {c!r}")
     tokens.append(Token("EOF", None, line, col))
     return tokens
+
+
+# --- Thin class wrapper for callers that prefer the OO API ------------------
+
+
+class Tokenizer:
+    """OO wrapper around ``tokenize``. ``Tokenizer(sql).tokenize()`` == ``tokenize(sql)``."""
+
+    def __init__(self, sql: str):
+        self._sql = sql
+
+    def tokenize(self) -> list[Token]:
+        return tokenize(self._sql)

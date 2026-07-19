@@ -185,6 +185,33 @@ class Update:
     col: int = 0
 
 
+# --- tinydb-acid (Task 4): transaction-control statements ---
+
+
+@dataclass(frozen=True)
+class Begin:
+    """BEGIN [;]: open a transaction."""
+
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class Commit:
+    """COMMIT [;]: flush pending writes."""
+
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class Rollback:
+    """ROLLBACK [;]: discard pending writes."""
+
+    line: int = 0
+    col: int = 0
+
+
 # --- Parser ------------------------------------------------------------------
 
 
@@ -241,6 +268,16 @@ class _Parser:
             raise ParseError(t.line, t.col, f"expected statement, got {t.type}")
 
         kw = t.value
+        if kw == "BEGIN":
+            self.advance()
+            return Begin(line=t.line, col=t.col)
+        if kw == "COMMIT":
+            self.advance()
+            return Commit(line=t.line, col=t.col)
+        if kw == "ROLLBACK":
+            self.advance()
+            return Rollback(line=t.line, col=t.col)
+
         if kw == "CREATE":
             return self._parse_create_table()
         if kw == "DROP":
@@ -851,6 +888,8 @@ class _Parser:
 
 
 # --- Public entry ------------------------------------------------------------
+
+Parser = _Parser
 
 
 def parse(tokens: list[Token]) -> StatementList:
