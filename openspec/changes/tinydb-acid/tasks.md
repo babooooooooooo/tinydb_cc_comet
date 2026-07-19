@@ -33,10 +33,10 @@
 
 ## 5. Executor 事务路径
 
-- [ ] 5.1 在 `executor.py` 维护 `current_txn` 状态
-- [ ] 5.2 实现 auto-commit：未 BEGIN 单语句走一次性 txn
-- [ ] 5.3 实现 BEGIN/COMMIT/ROLLBACK 调度
-- [ ] 5.4 把现有 DML/DDL 路径重写为经 `txn.write_page(...)`，commit 时落主文件
+- [x] 5.1 在 `executor.py` 维护 `current_txn` 状态
+- [x] 5.2 实现 auto-commit：未 BEGIN 单语句走一次性 txn
+- [x] 5.3 实现 BEGIN/COMMIT/ROLLBACK 调度
+- [x] 5.4 把现有 DML/DDL 路径重写为经 `txn.write_page(...)`，commit 时落主文件
 
 ## 6. Crash Recovery
 
