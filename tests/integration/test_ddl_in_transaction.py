@@ -31,7 +31,6 @@ def fresh_db(tmp_path):
 # --- 1. CREATE TABLE + ROLLBACK discards the table -------------------------
 
 
-@pytest.mark.integration
 def test_create_table_in_txn_rollback_no_side_effect(fresh_db):
     """CREATE TABLE inside a rolled-back txn must not be visible afterwards.
 
@@ -56,7 +55,6 @@ def test_create_table_in_txn_rollback_no_side_effect(fresh_db):
 # --- 2. DROP TABLE + COMMIT removes the table ------------------------------
 
 
-@pytest.mark.integration
 def test_drop_table_in_txn_commit_removes_table(fresh_db):
     """DROP TABLE inside a committed txn removes the table for good.
 
@@ -81,7 +79,6 @@ def test_drop_table_in_txn_commit_removes_table(fresh_db):
 # --- 3. CREATE TABLE + COMMIT persists the table ----------------------------
 
 
-@pytest.mark.integration
 def test_create_table_in_txn_commit_persists(fresh_db):
     """CREATE TABLE inside a committed txn is visible to SELECT afterwards.
 
@@ -97,3 +94,27 @@ def test_create_table_in_txn_commit_persists(fresh_db):
 
     rows = fresh_db.execute("SELECT * FROM t")
     assert [(r.id, r.name) for r in rows] == [(7, "persisted")]
+
+
+# --- 4. DROP TABLE + ROLLBACK restores the table ---------------------------
+
+
+def test_drop_table_in_txn_rollback_restores_table(fresh_db):
+    """DROP TABLE inside a rolled-back txn must leave the table intact.
+
+    Locks in: a DROP TABLE that runs inside a BEGIN block but is then
+    ROLLED BACK must restore the table and its rows. The ROLLBACK path
+    must restore both the catalog entry AND the free-list head
+    (DROP TABLE calls ``Pager.free_page`` to return data pages, which
+    mutates page 0's ``free_list_head`` field — that mutation must be
+    reverted too).
+    """
+    fresh_db.execute("CREATE TABLE t(id INT PRIMARY KEY, v TEXT)")
+    fresh_db.execute("INSERT INTO t(id, v) VALUES (1, 'a')")
+
+    fresh_db.execute("BEGIN")
+    fresh_db.execute("DROP TABLE t")
+    fresh_db.execute("ROLLBACK")
+
+    rows = fresh_db.execute("SELECT * FROM t WHERE id = 1")
+    assert [(r.id, r.v) for r in rows] == [(1, "a")]

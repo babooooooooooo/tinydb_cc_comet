@@ -15,7 +15,7 @@ Notes / adaptations vs. plan §7:
   * Test 2's WAL-size assertion is verified AFTER reopen (post-recovery),
     not after the first ``close()``. ``Transaction.commit`` only truncates
     records with ``txn_id < self.txn_id``, so the just-committed txn's
-    own BEGIN/PAGE_WRITE/COMMIT records remain on disk until the next
+    own PAGE_WRITE/COMMIT records remain on disk until the next
     process (this test's phase-2 reopen) replays and truncates the WAL.
   * Test 3 wraps ``Database(path)`` in ``pytest.raises(WalCorruption)``
     because :func:`Recovery.replay` re-raises after applying the valid
@@ -40,14 +40,14 @@ pytestmark = pytest.mark.integration
 # --- 1. BEGIN + INSERT (no COMMIT) → recovery discards uncommitted --------
 
 
-@pytest.mark.integration
 def test_crash_after_begin_no_commit_discards(tmp_path):
     """Process killed after BEGIN + INSERT (no COMMIT) → recovery discards.
 
-    Phase 1 writes a BEGIN + PAGE_WRITE to the WAL but never commits.
-    After ``close()`` the WAL still exists with the uncommitted txn.
-    On reopen, ``Recovery.replay`` sees BEGIN without COMMIT and leaves
-    the main file untouched. A subsequent ``SELECT`` is empty.
+    Phase 1 writes a PAGE_WRITE to the WAL but never commits. After
+    ``close()`` the WAL still exists with the uncommitted txn. On
+    reopen, ``Recovery.replay`` sees PAGE_WRITE without a matching
+    COMMIT and leaves the main file untouched. A subsequent ``SELECT``
+    is empty.
     """
     path = str(tmp_path / "crash.db")
     wal_path = path + ".wal"
@@ -60,7 +60,7 @@ def test_crash_after_begin_no_commit_discards(tmp_path):
     # Simulate kill -9: just drop reference without commit
     db.close()
 
-    # WAL should still have uncommitted txn (BEGIN + PAGE_WRITE)
+    # WAL should still have uncommitted txn (PAGE_WRITE)
     assert os.path.exists(wal_path)
 
     # Phase 2: reopen → recovery should discard uncommitted
@@ -75,7 +75,6 @@ def test_crash_after_begin_no_commit_discards(tmp_path):
 # --- 2. BEGIN + INSERT + COMMIT → recovery replays, data visible ---------
 
 
-@pytest.mark.integration
 def test_crash_after_commit_visible(tmp_path):
     """Process killed after COMMIT → recovery replays, data visible.
 
@@ -112,7 +111,6 @@ def test_crash_after_commit_visible(tmp_path):
 # --- 3. Corrupt trailing WAL record → recovery truncates + applies valid -
 
 
-@pytest.mark.integration
 def test_partial_wal_record_truncated_on_recovery(tmp_path):
     """WAL with corrupt trailing record → recovery truncates + applies valid.
 
