@@ -270,6 +270,11 @@ class _Parser:
     def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.i = 0
+        # Source-position of the most recently parsed column name. Set by
+        # _parse_column_definition and read by _parse_column_list when a
+        # duplicate column name surfaces, so the reported error position is
+        # the duplicate token (matches pre-refactor behavior).
+        self._last_col_tok: Optional[Token] = None
 
     # --- cursor primitives --------------------------------------------------
 
@@ -350,6 +355,12 @@ class _Parser:
     # --- CREATE TABLE -------------------------------------------------------
 
     def _parse_create_table(self) -> CreateTable:
+        """Parse ``CREATE TABLE name (col_def [, col_def ...])``.
+
+        Thin dispatcher: validates the CREATE TABLE header and the table
+        name, then delegates to :meth:`_parse_column_list` for the comma-
+        separated column definitions. Returns a ``CreateTable`` AST node.
+        """
         kw = self.expect_keyword("CREATE")
         self.expect_keyword("TABLE")
 
@@ -360,116 +371,150 @@ class _Parser:
         name = self.advance().value
 
         self.expect("PUNCT", "(")
+        cols = self._parse_column_list()
+        self.expect("PUNCT", ")")
 
-        cols: list[ColumnDefinition] = []
-        seen: set = set()
+        return CreateTable(
+            name=name, columns=tuple(cols),
+            line=kw.line, col=kw.col,
+        )
 
+    def _parse_column_list(self) -> list[ColumnDefinition]:
+        """Parse a comma-separated list of column definitions until ``)``.
+
+        Empty list is rejected (``CREATE TABLE t ()`` is invalid). Each
+        column is parsed by :meth:`_parse_column_definition`; duplicate
+        column names are surfaced before the second definition is added so
+        the reported position is the duplicate.
+        """
         # Empty column list: `CREATE TABLE t ()` is invalid.
         if self.peek().type == "PUNCT" and self.peek().value == ")":
             tok = self.peek()
             raise ParseError(tok.line, tok.col, "expected column name")
 
+        cols: list[ColumnDefinition] = []
+        seen: set = set()
         while True:
-            col_tok = self.peek()
-            if col_tok.type != "IDENT":
-                raise ParseError(col_tok.line, col_tok.col, "expected column name")
-            cname = self.advance().value
-            if cname in seen:
-                raise ParseError(col_tok.line, col_tok.col, f"duplicate column {cname}")
-            seen.add(cname)
-
-            type_tok = self.peek()
-            if type_tok.type not in ("KEYWORD", "IDENT"):
-                value_repr = (
-                    type_tok.value if type_tok.type != "EOF" else "EOF"
-                )
+            col = self._parse_column_definition()
+            if col.name in seen:
+                # Position reported is the duplicate token at the start of
+                # the offending column, matching pre-refactor behavior.
                 raise ParseError(
-                    type_tok.line, type_tok.col,
-                    f"expected type name, got {type_tok.type} {value_repr!r}",
+                    self._last_col_tok.line, self._last_col_tok.col,
+                    f"duplicate column {col.name}",
                 )
-            type_name = type_tok.value.upper()
-            if type_name not in SUPPORTED_TYPES:
-                raise ParseError(
-                    type_tok.line, type_tok.col,
-                    f"type {type_name} not supported",
-                )
-            self.advance()  # consume the type name token
-
-            type_params = self._parse_type_params(type_name, type_tok)
-
-            # Parse optional constraint clauses: NOT NULL / UNIQUE / PRIMARY KEY.
-            # Order-independent; multiple clauses allowed on one column.
-            nullable = True
-            unique = False
-            primary_key = False
-            saw_unique = False
-            saw_pk = False
-            saw_not_null = False
-            while self.peek().type == "KEYWORD" and self.peek().value in {
-                "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE",
-            }:
-                kw_tok = self.advance()
-                if kw_tok.value == "NOT":
-                    nxt = self.peek()
-                    if not (nxt.type == "KEYWORD" and nxt.value == "NULL"):
-                        raise ParseError(
-                            nxt.line, nxt.col, "expected NULL after NOT"
-                        )
-                    self.advance()
-                    if saw_not_null:
-                        raise ParseError(
-                            kw_tok.line, kw_tok.col, "duplicate NOT NULL constraint"
-                        )
-                    saw_not_null = True
-                    nullable = False
-                elif kw_tok.value == "NULL":
-                    # Bare NULL (without leading NOT) is rejected (R2 裁决 2).
-                    raise ParseError(
-                        kw_tok.line, kw_tok.col,
-                        "bare NULL not allowed; use NOT NULL or omit",
-                    )
-                elif kw_tok.value == "PRIMARY":
-                    nxt = self.peek()
-                    if not (nxt.type == "KEYWORD" and nxt.value == "KEY"):
-                        raise ParseError(
-                            nxt.line, nxt.col, "expected KEY after PRIMARY"
-                        )
-                    self.advance()
-                    if saw_pk:
-                        raise ParseError(
-                            kw_tok.line, kw_tok.col, "duplicate PRIMARY KEY"
-                        )
-                    saw_pk = True
-                    primary_key = True
-                elif kw_tok.value == "KEY":
-                    # Bare KEY without PRIMARY is rejected.
-                    raise ParseError(
-                        kw_tok.line, kw_tok.col,
-                        "unexpected KEY; use PRIMARY KEY",
-                    )
-                elif kw_tok.value == "UNIQUE":
-                    if saw_unique:
-                        raise ParseError(
-                            kw_tok.line, kw_tok.col, "duplicate UNIQUE constraint"
-                        )
-                    saw_unique = True
-                    unique = True
-
-            cols.append(ColumnDefinition(
-                name=cname, type=type_name, type_params=type_params,
-                nullable=nullable, unique=unique, primary_key=primary_key,
-            ))
-
+            seen.add(col.name)
+            cols.append(col)
             if self.peek().type == "PUNCT" and self.peek().value == ",":
                 self.advance()
                 continue
             break
+        return cols
 
-        self.expect("PUNCT", ")")
-        return CreateTable(
-            name=name, columns=tuple(cols),
-            line=kw.line, col=kw.col,
+    def _parse_column_definition(self) -> ColumnDefinition:
+        """Parse a single column: ``name type[(params)] [constraints...]``.
+
+        Delegates the type-param suffix to :meth:`_parse_type_params` and
+        the trailing constraint clauses to :meth:`_parse_column_constraints`.
+        """
+        # Column name (IDENT).
+        col_tok = self.peek()
+        if col_tok.type != "IDENT":
+            raise ParseError(col_tok.line, col_tok.col, "expected column name")
+        cname = self.advance().value
+        self._last_col_tok = col_tok  # for duplicate-name error positioning
+
+        # Type name (KEYWORD or IDENT; case-insensitive upper).
+        type_tok = self.peek()
+        if type_tok.type not in ("KEYWORD", "IDENT"):
+            value_repr = (
+                type_tok.value if type_tok.type != "EOF" else "EOF"
+            )
+            raise ParseError(
+                type_tok.line, type_tok.col,
+                f"expected type name, got {type_tok.type} {value_repr!r}",
+            )
+        type_name = type_tok.value.upper()
+        if type_name not in SUPPORTED_TYPES:
+            raise ParseError(
+                type_tok.line, type_tok.col,
+                f"type {type_name} not supported",
+            )
+        self.advance()  # consume the type name token
+
+        type_params = self._parse_type_params(type_name, type_tok)
+
+        nullable, unique, primary_key = self._parse_column_constraints()
+
+        return ColumnDefinition(
+            name=cname, type=type_name, type_params=type_params,
+            nullable=nullable, unique=unique, primary_key=primary_key,
         )
+
+    def _parse_column_constraints(self) -> tuple[bool, bool, bool]:
+        """Parse trailing constraint clauses: ``NOT NULL`` / ``UNIQUE`` / ``PRIMARY KEY``.
+
+        Returns ``(nullable, unique, primary_key)``. Order-independent;
+        multiple clauses allowed on one column. Duplicates of any one
+        clause are rejected. Bare ``NULL`` (without leading ``NOT``) and
+        bare ``KEY`` (without leading ``PRIMARY``) are rejected.
+        """
+        nullable = True
+        unique = False
+        primary_key = False
+        saw_unique = False
+        saw_pk = False
+        saw_not_null = False
+        while self.peek().type == "KEYWORD" and self.peek().value in {
+            "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE",
+        }:
+            kw_tok = self.advance()
+            if kw_tok.value == "NOT":
+                nxt = self.peek()
+                if not (nxt.type == "KEYWORD" and nxt.value == "NULL"):
+                    raise ParseError(
+                        nxt.line, nxt.col, "expected NULL after NOT"
+                    )
+                self.advance()
+                if saw_not_null:
+                    raise ParseError(
+                        kw_tok.line, kw_tok.col, "duplicate NOT NULL constraint"
+                    )
+                saw_not_null = True
+                nullable = False
+            elif kw_tok.value == "NULL":
+                # Bare NULL (without leading NOT) is rejected (R2 裁决 2).
+                raise ParseError(
+                    kw_tok.line, kw_tok.col,
+                    "bare NULL not allowed; use NOT NULL or omit",
+                )
+            elif kw_tok.value == "PRIMARY":
+                nxt = self.peek()
+                if not (nxt.type == "KEYWORD" and nxt.value == "KEY"):
+                    raise ParseError(
+                        nxt.line, nxt.col, "expected KEY after PRIMARY"
+                    )
+                self.advance()
+                if saw_pk:
+                    raise ParseError(
+                        kw_tok.line, kw_tok.col, "duplicate PRIMARY KEY"
+                    )
+                saw_pk = True
+                primary_key = True
+            elif kw_tok.value == "KEY":
+                # Bare KEY without PRIMARY is rejected.
+                raise ParseError(
+                    kw_tok.line, kw_tok.col,
+                    "unexpected KEY; use PRIMARY KEY",
+                )
+            elif kw_tok.value == "UNIQUE":
+                if saw_unique:
+                    raise ParseError(
+                        kw_tok.line, kw_tok.col, "duplicate UNIQUE constraint"
+                    )
+                saw_unique = True
+                unique = True
+        return nullable, unique, primary_key
 
     # --- type parameter parsing (Task 12) -----------------------------------
 
