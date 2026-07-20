@@ -20,9 +20,9 @@ def test_int_codec_roundtrip():
 
 def test_int_codec_overflow_raises():
     codec = lookup("INT")
-    with pytest.raises(OverflowError):
+    with pytest.raises(CodecError):
         codec.encode_py(2**31)
-    with pytest.raises(OverflowError):
+    with pytest.raises(CodecError):
         codec.encode_py(-(2**31) - 1)
 
 
@@ -248,7 +248,7 @@ def test_varchar_codec_roundtrip_within_max():
 
 def test_varchar_codec_rejects_overlong():
     codec = codec_for("VARCHAR", (10,))
-    with pytest.raises(TypeError, match="VARCHAR\\(10\\) length 11 exceeds max"):
+    with pytest.raises(CodecError, match="VARCHAR\\(10\\) length 11 exceeds max"):
         codec.encode_py("a" * 11)
 
 
@@ -279,7 +279,7 @@ def test_char_codec_pads_short_string():
 
 def test_char_codec_rejects_overlong():
     codec = codec_for("CHAR", (5,))
-    with pytest.raises(TypeError, match="CHAR\\(5\\) length 6 exceeds max"):
+    with pytest.raises(CodecError, match="CHAR\\(5\\) length 6 exceeds max"):
         codec.encode_py("abcdef")
 
 
@@ -451,3 +451,26 @@ def test_legacy_validate_compare_removed_from_type_system():
     """
     with pytest.raises(ImportError):
         from tinydb.type_system import validate_compare  # noqa: F401
+
+
+def test_int_codec_encode_py_overflow_raises_codec_error():
+    """After F3+F6 refactor, encode_py should raise CodecError (not OverflowError)
+    for out-of-range ints, matching _IntCodec.validate's contract.
+    """
+    codec = lookup("INT")
+    with pytest.raises(CodecError, match="INT out of range"):
+        codec.encode_py(2**31)
+
+
+def test_varchar_codec_overflow_raises_codec_error():
+    """After F2 fix, length-exceeded should raise CodecError (not TypeError)."""
+    codec = codec_for("VARCHAR", (10,))
+    with pytest.raises(CodecError, match="length 11 exceeds max"):
+        codec.encode_py("x" * 11)
+
+
+def test_char_codec_overflow_raises_codec_error():
+    """After F2 fix, CHAR overlong should raise CodecError (not TypeError)."""
+    codec = codec_for("CHAR", (5,))
+    with pytest.raises(CodecError, match="length 6 exceeds max"):
+        codec.encode_py("x" * 6)
