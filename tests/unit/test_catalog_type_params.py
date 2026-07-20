@@ -77,3 +77,22 @@ def test_load_column_rejects_legacy_list_form_with_helpful_message():
     """
     with pytest.raises(InvalidDatabaseFile, match="legacy \\[name, type\\] arrays"):
         _load_column(["id", "INT"])
+
+
+def test_load_column_rejects_non_dict_non_list_with_generic_message():
+    """F4: Non-list, non-dict inputs should get a generic 'expected Column.to_dict()
+    object form' message, NOT the misleading legacy-form message.
+
+    The legacy [name, type] hint must be reserved for actual list inputs.
+    """
+    with pytest.raises(InvalidDatabaseFile) as excinfo:
+        _load_column(42)
+    msg = str(excinfo.value)
+    assert "expected Column.to_dict" in msg
+    assert "legacy [name, type] arrays" not in msg
+
+    with pytest.raises(InvalidDatabaseFile) as excinfo:
+        _load_column(None)
+    msg = str(excinfo.value)
+    assert "expected Column.to_dict" in msg
+    assert "legacy [name, type] arrays" not in msg

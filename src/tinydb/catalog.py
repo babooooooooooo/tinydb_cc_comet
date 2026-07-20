@@ -95,11 +95,16 @@ def _dec_int(v) -> int:
 
 def _load_column(item) -> Column:
     """Load column from v2 object format produced by Column.to_dict()."""
+    if isinstance(item, list):
+        raise InvalidDatabaseFile(
+            f"unrecognized column entry: {item!r} "
+            "(legacy [name, type] arrays are no longer supported — "
+            "please migrate to v2 object format)"
+        )
     if not isinstance(item, dict):
         raise InvalidDatabaseFile(
             f"unrecognized column entry: {item!r} "
-            "(expected Column.to_dict() object form; legacy [name, type] arrays "
-            "are no longer supported — please migrate to v2 object format)"
+            "(expected Column.to_dict() object form)"
         )
     return Column.from_dict(item)
 
@@ -151,7 +156,13 @@ class Catalog:
     ) -> None:
         if name in self.tables:
             raise ValueError(f"table {name!r} already exists")
-        cols: tuple[Column, ...] = tuple(schema)
+        schema_list = list(schema)
+        if schema_list and not all(isinstance(c, Column) for c in schema_list):
+            bad = next(c for c in schema_list if not isinstance(c, Column))
+            raise TypeError(
+                f"create_table expects Column instances, got {type(bad).__name__}: {bad!r}"
+            )
+        cols: tuple[Column, ...] = tuple(schema_list)
         self.tables[name] = TableInfo(
             name=name,
             columns=cols,
