@@ -35,6 +35,12 @@ from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
     NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
 )
+from tinydb._schema import (
+    col_type_and_params,
+    row_name_index,
+    schema_name_index,
+    ti_name_index,
+)
 from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
 from tinydb.type_system import (
     codec_for,
@@ -62,13 +68,12 @@ def eval_expr(expr: Any, row: list, schema: list) -> bool:
     """
     if isinstance(expr, EqualsExpr):
         col_idx = next(
-            (i for i, (n, _, *_) in enumerate(schema) if n == expr.column),
+            (i for i, (n, *_) in enumerate(schema) if n == expr.column),
             None,
         )
         if col_idx is None:
             raise ExecutionError(f"unknown column {expr.column!r}")
-        col_type = schema[col_idx][1]
-        col_params = schema[col_idx][2] if len(schema[col_idx]) >= 3 else ()
+        col_type, col_params = col_type_and_params(schema[col_idx])
         # Strict same-type check first (Design D6 / Task 18): if the parsed
         # literal's inferred DB type or its params disagree with the column
         # declaration, raise TypeError before any byte encoding happens.
@@ -258,7 +263,7 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
 
     key_cols = stmt.group_by
     # schema is the v2 form [(name, type, type_params), ...]; we only need the name.
-    name_to_idx = {n: i for i, (n, *_) in enumerate(schema)}
+    name_to_idx = schema_name_index(schema)
 
     # Validate GROUP BY columns exist up front so an unknown column surfaces
     # before any partial grouping work.
@@ -339,7 +344,7 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
     if not rows:
         return rows
 
-    name_to_idx = _build_row_col_index(rows[0])
+    name_to_idx = row_name_index(rows[0])
 
     # Three-stage resolution: alias -> group col -> raise.
     if col in agg_aliases and col in name_to_idx:
@@ -371,7 +376,7 @@ def _project_aggregate_row(row, stmt, schema) -> "Row":
     if any(si.kind == "star" for si in stmt.select_items):
         return row
 
-    name_to_idx_row = _build_row_col_index(row)
+    name_to_idx_row = row_name_index(row)
     out_cols: list = []
     out_vals: list = []
 
@@ -405,7 +410,7 @@ def apply_order_limit_phase1(rows: list, order_by, agg_aliases, group_cols) -> l
     """Phase1 minimal ORDER BY: only IDENT keys, must be in GROUP BY cols or aliases."""
     if not rows or not order_by:
         return rows
-    name_to_idx = _build_row_col_index(rows[0])
+    name_to_idx = row_name_index(rows[0])
 
     keys = []
     for ob in order_by:
@@ -822,7 +827,7 @@ class Executor:
             raise ExecutionError("INSERT column list must be non-empty")
 
         cols = ti.columns
-        name_to_idx: dict[str, int] = {c.name: i for i, c in enumerate(cols)}
+        name_to_idx: dict[str, int] = ti_name_index(ti)
 
         # Defensive executor-side validation; parser also enforces these.
         seen: set[str] = set()
@@ -948,7 +953,7 @@ class Executor:
         only the requested ``columns`` into a tuple, and drops any tuple
         containing a NULL member (per R9 裁决 9).
         """
-        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        name_to_idx = ti_name_index(ti)
         col_idxs = tuple(name_to_idx[c] for c in columns)
         seen: set = set()
         for _sid, vals, _pid in self._scan_table(ti):
@@ -1207,7 +1212,7 @@ class Executor:
         # Validate ORDER BY columns up front so an unknown column surfaces
         # before sort. Aggregate-path order_by is validated in apply_order_limit_phase1.
         if stmt.order_by and not aggregate_path:
-            name_to_idx_sort = {n: i for i, (n, _, *_) in enumerate(schema)}
+            name_to_idx_sort = schema_name_index(schema)
             for it in stmt.order_by:
                 if it.column not in name_to_idx_sort:
                     raise ExecutionError(
@@ -1219,7 +1224,7 @@ class Executor:
         # Aggregation paths validate projection via _project_aggregate_row.
         proj_idx: list[int] = []
         if stmt.columns != ("*",) and not aggregate_path:
-            name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
+            name_to_idx = schema_name_index(schema)
             for cname in stmt.columns:
                 if cname not in name_to_idx:
                     raise ExecutionError(f"unknown column {cname!r}")
@@ -1398,14 +1403,13 @@ class Executor:
         schema = ti.schema_v2
 
         # 1) Validate SET columns + literal types
-        col_name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
+        col_name_to_idx = schema_name_index(schema)
         for col_name, expr in stmt.sets:
             if col_name not in col_name_to_idx:
                 raise ExecutionError(f"unknown column {col_name!r}")
             if not isinstance(expr, EqualsExpr):
                 raise ExecutionError("SET right-hand side must be a literal")
-            col_type = schema[col_name_to_idx[col_name]][1]
-            col_params = schema[col_name_to_idx[col_name]][2] if len(schema[col_name_to_idx[col_name]]) >= 3 else ()
+            col_type, col_params = col_type_and_params(schema[col_name_to_idx[col_name]])
             try:
                 codec_for(col_type, col_params).validate(expr.value)
             except (TypeError, ValueError, OverflowError) as e:

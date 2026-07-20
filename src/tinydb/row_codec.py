@@ -2,29 +2,22 @@
 
 Codec dispatch goes through ``codec_for`` (Protocol-based) so that subsequent
 type additions (VARCHAR/CHAR/DECIMAL/etc.) and the FLOAT 4-byte migration only
-need to touch type_system.py. The legacy module-level ``encode_int``/``decode_int``
-helpers are no longer referenced here; existing callers that still rely on
-those helpers should import them directly from ``tinydb.type_system``.
+need to touch type_system.py.
 
 Schema tuple shape:
   - (name, type)                 — 2-tuple, legacy form; params defaults to ()
-  - (name, type, params)         — 3-tuple, forward-compatible form (Plan task 7
-                                   wires Parser to produce this for VARCHAR/CHAR/DECIMAL)
+  - (name, type, params)         — 3-tuple, forward-compatible form
+
+Both shapes are normalized through :func:`tinydb._schema.col_type_and_params`;
+this module intentionally does not contain its own parser so the contract
+lives in exactly one place.
 """
+from tinydb._schema import col_type_and_params
 from tinydb.type_system import codec_for
 
 
 def _bitmap_len(col_count: int) -> int:
     return (col_count + 7) // 8
-
-
-def _column_type_and_params(col):
-    """Return (typ, params) from a schema column tuple. Accepts 2-tuple or 3-tuple."""
-    if len(col) == 2:
-        return col[1], ()
-    if len(col) == 3:
-        return col[1], tuple(col[2])
-    raise ValueError(f"schema column entry must be (name, type[, params]), got {col!r}")
 
 
 def encode_row(values: list, schema: list) -> bytes:
@@ -45,7 +38,7 @@ def encode_row(values: list, schema: list) -> bytes:
         if val is None:
             bitmap[i // 8] |= 1 << (i % 8)
             continue
-        typ, params = _column_type_and_params(col)
+        typ, params = col_type_and_params(col)
         codec = codec_for(typ, params)
         parts.append(codec.encode_py(val))
     return bytes(bitmap) + b"".join(parts)
@@ -69,7 +62,7 @@ def decode_row(buf: bytes, schema: list) -> list:
         if null_bit:
             out.append(None)
             continue
-        typ, params = _column_type_and_params(col)
+        typ, params = col_type_and_params(col)
         codec = codec_for(typ, params)
         val, off = codec.decode_bytes(buf, off)
         out.append(val)
