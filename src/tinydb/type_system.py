@@ -188,6 +188,8 @@ class _IntCodec:
                 8: (">q", -(2**63), 2**63)}[self.width]
 
     def encode_py(self, value):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise CodecError(f"expected int for {self.name}, got {type(value).__name__}")
         fmt, lo, hi = self._spec
         if not (lo <= value < hi):
             raise OverflowError(f"{self.name} out of range: {value}")
@@ -273,8 +275,10 @@ class _FloatCodec:
     width = 4  # DOUBLE sets width=8
 
     def encode_py(self, value):
+        if not isinstance(value, float):
+            raise CodecError(f"expected float for {self.name}, got {type(value).__name__}")
         if math.isnan(value) or math.isinf(value):
-            raise ValueError(f"{self.name} inf/NaN not allowed: {value!r}")
+            raise CodecError(f"{self.name} inf/NaN not allowed: {value!r}")
         return struct.pack(">f" if self.width == 4 else ">d", value)
 
     def decode_bytes(self, buf, offset):

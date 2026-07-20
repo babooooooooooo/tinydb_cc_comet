@@ -8,7 +8,10 @@ Covers:
 - to_dict round-trips through dict
 - Column -> dict -> Column preserves type_params
 """
-from tinydb.catalog import Column
+import pytest
+
+from tinydb.catalog import Column, _load_column
+from tinydb.errors import InvalidDatabaseFile
 
 
 def test_column_default_type_params_empty():
@@ -65,3 +68,12 @@ def test_column_roundtrip_through_dict():
     d = col1.to_dict()
     col2 = Column.from_dict(d)
     assert col1 == col2
+
+
+def test_load_column_rejects_legacy_list_form_with_helpful_message():
+    """SUGGESTION-2: when a v1 [name, type] array is encountered, the error must
+    explicitly name the legacy form so users hitting it on upgrade have a clear
+    migration hint.
+    """
+    with pytest.raises(InvalidDatabaseFile, match="legacy \\[name, type\\] arrays"):
+        _load_column(["id", "INT"])
