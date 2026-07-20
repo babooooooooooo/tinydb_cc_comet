@@ -1,12 +1,9 @@
 """Unit tests for validate_compare_types and infer_literal_type (Task 18).
 
 Design D6: WHERE clause comparisons require column type and literal type to
-match exactly (both type name and type_params). The new
+match exactly (both type name and type_params). The
 ``validate_compare_types(col_type, col_params, lit_type, lit_params)`` is the
 strict-same-type check used by ``eval_expr`` in executor.py.
-
-The legacy ``validate_compare(col_bytes, col_type, lit_bytes, lit_type)`` is
-preserved for backward compatibility and is NOT exercised here.
 """
 import datetime
 

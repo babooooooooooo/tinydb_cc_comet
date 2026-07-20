@@ -1,14 +1,15 @@
 """Tests for TypeCodec Protocol implementations (Task 2 / Plan 1.3).
 
 These tests exercise the new codec-based dispatch API (lookup, codec_for).
-The legacy module-level encode_*/decode_* helpers are preserved for
-backward compatibility per Design Doc §F2 and are NOT exercised here.
+The legacy module-level encode_*/decode_* helpers were removed in
+type-codec-and-catalog-cleanup (H6). This file now also exercises the
+type-mismatch contract that encode_py must enforce via CodecError.
 """
 import datetime
 
 import pytest
 
-from tinydb.type_system import lookup, codec_for
+from tinydb.type_system import lookup, codec_for, CodecError
 
 
 def test_int_codec_roundtrip():
@@ -408,3 +409,45 @@ def test_timestamp_codec_parse_iso_literal():
     codec = lookup("TIMESTAMP")
     parsed = codec.parse_literal("2026-07-16 14:30:00", ())
     assert parsed == datetime.datetime(2026, 7, 16, 14, 30, 0)
+
+
+# --- Codec encode_py type-safety contract (type-codec-and-catalog-cleanup H6) ---
+
+
+def test_int_codec_encode_py_rejects_float_with_codec_error():
+    """_IntCodec.encode_py MUST raise CodecError (not struct.error) when given a float.
+
+    Spec scenario: 'Convert Python float to INT rejected via codec registry'.
+    Without isinstance check, struct.pack raises struct.error which is NOT a CodecError.
+    """
+    codec = lookup("INT")
+    with pytest.raises(CodecError, match="expected int for INT"):
+        codec.encode_py(2.5)
+
+
+def test_float_codec_encode_py_nan_raises_codec_error():
+    """_FloatCodec.encode_py MUST raise CodecError (not plain ValueError) for NaN.
+
+    Spec scenario: 'Convert Python float NaN rejected via codec registry' asserts
+    the raised exception IS CodecError (not just ValueError). CodecError IS-A
+    ValueError but isinstance(e, CodecError) must be True.
+    """
+    codec = lookup("FLOAT")
+    with pytest.raises(CodecError, match="NaN not allowed"):
+        codec.encode_py(float("nan"))
+
+
+def test_float_codec_encode_py_inf_raises_codec_error():
+    """Same contract for +Inf: must be CodecError, not plain ValueError."""
+    codec = lookup("FLOAT")
+    with pytest.raises(CodecError, match="inf/NaN not allowed"):
+        codec.encode_py(float("inf"))
+
+
+def test_legacy_validate_compare_removed_from_type_system():
+    """The legacy module-level validate_compare function must no longer be importable.
+
+    Spec should cover this removal alongside py_to_db / db_to_py.
+    """
+    with pytest.raises(ImportError):
+        from tinydb.type_system import validate_compare  # noqa: F401
