@@ -8,6 +8,7 @@ from tinydb.executor import (
 from tinydb.parser import parse
 from tinydb.tokenizer import tokenize
 from tinydb.errors import ExecutionError
+from tinydb.type_system import codec_for
 
 
 @pytest.mark.unit
@@ -171,16 +172,15 @@ def test_project_aggregate_row_group_col_passthrough():
 @pytest.mark.unit
 @pytest.mark.spec_id("REQ-AGG-009-SCN-01")
 def test_agg_sum_text_raises():
-    """E8: SUM on TEXT column raises TypeError via type_system.
+    """E8: TEXT codec rejects an integer before aggregation receives it.
 
     Note: the executor's _agg_sum does not validate schema types — that
-    responsibility lives in py_to_db. We assert that py_to_db rejects an
-    int being coerced to TEXT, which is the actual boundary that protects
-    aggregates from receiving non-numeric data.
+    responsibility lives in the codec registry. We assert that codec_for
+    rejects an int being coerced to TEXT, which is the actual boundary
+    that protects aggregates from receiving non-numeric data.
     """
-    from tinydb.type_system import py_to_db
     with pytest.raises(TypeError):
-        py_to_db(123, "TEXT")
+        codec_for("TEXT").validate(123)
 
 
 @pytest.mark.unit

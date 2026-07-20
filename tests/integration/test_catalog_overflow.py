@@ -7,7 +7,7 @@ allocated via ``Pager.alloc_page``). Each chain page carries a 4-byte
 """
 import pytest
 
-from tinydb.catalog import Catalog, _pack_chain, _unpack_chain
+from tinydb.catalog import Catalog, Column, _pack_chain, _unpack_chain
 from tinydb.pager import PAGE_SIZE
 
 
@@ -23,7 +23,7 @@ def test_overflow_chain_roundtrip(tmp_path):
     for i in range(60):
         cat.create_table(
             f"t{i}",
-            [("id", "INT"), ("name", "TEXT")],
+            (Column(name="id", type="INT"), Column(name="name", type="TEXT")),
             root_page_id=10 + i,
             next_page_id=11 + i,
         )
@@ -68,7 +68,7 @@ def test_single_page_catalog_no_overflow(tmp_path):
     cat = Catalog()
     cat.create_table(
         "only",
-        [("id", "INT")],
+        (Column(name="id", type="INT"),),
         root_page_id=2,
         next_page_id=3,
     )
@@ -93,7 +93,7 @@ def test_write_catalog_chain_persists_across_reopen(tmp_path):
     for i in range(60):
         cat.create_table(
             f"t{i}",
-            [("id", "INT")],
+            (Column(name="id", type="INT"),),
             root_page_id=10 + i,
             next_page_id=11 + i,
         )

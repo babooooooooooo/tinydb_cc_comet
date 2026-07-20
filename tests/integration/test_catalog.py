@@ -20,11 +20,11 @@ def test_catalog_empty_roundtrip():
 @pytest.mark.spec_id("REQ-STORAGE-005-SCN-02")
 def test_catalog_register_table():
     c = Catalog()
-    schema = [("id", "INT"), ("name", "TEXT")]
+    schema = (Column(name="id", type="INT"), Column(name="name", type="TEXT"))
     c.create_table("users", schema, root_page_id=2, next_page_id=2)
     assert "users" in c.tables
     ti = c.get_table("users")
-    assert ti.schema == schema
+    assert ti.schema == [("id", "INT"), ("name", "TEXT")]
     assert ti.root_page_id == 2
 
 
@@ -35,7 +35,7 @@ def test_catalog_persisted_across_reopen(tmp_path):
 
     p = Pager(str(tmp_path / "cat.db"))
     c = Catalog.from_bytes(p.read_page(1))
-    c.create_table("t", [("x", "INT")], root_page_id=2, next_page_id=2)
+    c.create_table("t", (Column(name="x", type="INT"),), root_page_id=2, next_page_id=2)
     p.write_page(1, c.to_bytes())
     p.flush()
     p.close()
@@ -51,7 +51,7 @@ def test_catalog_encodes_int_fields_as_json_strings():
     c = Catalog()
     # simulate large int root_page_id > 2^53
     huge = 2**60
-    c.create_table("big", [("v", "INT")], root_page_id=huge, next_page_id=huge)
+    c.create_table("big", (Column(name="v", type="INT"),), root_page_id=huge, next_page_id=huge)
     raw = c.to_bytes()
     text = raw.rstrip(b"\x00").decode("utf-8")
     parsed = json.loads(text)

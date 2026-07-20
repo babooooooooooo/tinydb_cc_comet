@@ -1,12 +1,12 @@
-"""Tests for Column.type_params backward-compatible field (Task 15).
+"""Tests for Column.type_params (Task 15).
 
 Covers:
 - Default value is empty tuple
 - Construction with type_params works
-- from_dict defaults to () when key missing (legacy JSON compat)
+- from_dict defaults to () when key missing
 - from_dict reads list/tuple value from JSON
 - to_dict round-trips through dict
-- Old 2-tuple [name, type] format still loads via _load_column
+- Column -> dict -> Column preserves type_params
 """
 from tinydb.catalog import Column
 
@@ -57,18 +57,6 @@ def test_column_to_dict_empty_type_params():
     col = Column(name="id", type="INT")
     d = col.to_dict()
     assert d["type_params"] == []
-
-
-def test_column_legacy_2tuple_format_still_works():
-    """Old catalog schema with [name, type] list format still loads."""
-    try:
-        from tinydb.catalog import _load_column
-    except ImportError:
-        return  # no _load_column helper, skip
-    col = _load_column(["id", "INT"])
-    assert col.name == "id"
-    assert col.type == "INT"
-    assert col.type_params == ()
 
 
 def test_column_roundtrip_through_dict():

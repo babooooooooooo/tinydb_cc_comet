@@ -3,8 +3,8 @@
 Locks in recursive-descent expression evaluator semantics: EQ / AND / OR /
 NOT, plus strict-type + unknown-column error paths.
 
-Note on type mismatch: eval_expr raises ``TypeError`` (preserving MVP
-behavior via ``py_to_db``) on direct EqualsExpr calls. When the EqualsExpr
+Note on type mismatch: eval_expr raises ``TypeError`` (via codec registry
+``validate_compare_types``) on direct EqualsExpr calls. When the EqualsExpr
 is a sub-expression reached only after AND/OR short-circuit, the bad branch
 is never evaluated (Python ``and``/``or`` short-circuit), so the type
 mismatch is hidden — which is the desired behavior.
