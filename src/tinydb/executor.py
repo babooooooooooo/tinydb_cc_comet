@@ -1464,71 +1464,18 @@ class Executor:
         schema = ti.schema_v2
 
         # 1) Validate SET columns + literal types
-        col_name_to_idx = schema_name_index(schema)
-        for col_name, expr in stmt.sets:
-            if col_name not in col_name_to_idx:
-                raise ExecutionError(f"unknown column {col_name!r}")
-            if not isinstance(expr, EqualsExpr):
-                raise ExecutionError("SET right-hand side must be a literal")
-            col_type, col_params = col_type_and_params(schema[col_name_to_idx[col_name]])
-            try:
-                codec_for(col_type, col_params).validate(expr.value)
-            except CodecError as e:
-                raise TypeError(
-                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
-                ) from e
+        col_name_to_idx = self._validate_update_sets(stmt, schema)
 
-        # 2) Collect matches
-        matches: list[tuple[int, int, list[Any]]] = []
-        for sid, vals, pid in self._scan_table(ti):
-            if stmt.where is None or eval_expr(stmt.where, vals, schema):
-                matches.append((pid, sid, vals))
+        # 2-3) Collect matches and group by page
+        matches = self._collect_update_matches(stmt, ti, schema)
+        by_page = _group_matches_by_page(matches)
 
-        # 3) Group by page
-        by_page: dict[int, list[tuple[int, list[Any]]]] = {}
-        for pid, sid, vals in matches:
-            by_page.setdefault(pid, []).append((sid, vals))
-
-        # 4) Per-page in-place update + fallback
-        #    For each updated row, compute (old_vals, new_vals) index deltas
-        #    and apply them AFTER the write so the index always references
-        #    a live slot. In-place updates keep the same (pid, sid); the
-        #    fallback path (delete + reinsert or chain) gets a NEW (pid, sid).
+        # 4-5) Apply updates page by page; drain pending chain inserts after each flush
         for pid, sid_vals_list in by_page.items():
             page = SlottedPage.from_bytes(pid, self._txn_read_page(pid))
-            pending_chain_inserts: list[tuple[list, list, bytes]] = []
-            for sid, vals in sid_vals_list:
-                old_vals = list(vals)
-                new_vals = list(vals)
-                for col_name, expr in stmt.sets:
-                    new_vals[col_name_to_idx[col_name]] = expr.value
-                new_bytes = encode_row(new_vals, schema)
-
-                old_slot = page.slots[sid]
-                grew = len(new_bytes) > old_slot.length
-                if not grew:
-                    try:
-                        page.update(sid, new_bytes)
-                        # In-place: slot_ref stays (pid, sid).
-                        self._update_index_for_row(
-                            ti, old_vals, new_vals, (pid, sid),
-                        )
-                        continue
-                    except PageFull:
-                        grew = True
-                # Fallback: grew == True → delete + insert (or chain)
-                if old_slot.flags & FLAG_SPILL_START:
-                    self._free_overflow_chain(pid)
-                page.delete(sid)
-                try:
-                    new_sid = page.insert(new_bytes)
-                    # Delete old index entries (slot gone), insert new.
-                    self._update_index_for_row(
-                        ti, old_vals, new_vals, (pid, new_sid),
-                    )
-                except PageFull:
-                    pending_chain_inserts.append((old_vals, new_vals, new_bytes))
-
+            pending_chain_inserts = self._apply_page_updates(
+                ti, pid, page, sid_vals_list, stmt, schema, col_name_to_idx,
+            )
             # Flush this page before chain inserts (may advance next_page_id).
             self._txn_write_page(pid, page.to_bytes())
             for old_vals, new_vals, new_bytes in pending_chain_inserts:
@@ -1541,6 +1488,99 @@ class Executor:
 
         self.pager.flush()
         return []
+
+    def _validate_update_sets(
+        self, stmt: Update, schema: list[tuple],
+    ) -> dict[str, int]:
+        """Validate SET clauses against the schema. Returns name->index map.
+
+        For each ``col = literal`` assignment:
+          * column must exist in the schema
+          * right-hand side must be an ``EqualsExpr`` literal (no expressions)
+          * literal value must satisfy the column's codec
+        """
+        col_name_to_idx = schema_name_index(schema)
+        for col_name, expr in stmt.sets:
+            if col_name not in col_name_to_idx:
+                raise ExecutionError(f"unknown column {col_name!r}")
+            if not isinstance(expr, EqualsExpr):
+                raise ExecutionError("SET right-hand side must be a literal")
+            col_type, col_params = col_type_and_params(
+                schema[col_name_to_idx[col_name]],
+            )
+            try:
+                codec_for(col_type, col_params).validate(expr.value)
+            except CodecError as e:
+                raise TypeError(
+                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+                ) from e
+        return col_name_to_idx
+
+    def _collect_update_matches(
+        self,
+        stmt: Update,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> list[tuple[int, int, list[Any]]]:
+        """Return ``[(page_id, slot_id, vals), ...]`` for rows matching WHERE."""
+        matches: list[tuple[int, int, list[Any]]] = []
+        for sid, vals, pid in self._scan_table(ti):
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
+                matches.append((pid, sid, vals))
+        return matches
+
+    def _apply_page_updates(
+        self,
+        ti: TableInfo,
+        pid: int,
+        page: "SlottedPage",
+        sid_vals_list: list[tuple[int, list[Any]]],
+        stmt: Update,
+        schema: list[tuple],
+        col_name_to_idx: dict[str, int],
+    ) -> list[tuple[list, list, bytes]]:
+        """Apply in-place updates on a single page; return chain-insert queue.
+
+        For each (sid, vals):
+          * build new row bytes from ``stmt.sets``
+          * try in-place update; on PageFull, fall back to delete+insert
+          * if the fallback also overflows the page, queue for chain insert
+        Updates ``page`` in-place (caller flushes). The ``pid`` parameter
+        is needed for index maintenance and overflow-chain reclamation
+        because both reference the underlying page id.
+        """
+        pending_chain_inserts: list[tuple[list, list, bytes]] = []
+        for sid, vals in sid_vals_list:
+            old_vals = list(vals)
+            new_vals = list(vals)
+            for col_name, expr in stmt.sets:
+                new_vals[col_name_to_idx[col_name]] = expr.value
+            new_bytes = encode_row(new_vals, schema)
+
+            old_slot = page.slots[sid]
+            grew = len(new_bytes) > old_slot.length
+            if not grew:
+                try:
+                    page.update(sid, new_bytes)
+                    # In-place: slot_ref stays (pid, sid).
+                    self._update_index_for_row(
+                        ti, old_vals, new_vals, (pid, sid),
+                    )
+                    continue
+                except PageFull:
+                    grew = True
+            # Fallback: grew == True -> delete + insert (or chain)
+            if old_slot.flags & FLAG_SPILL_START:
+                self._free_overflow_chain(pid)
+            page.delete(sid)
+            try:
+                new_sid = page.insert(new_bytes)
+                self._update_index_for_row(
+                    ti, old_vals, new_vals, (pid, new_sid),
+                )
+            except PageFull:
+                pending_chain_inserts.append((old_vals, new_vals, new_bytes))
+        return pending_chain_inserts
 
     # --- B+tree fast-path helpers (Task 7) ----------------------------------
 
@@ -1647,3 +1687,13 @@ class Executor:
         if slot.flags & FLAG_SPILL_START:
             row_bytes = row_bytes + self._read_overflow_chain(page_id)
         return [(slot_id, decode_row(row_bytes, ti.schema_v2), page_id)]
+
+
+def _group_matches_by_page(
+    matches: list[tuple[int, int, list[Any]]],
+) -> dict[int, list[tuple[int, list[Any]]]]:
+    """Group UPDATE matches by page id (drops the page id from each triple)."""
+    by_page: dict[int, list[tuple[int, list[Any]]]] = {}
+    for pid, sid, vals in matches:
+        by_page.setdefault(pid, []).append((sid, vals))
+    return by_page
