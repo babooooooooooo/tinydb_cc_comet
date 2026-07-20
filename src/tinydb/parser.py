@@ -683,7 +683,7 @@ class _Parser:
 
         # Cached alias list for the executor's HAVING/ORDER evaluation.
         aggregate_aliases = tuple(
-            si.alias or _default_alias(si.aggregate)
+            si.alias or default_alias(si.aggregate)
             for si in items if si.kind == "aggregate"
         )
 
@@ -694,7 +694,7 @@ class _Parser:
                 legacy_cols = ["*"]
                 break
             if si.kind == "aggregate":
-                legacy_cols.append(si.alias or _default_alias(si.aggregate))
+                legacy_cols.append(si.alias or default_alias(si.aggregate))
             else:
                 legacy_cols.append(si.name)
 
@@ -1106,8 +1106,17 @@ class _Parser:
         return False
 
 
-def _default_alias(agg: AggregateCall) -> str:
-    """Default aggregate alias per design doc (T2)."""
+def default_alias(agg: AggregateCall) -> str:
+    """Default aggregate alias per design doc (T2).
+
+    Exposed at module scope so the executor's aggregate-row projection
+    can reuse the same rule instead of reimplementing it.
+
+    Rules:
+      - ``COUNT(*)`` -> ``"count"``
+      - any aggregate with a column arg -> ``"<func>_<col>"`` lowercased
+      - fallback (rare): ``<func>`` lowercased
+    """
     if agg.arg == "*":
         return "count"
     if (

@@ -42,6 +42,7 @@ from tinydb._schema import (
     ti_name_index,
 )
 from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
+from tinydb.parser import default_alias as _aggregate_default_alias
 from tinydb.type_system import (
     CodecError,
     codec_for,
@@ -207,24 +208,6 @@ def _resolve_aggregate_arg(agg: AggregateCall) -> tuple:
     return ("column", agg.arg[1])
 
 
-def _aggregate_default_alias(agg: AggregateCall) -> str:
-    """Default aggregate alias per design doc."""
-    if agg.arg == "*":
-        return "count"
-    if (
-        isinstance(agg.arg, tuple)
-        and len(agg.arg) == 2
-        and agg.arg[0] == "column"
-    ):
-        return f"{agg.func.lower()}_{agg.arg[1]}"
-    return f"{agg.func.lower()}"
-
-
-def _build_row_col_index(row) -> dict:
-    """Map ``row.columns[i] -> i`` for O(1) lookup by name."""
-    return {n: i for i, n in enumerate(row.columns)}
-
-
 def _compare(val, op: str, lit) -> bool:
     """NULL-safe comparison used by HAVING/ORDER.
 
@@ -307,10 +290,7 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
                 val = _AGG_FUNCS[agg.func](group_rows, col_idx, schema)
             # Default alias: ``count`` for COUNT(*) (no column), otherwise
             # ``<func>_<colname>`` matching design doc.
-            if agg.arg == "*":
-                alias = si.alias or "count"
-            else:
-                alias = si.alias or f"{agg.func.lower()}_{col_name}"
+            alias = si.alias or _aggregate_default_alias(agg)
             columns.append(alias)
             values.append(val)
         out_rows.append(Row(values=tuple(values), columns=tuple(columns)))
