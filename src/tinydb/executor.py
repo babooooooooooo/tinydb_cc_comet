@@ -380,6 +380,22 @@ def _project_aggregate_row(row, stmt, schema) -> "Row":
     return Row(values=tuple(out_vals), columns=tuple(out_cols))
 
 
+def _apply_limit_offset(stmt, rows):
+    """Apply ``stmt.offset`` and ``stmt.limit`` to ``rows``.
+
+    Shared by the legacy scan path and the aggregate 5-phase pipeline so
+    both slicing idioms stay in sync. ``offset`` defaults to 0 (falsy) when
+    unset; ``limit`` is only honored when explicitly set (slicing with
+    ``None`` would not consume all rows, so we guard on ``is not None``).
+    Returns the (possibly trimmed) list.
+    """
+    if stmt.offset:
+        rows = rows[stmt.offset:]
+    if stmt.limit is not None:
+        rows = rows[:stmt.limit]
+    return rows
+
+
 def _project_legacy_row(
     stmt: "Select",
     vals: list,
@@ -1119,6 +1135,28 @@ class Executor:
             ov[0] = 0
             self._txn_write_page(pid, bytes(ov))
 
+    def _read_slot_row_bytes(
+        self, page: "SlottedPage", sid: int, pid: int,
+    ) -> Optional[bytes]:
+        """Return the full row bytes for ``(page, sid)`` or ``None`` if absent.
+
+        Single source of truth for the tombstone + spill-handling rules
+        that used to be inlined in both :meth:`_scan_table` and
+        :meth:`_read_row_by_slot`. Returns ``None`` when the slot is
+        tombstoned, missing, or out of range; otherwise returns the
+        decoded row bytes (with the overflow chain appended when the
+        slot carries ``FLAG_SPILL_START``).
+        """
+        slot = page.slots[sid]
+        if slot.flags & FLAG_TOMBSTONE:
+            return None
+        row_bytes = page.get(sid)
+        if row_bytes is None:
+            return None
+        if slot.flags & FLAG_SPILL_START:
+            row_bytes = row_bytes + self._read_overflow_chain(pid)
+        return row_bytes
+
     def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
 
@@ -1145,14 +1183,9 @@ class Executor:
             raw = self._txn_read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             for sid in range(page.num_slots):
-                slot = page.slots[sid]
-                if slot.flags & FLAG_TOMBSTONE:
+                row_bytes = self._read_slot_row_bytes(page, sid, pid)
+                if row_bytes is None:
                     continue
-                row_bytes = page.get(sid)
-                if row_bytes is None:  # tombstone or out-of-range slot
-                    continue
-                if slot.flags & FLAG_SPILL_START:
-                    row_bytes = row_bytes + self._read_overflow_chain(pid)
                 results.append((sid, decode_row(row_bytes, ti.schema_v2), pid))
         return results
 
@@ -1337,10 +1370,7 @@ class Executor:
             agg_rows = apply_order_limit_phase1(
                 agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
             )
-        if stmt.offset:
-            agg_rows = agg_rows[stmt.offset:]
-        if stmt.limit is not None:
-            agg_rows = agg_rows[:stmt.limit]
+        agg_rows = _apply_limit_offset(stmt, agg_rows)
         # Phase 5: project to SELECT list shape; returns Row objects.
         return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
 
@@ -1378,10 +1408,7 @@ class Executor:
         so callers can supply the legacy-row or aggregate-row projection
         without duplicating the slice-and-iterate scaffold.
         """
-        if stmt.offset:
-            rows = rows[stmt.offset:]
-        if stmt.limit is not None:
-            rows = rows[:stmt.limit]
+        rows = _apply_limit_offset(stmt, rows)
         results: list[list[Any]] = []
         for _sid, vals, _pid in rows:
             results.append(project(stmt, vals, proj_idx))
@@ -1678,14 +1705,9 @@ class Executor:
         page_id, slot_id = slot_ref
         raw = self._txn_read_page(page_id)
         page = SlottedPage.from_bytes(page_id, raw)
-        slot = page.slots[slot_id]
-        if slot.flags & FLAG_TOMBSTONE:
-            return []
-        row_bytes = page.get(slot_id)
+        row_bytes = self._read_slot_row_bytes(page, slot_id, page_id)
         if row_bytes is None:
             return []
-        if slot.flags & FLAG_SPILL_START:
-            row_bytes = row_bytes + self._read_overflow_chain(page_id)
         return [(slot_id, decode_row(row_bytes, ti.schema_v2), page_id)]
 
 
