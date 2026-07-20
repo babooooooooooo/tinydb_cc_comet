@@ -9,8 +9,9 @@ from __future__ import annotations
 from functools import cmp_to_key
 from typing import Any
 
+from tinydb._schema import col_type_and_params, schema_name_index
 from tinydb.errors import ExecutionError
-from tinydb.type_system import codec_for
+from tinydb.type_system import CodecError, codec_for
 
 
 def stable_sort(
@@ -27,7 +28,7 @@ def stable_sort(
     ``schema`` is the v2 form (3-tuple with type_params) so codec
     dispatch honors parametric types (Task 17).
     """
-    name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
+    name_to_idx = schema_name_index(schema)
 
     def cmp(r1: tuple, r2: tuple) -> int:
         for it in items:
@@ -37,14 +38,13 @@ def stable_sort(
                 )
             i = name_to_idx[it.column]
             v1, v2 = r1[1][i], r2[1][i]
-            col_type = schema[i][1]
-            col_params = schema[i][2] if len(schema[i]) >= 3 else ()
+            col_type, col_params = col_type_and_params(schema[i])
             # codec_for is the canonical type check; surface type errors
             # as ExecutionError (consistent with executor error model).
             try:
                 codec_for(col_type, col_params).validate(v1)
                 codec_for(col_type, col_params).validate(v2)
-            except (TypeError, ValueError, OverflowError) as e:
+            except CodecError as e:
                 raise ExecutionError(
                     f"column {it.column!r}: {e}"
                 ) from e

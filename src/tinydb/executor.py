@@ -15,7 +15,6 @@ wrapper installed on every B+tree also routes reads/writes/frees
 through ``_txn_*`` helpers so B+tree updates participate in the active
 txn.
 """
-import copy
 from collections import defaultdict
 from typing import Any, Optional, Union
 
@@ -26,8 +25,8 @@ from tinydb.pager import Pager
 from tinydb.parser import (
     Begin, Commit, Rollback,
     CreateTable, DropTable, Insert, Select, Delete, Update,
-    EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
-    AggregateCall, SelectItem,
+    EqualsExpr, AndExpr, OrExpr, NotExpr,
+    AggregateCall,
 )
 from tinydb.transaction import Transaction
 from tinydb.row_codec import decode_row, encode_row
@@ -35,8 +34,15 @@ from tinydb.slotted_page import (
     FLAG_SPILL_START, FLAG_TOMBSTONE, HEADER_SIZE, MAX_INLINE_PAYLOAD,
     NULL_PAGE_ID, PAGE_SIZE, SLOT_SIZE, SlottedPage,
 )
-from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
+from tinydb._schema import (
+    col_type_and_params,
+    row_name_index,
+    schema_name_index,
+    ti_name_index,
+)
+from tinydb.parser import default_alias as _aggregate_default_alias
 from tinydb.type_system import (
+    CodecError,
     codec_for,
     infer_literal_type,
     validate_compare_types,
@@ -62,13 +68,12 @@ def eval_expr(expr: Any, row: list, schema: list) -> bool:
     """
     if isinstance(expr, EqualsExpr):
         col_idx = next(
-            (i for i, (n, _, *_) in enumerate(schema) if n == expr.column),
+            (i for i, (n, *_) in enumerate(schema) if n == expr.column),
             None,
         )
         if col_idx is None:
             raise ExecutionError(f"unknown column {expr.column!r}")
-        col_type = schema[col_idx][1]
-        col_params = schema[col_idx][2] if len(schema[col_idx]) >= 3 else ()
+        col_type, col_params = col_type_and_params(schema[col_idx])
         # Strict same-type check first (Design D6 / Task 18): if the parsed
         # literal's inferred DB type or its params disagree with the column
         # declaration, raise TypeError before any byte encoding happens.
@@ -76,7 +81,7 @@ def eval_expr(expr: Any, row: list, schema: list) -> bool:
         validate_compare_types(col_type, col_params, lit_type, lit_params)
         try:
             codec_for(col_type, col_params).validate(expr.value)
-        except (TypeError, ValueError, OverflowError) as e:
+        except CodecError as e:
             raise TypeError(
                 f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
             ) from e
@@ -201,24 +206,6 @@ def _resolve_aggregate_arg(agg: AggregateCall) -> tuple:
     return ("column", agg.arg[1])
 
 
-def _aggregate_default_alias(agg: AggregateCall) -> str:
-    """Default aggregate alias per design doc."""
-    if agg.arg == "*":
-        return "count"
-    if (
-        isinstance(agg.arg, tuple)
-        and len(agg.arg) == 2
-        and agg.arg[0] == "column"
-    ):
-        return f"{agg.func.lower()}_{agg.arg[1]}"
-    return f"{agg.func.lower()}"
-
-
-def _build_row_col_index(row) -> dict:
-    """Map ``row.columns[i] -> i`` for O(1) lookup by name."""
-    return {n: i for i, n in enumerate(row.columns)}
-
-
 def _compare(val, op: str, lit) -> bool:
     """NULL-safe comparison used by HAVING/ORDER.
 
@@ -258,7 +245,7 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
 
     key_cols = stmt.group_by
     # schema is the v2 form [(name, type, type_params), ...]; we only need the name.
-    name_to_idx = {n: i for i, (n, *_) in enumerate(schema)}
+    name_to_idx = schema_name_index(schema)
 
     # Validate GROUP BY columns exist up front so an unknown column surfaces
     # before any partial grouping work.
@@ -301,10 +288,7 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
                 val = _AGG_FUNCS[agg.func](group_rows, col_idx, schema)
             # Default alias: ``count`` for COUNT(*) (no column), otherwise
             # ``<func>_<colname>`` matching design doc.
-            if agg.arg == "*":
-                alias = si.alias or "count"
-            else:
-                alias = si.alias or f"{agg.func.lower()}_{col_name}"
+            alias = si.alias or _aggregate_default_alias(agg)
             columns.append(alias)
             values.append(val)
         out_rows.append(Row(values=tuple(values), columns=tuple(columns)))
@@ -339,7 +323,7 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
     if not rows:
         return rows
 
-    name_to_idx = _build_row_col_index(rows[0])
+    name_to_idx = row_name_index(rows[0])
 
     # Three-stage resolution: alias -> group col -> raise.
     if col in agg_aliases and col in name_to_idx:
@@ -357,7 +341,7 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
     return out
 
 
-def _project_aggregate_row(row, stmt, schema) -> "Row":
+def _project_aggregate_row(row, stmt, schema):
     """Project aggregate Row to SELECT list shape.
 
     - SELECT *: pass through row unchanged.
@@ -371,7 +355,7 @@ def _project_aggregate_row(row, stmt, schema) -> "Row":
     if any(si.kind == "star" for si in stmt.select_items):
         return row
 
-    name_to_idx_row = _build_row_col_index(row)
+    name_to_idx_row = row_name_index(row)
     out_cols: list = []
     out_vals: list = []
 
@@ -394,6 +378,40 @@ def _project_aggregate_row(row, stmt, schema) -> "Row":
     return Row(values=tuple(out_vals), columns=tuple(out_cols))
 
 
+def _apply_limit_offset(stmt, rows):
+    """Apply ``stmt.offset`` and ``stmt.limit`` to ``rows``.
+
+    Shared by the legacy scan path and the aggregate 5-phase pipeline so
+    both slicing idioms stay in sync. ``offset`` defaults to 0 (falsy) when
+    unset; ``limit`` is only honored when explicitly set (slicing with
+    ``None`` would not consume all rows, so we guard on ``is not None``).
+    Returns the (possibly trimmed) list.
+    """
+    if stmt.offset:
+        rows = rows[stmt.offset:]
+    if stmt.limit is not None:
+        rows = rows[:stmt.limit]
+    return rows
+
+
+def _project_legacy_row(
+    stmt: "Select",
+    vals: list,
+    proj_idx: list[int],
+) -> list:
+    """Per-row projector for the legacy / scan SELECT path.
+
+    Mirrors the inline pattern that used to live in ``_exec_select``:
+    a ``SELECT *`` returns a copy of ``vals``; a named-column projection
+    picks ``vals[i]`` for each index in ``proj_idx``. Pulled into a
+    module-level function so ``_slice_and_project`` can be reused by
+    both the indexed fast path and the full scan path.
+    """
+    if stmt.columns == ("*",):
+        return list(vals)
+    return [vals[i] for i in proj_idx]
+
+
 def _neg_for_sort(v):
     """Negate numeric values for DESC ordering (works for int and float)."""
     if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -405,7 +423,7 @@ def apply_order_limit_phase1(rows: list, order_by, agg_aliases, group_cols) -> l
     """Phase1 minimal ORDER BY: only IDENT keys, must be in GROUP BY cols or aliases."""
     if not rows or not order_by:
         return rows
-    name_to_idx = _build_row_col_index(rows[0])
+    name_to_idx = row_name_index(rows[0])
 
     keys = []
     for ob in order_by:
@@ -822,7 +840,7 @@ class Executor:
             raise ExecutionError("INSERT column list must be non-empty")
 
         cols = ti.columns
-        name_to_idx: dict[str, int] = {c.name: i for i, c in enumerate(cols)}
+        name_to_idx: dict[str, int] = ti_name_index(ti)
 
         # Defensive executor-side validation; parser also enforces these.
         seen: set[str] = set()
@@ -948,7 +966,7 @@ class Executor:
         only the requested ``columns`` into a tuple, and drops any tuple
         containing a NULL member (per R9 裁决 9).
         """
-        name_to_idx = {c.name: i for i, c in enumerate(ti.columns)}
+        name_to_idx = ti_name_index(ti)
         col_idxs = tuple(name_to_idx[c] for c in columns)
         seen: set = set()
         for _sid, vals, _pid in self._scan_table(ti):
@@ -1114,6 +1132,28 @@ class Executor:
             ov[0] = 0
             self._txn_write_page(pid, bytes(ov))
 
+    def _read_slot_row_bytes(
+        self, page: "SlottedPage", sid: int, pid: int,
+    ) -> Optional[bytes]:
+        """Return the full row bytes for ``(page, sid)`` or ``None`` if absent.
+
+        Single source of truth for the tombstone + spill-handling rules
+        that used to be inlined in both :meth:`_scan_table` and
+        :meth:`_read_row_by_slot`. Returns ``None`` when the slot is
+        tombstoned, missing, or out of range; otherwise returns the
+        decoded row bytes (with the overflow chain appended when the
+        slot carries ``FLAG_SPILL_START``).
+        """
+        slot = page.slots[sid]
+        if slot.flags & FLAG_TOMBSTONE:
+            return None
+        row_bytes = page.get(sid)
+        if row_bytes is None:
+            return None
+        if slot.flags & FLAG_SPILL_START:
+            row_bytes = row_bytes + self._read_overflow_chain(pid)
+        return row_bytes
+
     def _scan_table(self, ti: TableInfo) -> list[tuple[int, list[Any], int]]:
         """Linear-scan all data pages, filtering tombstones.
 
@@ -1140,14 +1180,9 @@ class Executor:
             raw = self._txn_read_page(pid)
             page = SlottedPage.from_bytes(pid, raw)
             for sid in range(page.num_slots):
-                slot = page.slots[sid]
-                if slot.flags & FLAG_TOMBSTONE:
+                row_bytes = self._read_slot_row_bytes(page, sid, pid)
+                if row_bytes is None:
                     continue
-                row_bytes = page.get(sid)
-                if row_bytes is None:  # tombstone or out-of-range slot
-                    continue
-                if slot.flags & FLAG_SPILL_START:
-                    row_bytes = row_bytes + self._read_overflow_chain(pid)
                 results.append((sid, decode_row(row_bytes, ti.schema_v2), pid))
         return results
 
@@ -1191,15 +1226,43 @@ class Executor:
         # eval_expr / _stable_sort honors parametric types (Task 17).
         schema = ti.schema_v2
 
+        proj_idx, aggregate_path = self._validate_select(stmt, ti, schema)
+
+        # B+tree fast path (non-aggregate only).
+        if not aggregate_path and stmt.where is not None:
+            fast = self._exec_indexed_select(stmt, ti, schema, proj_idx)
+            if fast is not None:
+                return fast
+
+        # Aggregate path (5-phase pipeline).
+        if aggregate_path:
+            return self._exec_aggregate_select(stmt, ti, schema)
+
+        # Legacy / non-aggregate path.
+        return self._exec_scan_select(stmt, ti, schema, proj_idx)
+
+    def _validate_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> tuple[list[int], bool]:
+        """Validate SELECT clauses that must hold for any path.
+
+        Returns ``(proj_idx, aggregate_path)``:
+          * ``proj_idx``: ordered list of column indices for the
+            named-column projection, or empty list for ``SELECT *``.
+            Empty on the aggregate path (projection handled by
+            ``_project_aggregate_row``).
+          * ``aggregate_path``: True iff this query uses aggregates or
+            GROUP BY and should be routed to the aggregation pipeline.
+        """
         # Validate LIMIT/OFFSET non-negative.
         if stmt.offset is not None and stmt.offset < 0:
             raise ExecutionError(f"OFFSET must be non-negative, got {stmt.offset}")
         if stmt.limit is not None and stmt.limit < 0:
             raise ExecutionError(f"LIMIT must be non-negative, got {stmt.limit}")
 
-        # --- Detect aggregate path -----------------------------------------
-        # Both ``aggregate_aliases`` (set when any SelectItem.kind == 'aggregate')
-        # and ``group_by`` (non-empty GROUP BY clause) trigger the aggregate path.
         uses_agg = bool(stmt.aggregate_aliases)
         uses_group = bool(stmt.group_by)
         aggregate_path = uses_agg or uses_group
@@ -1207,7 +1270,7 @@ class Executor:
         # Validate ORDER BY columns up front so an unknown column surfaces
         # before sort. Aggregate-path order_by is validated in apply_order_limit_phase1.
         if stmt.order_by and not aggregate_path:
-            name_to_idx_sort = {n: i for i, (n, _, *_) in enumerate(schema)}
+            name_to_idx_sort = schema_name_index(schema)
             for it in stmt.order_by:
                 if it.column not in name_to_idx_sort:
                     raise ExecutionError(
@@ -1219,86 +1282,103 @@ class Executor:
         # Aggregation paths validate projection via _project_aggregate_row.
         proj_idx: list[int] = []
         if stmt.columns != ("*",) and not aggregate_path:
-            name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
+            name_to_idx = schema_name_index(schema)
             for cname in stmt.columns:
                 if cname not in name_to_idx:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        # --- B+tree fast path (non-aggregate only) -------------------------
-        # Single-equality WHERE on an indexed column short-circuits the full
-        # scan: encode the literal with the column's codec, look it up in the
-        # per-(table,col) B+tree, and read at most one row by (page_id,
-        # slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
-        if (
-            not aggregate_path
-            and stmt.where is not None
-            and self._is_single_eq_on_indexed(stmt.where, ti)
-        ):
-            col_name, lit_value = self._parse_single_eq(stmt.where)
-            if col_name is not None:
-                col_obj = next((c for c in ti.columns if c.name == col_name), None)
-                if col_obj is not None:
-                    bt = self.index_manager.get_btree(ti.name, col_name)
-                    if bt is not None:
-                        try:
-                            key = codec_for(
-                                col_obj.type, col_obj.type_params
-                            ).encode_py(lit_value)
-                            ref = self.index_manager.lookup_key(
-                                ti.name, col_name, key
-                            )
-                        except (TypeError, ValueError, OverflowError):
-                            ref = None
-                        if ref is None:
-                            return []
-                        fast_rows = self._read_row_by_slot(ti, ref)
-                        # Apply OFFSET / LIMIT / projection.
-                        if stmt.offset:
-                            fast_rows = fast_rows[stmt.offset:]
-                        if stmt.limit is not None:
-                            fast_rows = fast_rows[:stmt.limit]
-                        results: list[list[Any]] = []
-                        for _sid, vals, _pid in fast_rows:
-                            if stmt.columns == ("*",):
-                                results.append(list(vals))
-                            else:
-                                results.append([vals[i] for i in proj_idx])
-                        return results
+        return proj_idx, aggregate_path
 
-        # --- Aggregate path (5-phase pipeline) -----------------------------
-        if aggregate_path:
-            if not stmt.select_items:
-                raise ExecutionError(
-                    "SELECT * with GROUP BY requires explicit select_items",
-                )
-            # Phase 1: WHERE filter on raw rows.
-            raw_rows: list[list[Any]] = []
-            for _sid, vals, _pid in self._scan_table(ti):
-                if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
-                    continue
-                raw_rows.append(list(vals))
-            # Phase 2: GROUP BY + aggregate
-            agg_rows = apply_aggregation(raw_rows, stmt, schema)
-            # Phase 3: HAVING
-            if stmt.having is not None:
-                agg_rows = apply_having(
-                    agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
-                    schema,
-                )
-            # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
-            if stmt.order_by:
-                agg_rows = apply_order_limit_phase1(
-                    agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
-                )
-            if stmt.offset:
-                agg_rows = agg_rows[stmt.offset:]
-            if stmt.limit is not None:
-                agg_rows = agg_rows[:stmt.limit]
-            # Phase 5: project to SELECT list shape; returns Row objects.
-            return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
+    def _exec_indexed_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+        proj_idx: list[int],
+    ) -> Optional[list[list[Any]]]:
+        """B+tree indexed-lookup fast path. Returns ``None`` to defer to scan.
 
-        # --- Legacy / non-aggregate path ----------------------------------
+        Single-equality WHERE on an indexed column short-circuits the full
+        scan: encode the literal with the column's codec, look it up in the
+        per-(table,col) B+tree, and read at most one row by (page_id,
+        slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
+
+        Returns ``None`` when the WHERE is not a single-equality on an
+        indexed column so the caller can fall through to scan.
+        """
+        if not self._is_single_eq_on_indexed(stmt.where, ti):
+            return None
+        col_name, lit_value = self._parse_single_eq(stmt.where)
+        if col_name is None:
+            return None
+        col_obj = next((c for c in ti.columns if c.name == col_name), None)
+        if col_obj is None:
+            return None
+        bt = self.index_manager.get_btree(ti.name, col_name)
+        if bt is None:
+            return None
+        try:
+            key = codec_for(col_obj.type, col_obj.type_params).encode_py(lit_value)
+            ref = self.index_manager.lookup_key(ti.name, col_name, key)
+        except CodecError:
+            ref = None
+        if ref is None:
+            return []
+        fast_rows = self._read_row_by_slot(ti, ref)
+        return self._slice_and_project(
+            stmt, fast_rows, proj_idx, _project_legacy_row,
+        )
+
+    def _exec_aggregate_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> list:
+        """Aggregate 5-phase pipeline.
+
+        Phase 1: WHERE filter on raw rows.
+        Phase 2: GROUP BY + aggregate.
+        Phase 3: HAVING filter on aggregate rows.
+        Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal).
+        Phase 5: project to SELECT list shape.
+        """
+        if not stmt.select_items:
+            raise ExecutionError(
+                "SELECT * with GROUP BY requires explicit select_items",
+            )
+        # Phase 1: WHERE filter on raw rows.
+        raw_rows: list[list[Any]] = []
+        for _sid, vals, _pid in self._scan_table(ti):
+            if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
+                continue
+            raw_rows.append(list(vals))
+        # Phase 2: GROUP BY + aggregate
+        agg_rows = apply_aggregation(raw_rows, stmt, schema)
+        # Phase 3: HAVING
+        if stmt.having is not None:
+            agg_rows = apply_having(
+                agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
+                schema,
+            )
+        # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
+        if stmt.order_by:
+            agg_rows = apply_order_limit_phase1(
+                agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
+            )
+        agg_rows = _apply_limit_offset(stmt, agg_rows)
+        # Phase 5: project to SELECT list shape; returns Row objects.
+        return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
+
+    def _exec_scan_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+        proj_idx: list[int],
+    ) -> list[list[Any]]:
+        """Legacy scan path: WHERE filter -> ORDER BY -> OFFSET/LIMIT -> project."""
         rows: list[tuple[int, list[Any], int]] = []
         for sid, vals, pid in self._scan_table(ti):
             if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
@@ -1308,17 +1388,27 @@ class Executor:
         if stmt.order_by:
             rows = self._stable_sort(rows, stmt.order_by, schema)
 
-        if stmt.offset:
-            rows = rows[stmt.offset:]
-        if stmt.limit is not None:
-            rows = rows[:stmt.limit]
+        return self._slice_and_project(
+            stmt, rows, proj_idx, _project_legacy_row,
+        )
 
+    def _slice_and_project(
+        self,
+        stmt: Select,
+        rows: list[tuple[int, list[Any], int]],
+        proj_idx: list[int],
+        project,
+    ) -> list[list[Any]]:
+        """Apply OFFSET / LIMIT / projection to a list of (sid, vals, pid) rows.
+
+        ``project`` is the per-row projector (e.g. ``_project_legacy_row``)
+        so callers can supply the legacy-row or aggregate-row projection
+        without duplicating the slice-and-iterate scaffold.
+        """
+        rows = _apply_limit_offset(stmt, rows)
         results: list[list[Any]] = []
         for _sid, vals, _pid in rows:
-            if stmt.columns == ("*",):
-                results.append(list(vals))
-            else:
-                results.append([vals[i] for i in proj_idx])
+            results.append(project(stmt, vals, proj_idx))
         return results
 
     def _stable_sort(
@@ -1398,72 +1488,18 @@ class Executor:
         schema = ti.schema_v2
 
         # 1) Validate SET columns + literal types
-        col_name_to_idx = {n: i for i, (n, _, *_) in enumerate(schema)}
-        for col_name, expr in stmt.sets:
-            if col_name not in col_name_to_idx:
-                raise ExecutionError(f"unknown column {col_name!r}")
-            if not isinstance(expr, EqualsExpr):
-                raise ExecutionError("SET right-hand side must be a literal")
-            col_type = schema[col_name_to_idx[col_name]][1]
-            col_params = schema[col_name_to_idx[col_name]][2] if len(schema[col_name_to_idx[col_name]]) >= 3 else ()
-            try:
-                codec_for(col_type, col_params).validate(expr.value)
-            except (TypeError, ValueError, OverflowError) as e:
-                raise TypeError(
-                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
-                ) from e
+        col_name_to_idx = self._validate_update_sets(stmt, schema)
 
-        # 2) Collect matches
-        matches: list[tuple[int, int, list[Any]]] = []
-        for sid, vals, pid in self._scan_table(ti):
-            if stmt.where is None or eval_expr(stmt.where, vals, schema):
-                matches.append((pid, sid, vals))
+        # 2-3) Collect matches and group by page
+        matches = self._collect_update_matches(stmt, ti, schema)
+        by_page = _group_matches_by_page(matches)
 
-        # 3) Group by page
-        by_page: dict[int, list[tuple[int, list[Any]]]] = {}
-        for pid, sid, vals in matches:
-            by_page.setdefault(pid, []).append((sid, vals))
-
-        # 4) Per-page in-place update + fallback
-        #    For each updated row, compute (old_vals, new_vals) index deltas
-        #    and apply them AFTER the write so the index always references
-        #    a live slot. In-place updates keep the same (pid, sid); the
-        #    fallback path (delete + reinsert or chain) gets a NEW (pid, sid).
+        # 4-5) Apply updates page by page; drain pending chain inserts after each flush
         for pid, sid_vals_list in by_page.items():
             page = SlottedPage.from_bytes(pid, self._txn_read_page(pid))
-            pending_chain_inserts: list[tuple[list, list, bytes]] = []
-            for sid, vals in sid_vals_list:
-                old_vals = list(vals)
-                new_vals = list(vals)
-                for col_name, expr in stmt.sets:
-                    new_vals[col_name_to_idx[col_name]] = expr.value
-                new_bytes = encode_row(new_vals, schema)
-
-                old_slot = page.slots[sid]
-                grew = len(new_bytes) > old_slot.length
-                if not grew:
-                    try:
-                        page.update(sid, new_bytes)
-                        # In-place: slot_ref stays (pid, sid).
-                        self._update_index_for_row(
-                            ti, old_vals, new_vals, (pid, sid),
-                        )
-                        continue
-                    except PageFull:
-                        grew = True
-                # Fallback: grew == True → delete + insert (or chain)
-                if old_slot.flags & FLAG_SPILL_START:
-                    self._free_overflow_chain(pid)
-                page.delete(sid)
-                try:
-                    new_sid = page.insert(new_bytes)
-                    # Delete old index entries (slot gone), insert new.
-                    self._update_index_for_row(
-                        ti, old_vals, new_vals, (pid, new_sid),
-                    )
-                except PageFull:
-                    pending_chain_inserts.append((old_vals, new_vals, new_bytes))
-
+            pending_chain_inserts = self._apply_page_updates(
+                ti, pid, page, sid_vals_list, stmt, schema, col_name_to_idx,
+            )
             # Flush this page before chain inserts (may advance next_page_id).
             self._txn_write_page(pid, page.to_bytes())
             for old_vals, new_vals, new_bytes in pending_chain_inserts:
@@ -1476,6 +1512,99 @@ class Executor:
 
         self.pager.flush()
         return []
+
+    def _validate_update_sets(
+        self, stmt: Update, schema: list[tuple],
+    ) -> dict[str, int]:
+        """Validate SET clauses against the schema. Returns name->index map.
+
+        For each ``col = literal`` assignment:
+          * column must exist in the schema
+          * right-hand side must be an ``EqualsExpr`` literal (no expressions)
+          * literal value must satisfy the column's codec
+        """
+        col_name_to_idx = schema_name_index(schema)
+        for col_name, expr in stmt.sets:
+            if col_name not in col_name_to_idx:
+                raise ExecutionError(f"unknown column {col_name!r}")
+            if not isinstance(expr, EqualsExpr):
+                raise ExecutionError("SET right-hand side must be a literal")
+            col_type, col_params = col_type_and_params(
+                schema[col_name_to_idx[col_name]],
+            )
+            try:
+                codec_for(col_type, col_params).validate(expr.value)
+            except CodecError as e:
+                raise TypeError(
+                    f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
+                ) from e
+        return col_name_to_idx
+
+    def _collect_update_matches(
+        self,
+        stmt: Update,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> list[tuple[int, int, list[Any]]]:
+        """Return ``[(page_id, slot_id, vals), ...]`` for rows matching WHERE."""
+        matches: list[tuple[int, int, list[Any]]] = []
+        for sid, vals, pid in self._scan_table(ti):
+            if stmt.where is None or eval_expr(stmt.where, vals, schema):
+                matches.append((pid, sid, vals))
+        return matches
+
+    def _apply_page_updates(
+        self,
+        ti: TableInfo,
+        pid: int,
+        page: "SlottedPage",
+        sid_vals_list: list[tuple[int, list[Any]]],
+        stmt: Update,
+        schema: list[tuple],
+        col_name_to_idx: dict[str, int],
+    ) -> list[tuple[list, list, bytes]]:
+        """Apply in-place updates on a single page; return chain-insert queue.
+
+        For each (sid, vals):
+          * build new row bytes from ``stmt.sets``
+          * try in-place update; on PageFull, fall back to delete+insert
+          * if the fallback also overflows the page, queue for chain insert
+        Updates ``page`` in-place (caller flushes). The ``pid`` parameter
+        is needed for index maintenance and overflow-chain reclamation
+        because both reference the underlying page id.
+        """
+        pending_chain_inserts: list[tuple[list, list, bytes]] = []
+        for sid, vals in sid_vals_list:
+            old_vals = list(vals)
+            new_vals = list(vals)
+            for col_name, expr in stmt.sets:
+                new_vals[col_name_to_idx[col_name]] = expr.value
+            new_bytes = encode_row(new_vals, schema)
+
+            old_slot = page.slots[sid]
+            grew = len(new_bytes) > old_slot.length
+            if not grew:
+                try:
+                    page.update(sid, new_bytes)
+                    # In-place: slot_ref stays (pid, sid).
+                    self._update_index_for_row(
+                        ti, old_vals, new_vals, (pid, sid),
+                    )
+                    continue
+                except PageFull:
+                    grew = True
+            # Fallback: grew == True -> delete + insert (or chain)
+            if old_slot.flags & FLAG_SPILL_START:
+                self._free_overflow_chain(pid)
+            page.delete(sid)
+            try:
+                new_sid = page.insert(new_bytes)
+                self._update_index_for_row(
+                    ti, old_vals, new_vals, (pid, new_sid),
+                )
+            except PageFull:
+                pending_chain_inserts.append((old_vals, new_vals, new_bytes))
+        return pending_chain_inserts
 
     # --- B+tree fast-path helpers (Task 7) ----------------------------------
 
@@ -1573,12 +1702,17 @@ class Executor:
         page_id, slot_id = slot_ref
         raw = self._txn_read_page(page_id)
         page = SlottedPage.from_bytes(page_id, raw)
-        slot = page.slots[slot_id]
-        if slot.flags & FLAG_TOMBSTONE:
-            return []
-        row_bytes = page.get(slot_id)
+        row_bytes = self._read_slot_row_bytes(page, slot_id, page_id)
         if row_bytes is None:
             return []
-        if slot.flags & FLAG_SPILL_START:
-            row_bytes = row_bytes + self._read_overflow_chain(page_id)
         return [(slot_id, decode_row(row_bytes, ti.schema_v2), page_id)]
+
+
+def _group_matches_by_page(
+    matches: list[tuple[int, int, list[Any]]],
+) -> dict[int, list[tuple[int, list[Any]]]]:
+    """Group UPDATE matches by page id (drops the page id from each triple)."""
+    by_page: dict[int, list[tuple[int, list[Any]]]] = {}
+    for pid, sid, vals in matches:
+        by_page.setdefault(pid, []).append((sid, vals))
+    return by_page
