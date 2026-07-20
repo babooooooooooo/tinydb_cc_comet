@@ -25,9 +25,10 @@ def encode_row(values: list, schema: list) -> bytes:
 
     Bitmap is LSB-first: column 0 -> bit 0 of byte 0, column 1 -> bit 1, ...
 
-    Callers SHOULD pre-validate types via type_system.py_to_db for strict
-    type checking (e.g., reject bool-as-INT, NaN/Inf FLOAT). This module
-    performs mechanical encoding only.
+    Callers SHOULD pre-validate types via
+    ``codec_for(type, params).validate(value)`` for strict type checking
+    (e.g., reject bool-as-INT, NaN/Inf FLOAT). This module performs mechanical
+    encoding only.
     """
     if len(values) != len(schema):
         raise ValueError(f"values count {len(values)} != schema columns {len(schema)}")
