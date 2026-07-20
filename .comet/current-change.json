@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "change": null,
-  "branch": null
+  "change": "codec-exception-consistency",
+  "branch": "feature/20260720/codec-exception-consistency"
 }

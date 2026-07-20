@@ -1,0 +1,13 @@
+{
+  "change": "codec-exception-consistency",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "44b7851f7e12ab2c47d67965c66ef0ac473c8b941f8a0eac75f8f7518c1fd681",
+  "files": [
+    { "path": "openspec/changes/codec-exception-consistency/proposal.md", "sha256": "a58ddc8c17feb408e69c8a9919b22448183c9ddd3dc9550800ffc66ce8e80d2c" },
+    { "path": "openspec/changes/codec-exception-consistency/design.md", "sha256": "d9056265e1686bc0a08575f4c1292b89bf6cd44d44351179b0361a0ebd6c9528" },
+    { "path": "openspec/changes/codec-exception-consistency/tasks.md", "sha256": "1258a7b6df31c4d7db542cecf358e132025b723d650aad33e4387ac82cc10466" }
+  ]
+}

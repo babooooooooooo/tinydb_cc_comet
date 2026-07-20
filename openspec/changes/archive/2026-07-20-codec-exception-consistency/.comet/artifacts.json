@@ -1,0 +1,10 @@
+{
+  "openspec_proposal": "openspec/changes/codec-exception-consistency/proposal.md",
+  "openspec_design": "openspec/changes/codec-exception-consistency/design.md",
+  "openspec_tasks": "openspec/changes/codec-exception-consistency/tasks.md",
+  "design_document": "docs/superpowers/specs/2026-07-20-codec-exception-consistency-design.md",
+  "build_plan": "docs/superpowers/plans/2026-07-20-codec-exception-consistency.md",
+  "build_tasks_complete": "openspec/changes/codec-exception-consistency/tasks.md",
+  "handoff_context": "openspec/changes/codec-exception-consistency/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/codec-exception-consistency/.comet/handoff/design-context.md"
+}

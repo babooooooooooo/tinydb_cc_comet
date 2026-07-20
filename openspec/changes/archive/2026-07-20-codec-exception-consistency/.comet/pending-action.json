@@ -1,0 +1,6 @@
+{
+  "id": "classic-archive:codec-exception-consistency",
+  "stepId": "full.archive.execute",
+  "type": "checkpoint",
+  "ref": "codec-exception-consistency"
+}
