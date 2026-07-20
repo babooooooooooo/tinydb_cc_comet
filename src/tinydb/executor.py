@@ -43,6 +43,7 @@ from tinydb._schema import (
 )
 from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
 from tinydb.type_system import (
+    CodecError,
     codec_for,
     infer_literal_type,
     validate_compare_types,
@@ -81,7 +82,7 @@ def eval_expr(expr: Any, row: list, schema: list) -> bool:
         validate_compare_types(col_type, col_params, lit_type, lit_params)
         try:
             codec_for(col_type, col_params).validate(expr.value)
-        except (TypeError, ValueError, OverflowError) as e:
+        except CodecError as e:
             raise TypeError(
                 f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
             ) from e
@@ -1253,7 +1254,7 @@ class Executor:
                             ref = self.index_manager.lookup_key(
                                 ti.name, col_name, key
                             )
-                        except (TypeError, ValueError, OverflowError):
+                        except CodecError:
                             ref = None
                         if ref is None:
                             return []
@@ -1412,7 +1413,7 @@ class Executor:
             col_type, col_params = col_type_and_params(schema[col_name_to_idx[col_name]])
             try:
                 codec_for(col_type, col_params).validate(expr.value)
-            except (TypeError, ValueError, OverflowError) as e:
+            except CodecError as e:
                 raise TypeError(
                     f"{col_type} vs {_python_type_to_db_type(expr.value)}: {e}"
                 ) from e

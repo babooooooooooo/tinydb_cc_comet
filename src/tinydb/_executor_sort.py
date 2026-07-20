@@ -11,7 +11,7 @@ from typing import Any
 
 from tinydb._schema import col_type_and_params, schema_name_index
 from tinydb.errors import ExecutionError
-from tinydb.type_system import codec_for
+from tinydb.type_system import CodecError, codec_for
 
 
 def stable_sort(
@@ -44,7 +44,7 @@ def stable_sort(
             try:
                 codec_for(col_type, col_params).validate(v1)
                 codec_for(col_type, col_params).validate(v2)
-            except (TypeError, ValueError, OverflowError) as e:
+            except CodecError as e:
                 raise ExecutionError(
                     f"column {it.column!r}: {e}"
                 ) from e

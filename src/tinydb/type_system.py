@@ -1,4 +1,18 @@
-"""4-type system: INT/TEXT/FLOAT/BOOL encode/decode + literal parse + py_to_db/db_to_py + validate_compare. <= 150 lines."""
+"""Type system: codecs for INT/TEXT/FLOAT/BOOL/DECIMAL/DATE/TIME/TIMESTAMP/VARCHAR/CHAR/etc.
+
+Two parallel surfaces coexist by design:
+
+- **Legacy module-level helpers** (``encode_int``/``decode_int``/
+  ``py_to_db``/``db_to_py``/...) — kept for direct callers that pre-date
+  the codec registry. Used by ``catalog`` and a few internal paths.
+
+- **Codec registry** (``REGISTRY`` + ``TypeCodec`` Protocol) — the
+  canonical type contract. Every ``validate()`` raises :class:`CodecError`
+  so call sites have a single exception type to handle.
+
+Parametric types (VARCHAR(N), CHAR(N), DECIMAL(p,s)) are stored as codec
+classes in the registry and instantiated per-call by :func:`codec_for`.
+"""
 
 import datetime as _dt
 import math
@@ -9,6 +23,20 @@ _INT_FMT = ">q"  # signed 64-bit big-endian
 _INT_SIZE = 8
 _EPOCH_DATE = _dt.date(1970, 1, 1)  # DATE days-since-epoch origin
 _EPOCH_DT = _dt.datetime(1970, 1, 1)  # TIMESTAMP seconds-since-epoch origin
+
+
+class CodecError(TypeError, ValueError, OverflowError):
+    """Raised by a TypeCodec when a value violates the codec's contract.
+
+    Multi-inherits ``TypeError``/``ValueError``/``OverflowError`` so that
+    legacy ``except (TypeError, ValueError, OverflowError)`` blocks
+    continue to work unmodified; new code should catch ``CodecError``
+    directly to make intent clear.
+
+    Carries no extra payload — the message is the diagnostic.
+    """
+
+    pass
 
 
 def encode_int(value: int) -> bytes:
@@ -279,10 +307,10 @@ class _IntCodec:
 
     def validate(self, value):
         if not isinstance(value, int) or isinstance(value, bool):
-            raise TypeError(f"expected int for {self.name}, got {type(value).__name__}")
+            raise CodecError(f"expected int for {self.name}, got {type(value).__name__}")
         _, lo, hi = self._spec
         if not (lo <= value < hi):
-            raise OverflowError(f"{self.name} out of range: {value}")
+            raise CodecError(f"{self.name} out of range: {value}")
 
 
 class _TextCodec:
@@ -310,7 +338,7 @@ class _TextCodec:
 
     def validate(self, value):
         if not isinstance(value, str):
-            raise TypeError(f"expected str for TEXT, got {type(value).__name__}")
+            raise CodecError(f"expected str for TEXT, got {type(value).__name__}")
 
 
 class _BoolCodec:
@@ -335,7 +363,7 @@ class _BoolCodec:
 
     def validate(self, value):
         if not isinstance(value, bool):
-            raise TypeError(f"expected bool for BOOL, got {type(value).__name__}")
+            raise CodecError(f"expected bool for BOOL, got {type(value).__name__}")
 
 
 class _FloatCodec:
@@ -364,9 +392,9 @@ class _FloatCodec:
 
     def validate(self, value):
         if not isinstance(value, float):
-            raise TypeError(f"expected float for {self.name}, got {type(value).__name__}")
+            raise CodecError(f"expected float for {self.name}, got {type(value).__name__}")
         if math.isnan(value) or math.isinf(value):
-            raise ValueError(f"{self.name} inf/NaN not allowed: {value!r}")
+            raise CodecError(f"{self.name} inf/NaN not allowed: {value!r}")
 
 
 class _VarcharCodec:
@@ -394,7 +422,7 @@ class _VarcharCodec:
         return v
     def validate(self, value):
         if not isinstance(value, str):
-            raise TypeError(f"expected str for VARCHAR, got {type(value).__name__}")
+            raise CodecError(f"expected str for VARCHAR, got {type(value).__name__}")
         self._check(len(value.encode("utf-8")))
 
 
@@ -429,7 +457,7 @@ class _DecimalCodec:
     def parse_literal(self, text, params):
         return self._to_scaled(float(text)) / self._factor
     def validate(self, value):
-        if not isinstance(value, (int, float)) or isinstance(value, bool): raise TypeError(f"expected number for DECIMAL, got {type(value).__name__}")
+        if not isinstance(value, (int, float)) or isinstance(value, bool): raise CodecError(f"expected number for DECIMAL, got {type(value).__name__}")
         self._to_scaled(value)
 
 
@@ -445,7 +473,7 @@ class _DateCodec:
         try: return _dt.date.fromisoformat(text)
         except ValueError as e: raise ValueError(f"DATE literal invalid: {text!r} ({e})") from e
     def validate(self, value):
-        if not isinstance(value, _dt.date): raise TypeError(f"expected date for DATE, got {type(value).__name__}")
+        if not isinstance(value, _dt.date): raise CodecError(f"expected date for DATE, got {type(value).__name__}")
 
 
 class _TimeCodec:
@@ -464,7 +492,7 @@ class _TimeCodec:
         try: return _dt.time.fromisoformat(text)
         except ValueError as e: raise ValueError(f"TIME literal invalid: {text!r} ({e})") from e
     def validate(self, value):
-        if not isinstance(value, _dt.time): raise TypeError(f"expected time for TIME, got {type(value).__name__}")
+        if not isinstance(value, _dt.time): raise CodecError(f"expected time for TIME, got {type(value).__name__}")
 
 
 class _TimestampCodec:
@@ -479,7 +507,7 @@ class _TimestampCodec:
         try: return _dt.datetime.fromisoformat(text)
         except ValueError as e: raise ValueError(f"TIMESTAMP literal invalid: {text!r} ({e})") from e
     def validate(self, value):
-        if not isinstance(value, _dt.datetime): raise TypeError(f"expected datetime for TIMESTAMP, got {type(value).__name__}")
+        if not isinstance(value, _dt.datetime): raise CodecError(f"expected datetime for TIMESTAMP, got {type(value).__name__}")
 
 
 # Populate REGISTRY.
