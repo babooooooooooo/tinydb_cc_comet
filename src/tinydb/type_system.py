@@ -124,7 +124,6 @@ def infer_literal_type(value: object) -> tuple[str, tuple]:
     raise TypeError(f"unknown literal type: {type(value).__name__}")
 
 
-# TypeCodec registry; legacy helpers above stay for backward compatibility.
 # Parametric codecs are stored as classes and instantiated by codec_for().
 
 
@@ -171,7 +170,6 @@ def codec_for(type_name: str, params: tuple = ()):
     return entry(*params) if isinstance(entry, type) else entry
 
 
-# Codec implementations; legacy helpers above remain for backward compatibility.
 # FLOAT is 4-byte single precision; integer width selects SMALLINT/INT/BIGINT.
 
 
@@ -188,11 +186,8 @@ class _IntCodec:
                 8: (">q", -(2**63), 2**63)}[self.width]
 
     def encode_py(self, value):
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise CodecError(f"expected int for {self.name}, got {type(value).__name__}")
-        fmt, lo, hi = self._spec
-        if not (lo <= value < hi):
-            raise OverflowError(f"{self.name} out of range: {value}")
+        self.validate(value)
+        fmt, _, _ = self._spec
         return struct.pack(fmt, value)
 
     def decode_bytes(self, buf, offset):
@@ -275,10 +270,7 @@ class _FloatCodec:
     width = 4  # DOUBLE sets width=8
 
     def encode_py(self, value):
-        if not isinstance(value, float):
-            raise CodecError(f"expected float for {self.name}, got {type(value).__name__}")
-        if math.isnan(value) or math.isinf(value):
-            raise CodecError(f"{self.name} inf/NaN not allowed: {value!r}")
+        self.validate(value)
         return struct.pack(">f" if self.width == 4 else ">d", value)
 
     def decode_bytes(self, buf, offset):
@@ -309,7 +301,7 @@ class _VarcharCodec:
         self.max_len = max_len
     def _check(self, n: int) -> None:
         if n > self.max_len:
-            raise TypeError(f"VARCHAR({self.max_len}) length {n} exceeds max")
+            raise CodecError(f"VARCHAR({self.max_len}) length {n} exceeds max")
     def encode_py(self, value):
         data = value.encode("utf-8"); self._check(len(data))
         return struct.pack(">H", len(data)) + data
@@ -334,7 +326,7 @@ class _CharCodec(_VarcharCodec):
     name = "CHAR"
     def encode_py(self, value):
         d = value.encode("utf-8")
-        if len(d) > self.max_len: raise TypeError(f"CHAR({self.max_len}) length {len(d)} exceeds max")
+        if len(d) > self.max_len: raise CodecError(f"CHAR({self.max_len}) length {len(d)} exceeds max")
         return struct.pack(">H", self.max_len) + (value + " " * (self.max_len - len(d))).encode("utf-8")
 
 
