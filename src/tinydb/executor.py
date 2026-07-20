@@ -15,7 +15,6 @@ wrapper installed on every B+tree also routes reads/writes/frees
 through ``_txn_*`` helpers so B+tree updates participate in the active
 txn.
 """
-import copy
 from collections import defaultdict
 from typing import Any, Optional, Union
 
@@ -26,8 +25,8 @@ from tinydb.pager import Pager
 from tinydb.parser import (
     Begin, Commit, Rollback,
     CreateTable, DropTable, Insert, Select, Delete, Update,
-    EqualsExpr, AndExpr, OrExpr, NotExpr, OrderByItem,
-    AggregateCall, SelectItem,
+    EqualsExpr, AndExpr, OrExpr, NotExpr,
+    AggregateCall,
 )
 from tinydb.transaction import Transaction
 from tinydb.row_codec import decode_row, encode_row
@@ -41,7 +40,6 @@ from tinydb._schema import (
     schema_name_index,
     ti_name_index,
 )
-from tinydb.btree import InternalNode, NODE_TYPE_INTERNAL
 from tinydb.parser import default_alias as _aggregate_default_alias
 from tinydb.type_system import (
     CodecError,
@@ -343,7 +341,7 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
     return out
 
 
-def _project_aggregate_row(row, stmt, schema) -> "Row":
+def _project_aggregate_row(row, stmt, schema):
     """Project aggregate Row to SELECT list shape.
 
     - SELECT *: pass through row unchanged.
@@ -412,7 +410,6 @@ def _project_legacy_row(
     if stmt.columns == ("*",):
         return list(vals)
     return [vals[i] for i in proj_idx]
-    return Row(values=tuple(out_vals), columns=tuple(out_cols))
 
 
 def _neg_for_sort(v):

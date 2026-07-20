@@ -11,7 +11,6 @@ from tinydb.wal import (
     PAGE_WRITE,
     COMMIT,
     ROLLBACK,
-    CHECKPOINT,
 )
 
 # Re-entry guard: ``Pager.__init__`` calls ``_init_wal`` which invokes

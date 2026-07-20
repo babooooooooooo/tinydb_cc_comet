@@ -21,10 +21,10 @@ across many rows (see e.g. ``_exec_select``).
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 if TYPE_CHECKING:
-    from tinydb.catalog import Column, Row, TableInfo
+    from tinydb.catalog import Row, TableInfo
 
 
 def col_type_and_params(col: tuple) -> tuple[str, tuple]:

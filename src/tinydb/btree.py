@@ -44,7 +44,6 @@ class LeafNode:
         off = HEADER_SIZE
         for i, key in enumerate(self.keys):
             tomb = TOMBSTONE_FLAG if (i < len(self.tombstones) and self.tombstones[i]) else 0
-            meta = bytes([tomb])
             key_len = len(key)
             if off + 1 + 2 + key_len + 8 > PAGE_SIZE:
                 raise ValueError(f"leaf overflow at entry {i}")
