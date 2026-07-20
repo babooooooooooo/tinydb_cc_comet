@@ -20,7 +20,7 @@ created_at: 2026-07-20
 verified_at: 2026-07-20
 archive_confirmation: confirmed
 archived: true
-handoff_context: openspec/changes/codec-exception-consistency/.comet/handoff/design-context.json
+handoff_context: openspec/changes/archive/2026-07-20-codec-exception-consistency/.comet/handoff/design-context.json
 direct_override: null
 handoff_hash: 44b7851f7e12ab2c47d67965c66ef0ac473c8b941f8a0eac75f8f7518c1fd681
 classic_profile: full
