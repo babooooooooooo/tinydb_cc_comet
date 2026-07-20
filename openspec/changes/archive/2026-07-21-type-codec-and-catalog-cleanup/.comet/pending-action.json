@@ -1,0 +1,6 @@
+{
+  "id": "classic-archive:type-codec-and-catalog-cleanup",
+  "stepId": "full.archive.execute",
+  "type": "checkpoint",
+  "ref": "type-codec-and-catalog-cleanup"
+}
