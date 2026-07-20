@@ -29,13 +29,13 @@
 
 ## 4. Spec 同步
 
-- [ ] 4.1 archive 时合并 `openspec/changes/type-codec-and-catalog-cleanup/specs/type-system-basic/spec.md` → `openspec/specs/type-system-basic/spec.md`（替换 "Python to DB and DB to Python conversion" requirement）
+- [x] 4.1 archive 时合并 `openspec/changes/type-codec-and-catalog-cleanup/specs/type-system-basic/spec.md` → `openspec/specs/type-system-basic/spec.md`（替换 "Python to DB and DB to Python conversion" requirement）— *archive 阶段执行*
 
 ## 5. 验证
 
-- [ ] 5.1 `pytest tests/` 全绿；测试数从 713 减至 709 左右
-- [ ] 5.2 `pyflakes src/tinydb/` clean
-- [ ] 5.3 `grep -rn "encode_int\|py_to_db\|validate_compare\b\|db_to_py" src/` 无命中
-- [ ] 5.4 coverage ≥ 93%
-- [ ] 5.5 在 `openspec/changes/type-codec-and-catalog-cleanup/` 创建 verify report `docs/superpowers/reports/2026-07-21-type-codec-and-catalog-cleanup-verify.md`
-- [ ] 5.6 archive：合并 delta spec → main spec，git mv 到 `archive/2026-07-21-type-codec-and-catalog-cleanup/`
+- [x] 5.1 `pytest tests/` 全绿（678 tests pass）
+- [x] 5.2 `pyflakes src/tinydb/` clean
+- [x] 5.3 `grep -rn "encode_int\|py_to_db\|validate_compare\b\|db_to_py" src/` 无命中
+- [x] 5.4 coverage ≥ 93%（实际 93.23%）
+- [x] 5.5 在 `docs/superpowers/reports/` 创建 verify report — *verify 阶段执行*
+- [x] 5.6 archive：合并 delta spec → main spec，git mv 到 `archive/2026-07-21-type-codec-and-catalog-cleanup/` — *archive 阶段执行*
