@@ -28,10 +28,8 @@ CHAIN_THRESHOLD = CHAIN_BODY_SIZE - 64  # safety margin below CHAIN_BODY_SIZE
 class Column:
     """Column metadata with column-level constraints.
 
-    Persisted as a JSON object (see ``to_dict``/``from_dict``). Legacy
-    catalogs that stored schema as ``[[name, type], ...]`` are loaded
-    with the SQL92 defaults: ``nullable=True``, ``unique=False``,
-    ``primary_key=False`` (D3 裁决).
+    Persisted as a JSON object produced and consumed by
+    ``to_dict``/``from_dict``.
     """
 
     name: str
@@ -96,16 +94,14 @@ def _dec_int(v) -> int:
 
 
 def _load_column(item) -> Column:
-    """Dual-format loader: accepts legacy ``[name, type]`` arrays and new
-    ``{name, type, nullable, unique, primary_key}`` objects. Mixed forms
-    inside a single table are not allowed (R1 mitigation)."""
-    if isinstance(item, list):
-        if len(item) == 2 and isinstance(item[0], str) and isinstance(item[1], str):
-            return Column(name=item[0], type=item[1])
-        raise InvalidDatabaseFile(f"unrecognized column entry: {item!r}")
-    if isinstance(item, dict):
-        return Column.from_dict(item)
-    raise InvalidDatabaseFile(f"unrecognized column entry: {item!r}")
+    """Load column from v2 object format produced by Column.to_dict()."""
+    if not isinstance(item, dict):
+        raise InvalidDatabaseFile(
+            f"unrecognized column entry: {item!r} "
+            "(expected Column.to_dict() object form; legacy [name, type] arrays "
+            "are no longer supported — please migrate to v2 object format)"
+        )
+    return Column.from_dict(item)
 
 
 class Catalog:
@@ -121,14 +117,7 @@ class Catalog:
         c = cls()
         for name, info in data.get("tables", {}).items():
             schema_entries = info["schema"]
-            # R1 mitigation (D3): a single table's schema must be uniformly
-            # legacy-list or new-object format. Mixing is a serialization bug.
-            kinds = {type(item).__name__ for item in schema_entries}
-            if len(kinds) > 1:
-                raise InvalidDatabaseFile(
-                    f"table {name!r}: mixed legacy/new column formats not allowed"
-                )
-            cols = tuple(_load_column(c_) for c_ in schema_entries)
+            cols = tuple(_load_column(item) for item in schema_entries)
             c.tables[name] = TableInfo(
                 name=name,
                 columns=cols,
@@ -156,18 +145,13 @@ class Catalog:
     def create_table(
         self,
         name: str,
-        schema,  # tuple[Column, ...] or list[tuple[str, str]] (legacy)
+        schema: tuple[Column, ...],
         root_page_id: int,
         next_page_id: int,
     ) -> None:
         if name in self.tables:
             raise ValueError(f"table {name!r} already exists")
-        # Accept both Column tuples and legacy ``[(name, type), ...]`` so
-        # existing callers keep working during migration.
-        if schema and isinstance(schema[0], Column):
-            cols: tuple[Column, ...] = tuple(schema)
-        else:
-            cols = tuple(Column(name=n, type=t) for n, t in schema)
+        cols: tuple[Column, ...] = tuple(schema)
         self.tables[name] = TableInfo(
             name=name,
             columns=cols,
