@@ -380,6 +380,25 @@ def _project_aggregate_row(row, stmt, schema) -> "Row":
     return Row(values=tuple(out_vals), columns=tuple(out_cols))
 
 
+def _project_legacy_row(
+    stmt: "Select",
+    vals: list,
+    proj_idx: list[int],
+) -> list:
+    """Per-row projector for the legacy / scan SELECT path.
+
+    Mirrors the inline pattern that used to live in ``_exec_select``:
+    a ``SELECT *`` returns a copy of ``vals``; a named-column projection
+    picks ``vals[i]`` for each index in ``proj_idx``. Pulled into a
+    module-level function so ``_slice_and_project`` can be reused by
+    both the indexed fast path and the full scan path.
+    """
+    if stmt.columns == ("*",):
+        return list(vals)
+    return [vals[i] for i in proj_idx]
+    return Row(values=tuple(out_vals), columns=tuple(out_cols))
+
+
 def _neg_for_sort(v):
     """Negate numeric values for DESC ordering (works for int and float)."""
     if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -1177,15 +1196,43 @@ class Executor:
         # eval_expr / _stable_sort honors parametric types (Task 17).
         schema = ti.schema_v2
 
+        proj_idx, aggregate_path = self._validate_select(stmt, ti, schema)
+
+        # B+tree fast path (non-aggregate only).
+        if not aggregate_path and stmt.where is not None:
+            fast = self._exec_indexed_select(stmt, ti, schema, proj_idx)
+            if fast is not None:
+                return fast
+
+        # Aggregate path (5-phase pipeline).
+        if aggregate_path:
+            return self._exec_aggregate_select(stmt, ti, schema)
+
+        # Legacy / non-aggregate path.
+        return self._exec_scan_select(stmt, ti, schema, proj_idx)
+
+    def _validate_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> tuple[list[int], bool]:
+        """Validate SELECT clauses that must hold for any path.
+
+        Returns ``(proj_idx, aggregate_path)``:
+          * ``proj_idx``: ordered list of column indices for the
+            named-column projection, or empty list for ``SELECT *``.
+            Empty on the aggregate path (projection handled by
+            ``_project_aggregate_row``).
+          * ``aggregate_path``: True iff this query uses aggregates or
+            GROUP BY and should be routed to the aggregation pipeline.
+        """
         # Validate LIMIT/OFFSET non-negative.
         if stmt.offset is not None and stmt.offset < 0:
             raise ExecutionError(f"OFFSET must be non-negative, got {stmt.offset}")
         if stmt.limit is not None and stmt.limit < 0:
             raise ExecutionError(f"LIMIT must be non-negative, got {stmt.limit}")
 
-        # --- Detect aggregate path -----------------------------------------
-        # Both ``aggregate_aliases`` (set when any SelectItem.kind == 'aggregate')
-        # and ``group_by`` (non-empty GROUP BY clause) trigger the aggregate path.
         uses_agg = bool(stmt.aggregate_aliases)
         uses_group = bool(stmt.group_by)
         aggregate_path = uses_agg or uses_group
@@ -1211,80 +1258,100 @@ class Executor:
                     raise ExecutionError(f"unknown column {cname!r}")
                 proj_idx.append(name_to_idx[cname])
 
-        # --- B+tree fast path (non-aggregate only) -------------------------
-        # Single-equality WHERE on an indexed column short-circuits the full
-        # scan: encode the literal with the column's codec, look it up in the
-        # per-(table,col) B+tree, and read at most one row by (page_id,
-        # slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
-        if (
-            not aggregate_path
-            and stmt.where is not None
-            and self._is_single_eq_on_indexed(stmt.where, ti)
-        ):
-            col_name, lit_value = self._parse_single_eq(stmt.where)
-            if col_name is not None:
-                col_obj = next((c for c in ti.columns if c.name == col_name), None)
-                if col_obj is not None:
-                    bt = self.index_manager.get_btree(ti.name, col_name)
-                    if bt is not None:
-                        try:
-                            key = codec_for(
-                                col_obj.type, col_obj.type_params
-                            ).encode_py(lit_value)
-                            ref = self.index_manager.lookup_key(
-                                ti.name, col_name, key
-                            )
-                        except CodecError:
-                            ref = None
-                        if ref is None:
-                            return []
-                        fast_rows = self._read_row_by_slot(ti, ref)
-                        # Apply OFFSET / LIMIT / projection.
-                        if stmt.offset:
-                            fast_rows = fast_rows[stmt.offset:]
-                        if stmt.limit is not None:
-                            fast_rows = fast_rows[:stmt.limit]
-                        results: list[list[Any]] = []
-                        for _sid, vals, _pid in fast_rows:
-                            if stmt.columns == ("*",):
-                                results.append(list(vals))
-                            else:
-                                results.append([vals[i] for i in proj_idx])
-                        return results
+        return proj_idx, aggregate_path
 
-        # --- Aggregate path (5-phase pipeline) -----------------------------
-        if aggregate_path:
-            if not stmt.select_items:
-                raise ExecutionError(
-                    "SELECT * with GROUP BY requires explicit select_items",
-                )
-            # Phase 1: WHERE filter on raw rows.
-            raw_rows: list[list[Any]] = []
-            for _sid, vals, _pid in self._scan_table(ti):
-                if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
-                    continue
-                raw_rows.append(list(vals))
-            # Phase 2: GROUP BY + aggregate
-            agg_rows = apply_aggregation(raw_rows, stmt, schema)
-            # Phase 3: HAVING
-            if stmt.having is not None:
-                agg_rows = apply_having(
-                    agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
-                    schema,
-                )
-            # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
-            if stmt.order_by:
-                agg_rows = apply_order_limit_phase1(
-                    agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
-                )
-            if stmt.offset:
-                agg_rows = agg_rows[stmt.offset:]
-            if stmt.limit is not None:
-                agg_rows = agg_rows[:stmt.limit]
-            # Phase 5: project to SELECT list shape; returns Row objects.
-            return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
+    def _exec_indexed_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+        proj_idx: list[int],
+    ) -> Optional[list[list[Any]]]:
+        """B+tree indexed-lookup fast path. Returns ``None`` to defer to scan.
 
-        # --- Legacy / non-aggregate path ----------------------------------
+        Single-equality WHERE on an indexed column short-circuits the full
+        scan: encode the literal with the column's codec, look it up in the
+        per-(table,col) B+tree, and read at most one row by (page_id,
+        slot_id). OFFSET/LIMIT still apply; ORDER BY is a no-op for 1 row.
+
+        Returns ``None`` when the WHERE is not a single-equality on an
+        indexed column so the caller can fall through to scan.
+        """
+        if not self._is_single_eq_on_indexed(stmt.where, ti):
+            return None
+        col_name, lit_value = self._parse_single_eq(stmt.where)
+        if col_name is None:
+            return None
+        col_obj = next((c for c in ti.columns if c.name == col_name), None)
+        if col_obj is None:
+            return None
+        bt = self.index_manager.get_btree(ti.name, col_name)
+        if bt is None:
+            return None
+        try:
+            key = codec_for(col_obj.type, col_obj.type_params).encode_py(lit_value)
+            ref = self.index_manager.lookup_key(ti.name, col_name, key)
+        except CodecError:
+            ref = None
+        if ref is None:
+            return []
+        fast_rows = self._read_row_by_slot(ti, ref)
+        return self._slice_and_project(
+            stmt, fast_rows, proj_idx, _project_legacy_row,
+        )
+
+    def _exec_aggregate_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+    ) -> list:
+        """Aggregate 5-phase pipeline.
+
+        Phase 1: WHERE filter on raw rows.
+        Phase 2: GROUP BY + aggregate.
+        Phase 3: HAVING filter on aggregate rows.
+        Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal).
+        Phase 5: project to SELECT list shape.
+        """
+        if not stmt.select_items:
+            raise ExecutionError(
+                "SELECT * with GROUP BY requires explicit select_items",
+            )
+        # Phase 1: WHERE filter on raw rows.
+        raw_rows: list[list[Any]] = []
+        for _sid, vals, _pid in self._scan_table(ti):
+            if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
+                continue
+            raw_rows.append(list(vals))
+        # Phase 2: GROUP BY + aggregate
+        agg_rows = apply_aggregation(raw_rows, stmt, schema)
+        # Phase 3: HAVING
+        if stmt.having is not None:
+            agg_rows = apply_having(
+                agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
+                schema,
+            )
+        # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
+        if stmt.order_by:
+            agg_rows = apply_order_limit_phase1(
+                agg_rows, stmt.order_by, stmt.aggregate_aliases, stmt.group_by,
+            )
+        if stmt.offset:
+            agg_rows = agg_rows[stmt.offset:]
+        if stmt.limit is not None:
+            agg_rows = agg_rows[:stmt.limit]
+        # Phase 5: project to SELECT list shape; returns Row objects.
+        return [_project_aggregate_row(r, stmt, schema) for r in agg_rows]
+
+    def _exec_scan_select(
+        self,
+        stmt: Select,
+        ti: TableInfo,
+        schema: list[tuple],
+        proj_idx: list[int],
+    ) -> list[list[Any]]:
+        """Legacy scan path: WHERE filter -> ORDER BY -> OFFSET/LIMIT -> project."""
         rows: list[tuple[int, list[Any], int]] = []
         for sid, vals, pid in self._scan_table(ti):
             if stmt.where is not None and not eval_expr(stmt.where, vals, schema):
@@ -1294,17 +1361,30 @@ class Executor:
         if stmt.order_by:
             rows = self._stable_sort(rows, stmt.order_by, schema)
 
+        return self._slice_and_project(
+            stmt, rows, proj_idx, _project_legacy_row,
+        )
+
+    def _slice_and_project(
+        self,
+        stmt: Select,
+        rows: list[tuple[int, list[Any], int]],
+        proj_idx: list[int],
+        project,
+    ) -> list[list[Any]]:
+        """Apply OFFSET / LIMIT / projection to a list of (sid, vals, pid) rows.
+
+        ``project`` is the per-row projector (e.g. ``_project_legacy_row``)
+        so callers can supply the legacy-row or aggregate-row projection
+        without duplicating the slice-and-iterate scaffold.
+        """
         if stmt.offset:
             rows = rows[stmt.offset:]
         if stmt.limit is not None:
             rows = rows[:stmt.limit]
-
         results: list[list[Any]] = []
         for _sid, vals, _pid in rows:
-            if stmt.columns == ("*",):
-                results.append(list(vals))
-            else:
-                results.append([vals[i] for i in proj_idx])
+            results.append(project(stmt, vals, proj_idx))
         return results
 
     def _stable_sort(
