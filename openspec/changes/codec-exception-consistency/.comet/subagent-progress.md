@@ -54,3 +54,13 @@
 - pytest tests/ -q --cov=src/tinydb → 93.30% coverage
 - pyflakes src/tinydb/ → clean (exit 0)
 - diff vs base 15518f4: 5 files, +83/-20
+
+## Final review (review_mode: standard)
+
+Verdict: APPROVED_WITH_NOTES — no CRITICAL, no IMPORTANT, 2 SUGGESTIONs (non-blocking).
+
+Accepted SUGGESTIONs (recorded but not fixed in this change):
+- type_system.py:306, 329 — semicolon-squished one-liner style (pre-existing, not a regression)
+- type_system.py:188-191 — `_spec` unpacked twice (encode_py + validate); readability acceptable
+
+Both non-blocking; cleanup belongs to a separate refactor change rather than this fix-and-archive scope. Verified F1-F6 all wired correctly against current code. CodecError multi-inheritance (TypeError/ValueError/OverflowError) guarantees no `except`-site regression across parser/tokenizer/btree.
