@@ -310,7 +310,7 @@ class _Parser:
         stmts: list = []
         while not self.at_end():
             stmts.append(self.parse_statement())
-            if self.peek().type == "PUNCT" and self.peek().value == ";":
+            if self._peek_punct(";"):
                 self.advance()
                 continue
             # No more semicolons — must be EOF or next statement starts a new keyword.
@@ -388,7 +388,7 @@ class _Parser:
         the reported position is the duplicate.
         """
         # Empty column list: `CREATE TABLE t ()` is invalid.
-        if self.peek().type == "PUNCT" and self.peek().value == ")":
+        if self._peek_punct(")"):
             tok = self.peek()
             raise ParseError(tok.line, tok.col, "expected column name")
 
@@ -405,7 +405,7 @@ class _Parser:
                 )
             seen.add(col.name)
             cols.append(col)
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
@@ -530,7 +530,7 @@ class _Parser:
         - parametric types whose params violate per-type value ranges
           (e.g. ``VARCHAR(0)``, ``DECIMAL(20, 2)``, ``DECIMAL(5, 5)``)
         """
-        has_paren = self.peek().type == "PUNCT" and self.peek().value == "("
+        has_paren = self._peek_punct("(")
         is_parametric = type_name in _PARAMETRIC_TYPES
 
         if not has_paren:
@@ -556,7 +556,7 @@ class _Parser:
         params: list = [self.advance().value]
 
         # Optional second int arg.
-        if self.peek().type == "PUNCT" and self.peek().value == ",":
+        if self._peek_punct(","):
             self.advance()
             second_tok = self.peek()
             if second_tok.type != "INT":
@@ -634,7 +634,7 @@ class _Parser:
             if ct.type != "IDENT":
                 raise ParseError(ct.line, ct.col, "expected column name")
             cols.append(self.advance().value)
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
@@ -646,7 +646,7 @@ class _Parser:
         while True:
             self.expect("PUNCT", "(")
             row: list = []
-            if self.peek().type == "PUNCT" and self.peek().value == ")":
+            if self._peek_punct(")"):
                 tok = self.peek()
                 raise ParseError(tok.line, tok.col, "expected literal")
             while True:
@@ -664,7 +664,7 @@ class _Parser:
                         row.append(tok.value)
                     else:
                         raise ParseError(tok.line, tok.col, "expected literal")
-                if self.peek().type == "PUNCT" and self.peek().value == ",":
+                if self._peek_punct(","):
                     self.advance()
                     continue
                 break
@@ -675,7 +675,7 @@ class _Parser:
                 )
             values.append(row)
             self.expect("PUNCT", ")")
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
@@ -711,14 +711,14 @@ class _Parser:
 
         # GROUP BY (optional, aggregation only)
         group_by = ()
-        if self.peek().type == "KEYWORD" and self.peek().value == "GROUP":
+        if self._peek_kw("GROUP"):
             self.expect_keyword("GROUP")
             self.expect_keyword("BY")
             group_by = self._parse_col_list()
 
         # HAVING (optional, aggregation only)
         having = None
-        if self.peek().type == "KEYWORD" and self.peek().value == "HAVING":
+        if self._peek_kw("HAVING"):
             self.expect_keyword("HAVING")
             having = self._parse_having_expr()
 
@@ -782,29 +782,33 @@ class _Parser:
             break
         return tuple(items)
 
-    def _parse_limit(self) -> Optional[int]:
-        if not self._peek_kw("LIMIT"):
+    def _parse_int_kw_clause(self, kw: str, *, non_negative: bool) -> Optional[int]:
+        """Parse ``KW <int>`` if present; otherwise return ``None``.
+
+        Shared by ``LIMIT`` (non-negative is required) and ``OFFSET`` (the
+        executor rejects negatives later; parser just requires an INT
+        literal). The ``non_negative`` flag toggles the explicit check at
+        parse time vs deferred validation — LIMIT carries the check
+        because a negative limit is more likely a programmer bug than a
+        typed-in-the-dark mistake.
+        """
+        if not self._peek_kw(kw):
             return None
         self.advance()
         t = self.advance()
         if t.type != "INT":
             raise ParseError(
-                t.line, t.col, "LIMIT must be a non-negative integer",
+                t.line, t.col, f"{kw} must be a non-negative integer",
             )
-        if t.value < 0:
-            raise ParseError(t.line, t.col, "LIMIT must be non-negative")
+        if non_negative and t.value < 0:
+            raise ParseError(t.line, t.col, f"{kw} must be non-negative")
         return int(t.value)
 
+    def _parse_limit(self) -> Optional[int]:
+        return self._parse_int_kw_clause("LIMIT", non_negative=True)
+
     def _parse_offset(self) -> Optional[int]:
-        if not self._peek_kw("OFFSET"):
-            return None
-        self.advance()
-        t = self.advance()
-        if t.type != "INT":
-            raise ParseError(
-                t.line, t.col, "OFFSET must be a non-negative integer",
-            )
-        return int(t.value)
+        return self._parse_int_kw_clause("OFFSET", non_negative=False)
 
     # --- DELETE FROM <table> [WHERE ...] -----------------------------------
 
@@ -838,22 +842,9 @@ class _Parser:
                 raise ParseError(ct.line, ct.col, "expected column name in SET")
             col = self.advance().value
             self.expect("PUNCT", "=")
-            if (self.peek().type == "KEYWORD"
-                    and self.peek().value in _DATETIME_KEYWORDS):
-                val = self._parse_datetime_literal()
-            elif (self.peek().type == "KEYWORD"
-                    and self.peek().value == "DECIMAL"):
-                val = self._parse_decimal_literal()
-            else:
-                lit_tok = self.advance()
-                if lit_tok.type not in _LITERAL_TYPES:
-                    raise ParseError(
-                        lit_tok.line, lit_tok.col,
-                        "SET right-hand side must be a literal",
-                    )
-                val = lit_tok.value
+            val = self._parse_literal_value()
             sets.append((col, EqualsExpr(column=col, value=val)))
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
@@ -882,7 +873,7 @@ class _Parser:
         calls (use HAVING instead). Aggregate calls in HAVING/SELECT are
         handled by the aggregation pipeline.
         """
-        if not (self.peek().type == "KEYWORD" and self.peek().value == "WHERE"):
+        if not self._peek_kw("WHERE"):
             return None
         self.advance()
         t = self.peek()
@@ -948,18 +939,33 @@ class _Parser:
                 op_tok.line, op_tok.col,
                 f"operator {op_repr} not supported; MVP supports only =",
             )
+        lit_val = self._parse_literal_value()
+        return EqualsExpr(column=cname, value=lit_val)
+
+    def _parse_literal_value(self):
+        """Dispatch the next token to a literal decoder.
+
+        Handles the three literal forms the parser produces:
+          * DATETIME-keyword prefix (``DATE '...'`` / ``TIME '...'`` /
+            ``TIMESTAMP '...'``) — delegates to ``_parse_datetime_literal``
+          * ``DECIMAL '...'`` prefix — delegates to ``_parse_decimal_literal``
+          * bare literal (``INT`` / ``FLOAT`` / ``TEXT`` / ``BOOL``) — returns
+            the token's value as-is
+
+        Used by both ``_parse_comparison`` and the UPDATE SET clause so
+        the datetime / decimal / bare-literal discrimination lives in one
+        place.
+        """
         if (self.peek().type == "KEYWORD"
                 and self.peek().value in _DATETIME_KEYWORDS):
-            lit_val = self._parse_datetime_literal()
-        elif (self.peek().type == "KEYWORD"
+            return self._parse_datetime_literal()
+        if (self.peek().type == "KEYWORD"
                 and self.peek().value == "DECIMAL"):
-            lit_val = self._parse_decimal_literal()
-        else:
-            lit = self.advance()
-            if lit.type not in _LITERAL_TYPES:
-                raise ParseError(lit.line, lit.col, "expected literal")
-            lit_val = lit.value
-        return EqualsExpr(column=cname, value=lit_val)
+            return self._parse_decimal_literal()
+        lit = self.advance()
+        if lit.type not in _LITERAL_TYPES:
+            raise ParseError(lit.line, lit.col, "expected literal")
+        return lit.value
 
     # --- DATE / TIME / TIMESTAMP literal prefix ---------------------------
 
@@ -1026,7 +1032,7 @@ class _Parser:
         seen_aliases: set = set()
 
         # SELECT *
-        if self.peek().type == "PUNCT" and self.peek().value == "*":
+        if self._peek_punct("*"):
             self.advance()
             items.append(SelectItem(kind="star"))
             return tuple(items)
@@ -1042,7 +1048,7 @@ class _Parser:
                 seen_aliases.add(eff_alias)
             items.append(item)
 
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
@@ -1084,7 +1090,7 @@ class _Parser:
         func_tok = self.peek()
         func = self.advance().value
         self.expect("PUNCT", "(")
-        if self.peek().type == "PUNCT" and self.peek().value == "*":
+        if self._peek_punct("*"):
             self.advance()
             arg: object = "*"
         else:
@@ -1106,7 +1112,7 @@ class _Parser:
             if t.type != "IDENT":
                 raise ParseError(t.line, t.col, "expected column name in GROUP BY")
             cols.append(self.advance().value)
-            if self.peek().type == "PUNCT" and self.peek().value == ",":
+            if self._peek_punct(","):
                 self.advance()
                 continue
             break
