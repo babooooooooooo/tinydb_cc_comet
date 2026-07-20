@@ -124,7 +124,6 @@ def infer_literal_type(value: object) -> tuple[str, tuple]:
     raise TypeError(f"unknown literal type: {type(value).__name__}")
 
 
-# TypeCodec registry; legacy helpers above stay for backward compatibility.
 # Parametric codecs are stored as classes and instantiated by codec_for().
 
 
@@ -171,7 +170,6 @@ def codec_for(type_name: str, params: tuple = ()):
     return entry(*params) if isinstance(entry, type) else entry
 
 
-# Codec implementations; legacy helpers above remain for backward compatibility.
 # FLOAT is 4-byte single precision; integer width selects SMALLINT/INT/BIGINT.
 
 
