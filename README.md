@@ -1,8 +1,8 @@
-# tinydb (v0.1.0)
+# tinydb (v0.1.1)
 
 > Minimal embedded relational database for teaching and embedding. ACID, 15 SQL types, stdlib REPL.
 
-> **Status:** MVP complete with full ACID (`tinydb-acid`), 15 column types (`tinydb-types`), and a zero-dependency REPL (`tinydb-repl`). The latest patch is the **codec-exception-consistency** fix (F1-F6): `CodecError` is the single canonical exception for every type-level validation failure.
+> **Status:** MVP complete with full ACID (`tinydb-acid`), 15 column types (`tinydb-types`), and a zero-dependency REPL (`tinydb-repl`). The latest patch (**v0.1.1**) closes seven contract gaps in the prior codec-exception-consistency fix: every codec's `encode_py` now delegates to `self.validate(value)`, so `CodecError` is the single canonical exception for *every* type-level validation failure, including `DECIMAL` precision overflow, `CHAR(N)` length overflow, and indexed-path WHERE predicates with out-of-range literals.
 >
 > See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
 
@@ -12,7 +12,7 @@
 - **15 column types** — `INT` / `SMALLINT` / `BIGINT` / `FLOAT` / `DOUBLE` / `REAL` / `TEXT` / `VARCHAR(N)` / `CHAR(N)` / `BOOL` / `DECIMAL(p, s)` / `DATE` / `TIME` / `TIMESTAMP`
 - **ACID**: autocommit + explicit `BEGIN` … `COMMIT` / `ROLLBACK`, WAL-backed crash recovery, single-statement atomicity
 - **REPL**: zero external runtime deps, multi-line SQL, reverse-generated `.schema`, `.tables`, `.read <file>`
-- **Single source of truth for type contracts**: every codec speaks `encode_py` / `decode_bytes` / `validate` and validates via one canonical `CodecError`
+- **Single source of truth for type contracts**: every codec speaks `encode_py` / `decode_bytes` / `validate`. `encode_py` *always* delegates to `self.validate(value)` as its first statement (v0.1.1), so any wrong-type / out-of-range / wrong-precision input surfaces through one canonical `CodecError` — no `AttributeError`, `TypeError`, or `OverflowError` leak.
 - **Pure Python 3.11+ stdlib** — no pip dependencies for users; `hypothesis` / `pytest-cov` are dev-time only
 
 ## Quick start
@@ -91,7 +91,7 @@ All column-type validation runs through the canonical codec registry in `tinydb.
 | `decode_bytes(buf, offset) → (value, next_offset)` | `executor`, scan paths | read wire bytes back into a Python value |
 | `validate(value) → None` | internal anchor | throw `CodecError` if `value` violates the codec's contract |
 
-All validation failures raise the **same** exception class, `tinydb.type_system.CodecError`. There are no `TypeError`, `OverflowError`, or `ValueError` exceptions raised by codecs under the encode path — use `except CodecError`.
+All validation failures raise the **same** exception class, `tinydb.type_system.CodecError`. Every codec's `encode_py` calls `self.validate(value)` as its first statement (v0.1.1), so the only way to fail type validation — wrong Python type, value out of range, length overflow, precision overflow, NaN/Inf in FLOAT/DOUBLE — is `CodecError`. There are no `AttributeError`, `TypeError`, `OverflowError`, or `ValueError` leaks.
 
 ```python
 codec = tinydb.type_system.codec_for("INT", ())
@@ -102,9 +102,14 @@ codec.validate(True)                # raises CodecError: expected int for INT, g
 v = tinydb.type_system.codec_for("VARCHAR", (10,))
 v.encode_py("x" * 11)               # raises CodecError: VARCHAR(10) length 11 exceeds max
 v.encode_py("x" * 10)               # OK, packed with length prefix
+
+c = tinydb.type_system.codec_for("CHAR", (5,))
+c.encode_py("abcdef")               # raises CodecError: CHAR(5) length 6 exceeds max (v0.1.1)
+d = tinydb.type_system.codec_for("DECIMAL", (5, 2))
+d.encode_py(1000.00)                # raises CodecError: DECIMAL(5,2) value 1000.0 out of range (v0.1.1)
 ```
 
-`CodecError` is intentionally multi-inheriting `(TypeError, ValueError, OverflowError)` so existing `except (TypeError, ValueError, OverflowError)` blocks continue to catch. New code should catch `CodecError` directly.
+`CodecError` is intentionally multi-inheriting `(TypeError, ValueError, OverflowError)` so existing `except (TypeError, ValueError, OverflowError)` blocks continue to catch. New code should catch `CodecError` directly. Note: after v0.1.1, the multi-inheritance is no longer load-bearing — it exists only as a backward-compat shim.
 
 Live REPL:
 
@@ -199,15 +204,15 @@ pyflakes src/tinydb/
 pytest --cov=src/tinydb
 ```
 
-Coverage is enforced at 85% minimum (configured in `pyproject.toml`); current measurement is ~93%.
+Coverage is enforced at 85% minimum (configured in `pyproject.toml`); current measurement is ~93.5%.
 
-Reports for each release change are at `docs/superpowers/reports/`; the latest is `2026-07-20-codec-exception-consistency-verify.md`.
+Reports for each release change are at `docs/superpowers/reports/`; the latest is `2026-07-21-v0.1.1-verify.md`.
 
 ## Module map (current sizes)
 
 | Module | Lines | Responsibility |
 |---|---|---|
-| `type_system.py` | 431 | 15 codecs + registry; one canonical `CodecError` for all type-level validation failures |
+| `type_system.py` | 431 | 15 codecs + registry; one canonical `CodecError` for all type-level validation failures; every codec's `encode_py` delegates to `self.validate(value)` (v0.1.1) |
 | `pager.py` | 491 | 4 KB page I/O, mmap + BufferedRandom paths, free-list |
 | `slotted_page.py` | 208 | single-page layout, slotted record pointers, overflow chain |
 | `catalog.py` | 305 | table/column metadata; `Catalog.create_table` rejects non-Column inputs |
