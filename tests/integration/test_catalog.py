@@ -108,7 +108,7 @@ def test_create_table_rejects_legacy_2tuple_with_type_error():
     """F1: passing the legacy [name, type] 2-tuple form should raise TypeError,
     not silently accept it via tuple(schema)."""
     c = Catalog()
-    with pytest.raises(TypeError, match="create_table expects Column"):
+    with pytest.raises(TypeError, match="TableInfo expects Column"):
         c.create_table("t", [("id", "INT")], root_page_id=2, next_page_id=2)
 
 
@@ -117,5 +117,5 @@ def test_create_table_rejects_string_iterable():
     """F1: passing a bare string iterable should raise TypeError before
     tuple(schema) splits it into characters."""
     c = Catalog()
-    with pytest.raises(TypeError, match="create_table expects Column"):
+    with pytest.raises(TypeError, match="TableInfo expects Column"):
         c.create_table("t", "INT", root_page_id=2, next_page_id=2)

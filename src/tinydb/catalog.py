@@ -68,6 +68,17 @@ class TableInfo:
     next_page_id: int
     name: str = ""
 
+    def __post_init__(self) -> None:
+        # Validate Column types at the type-system layer so every TableInfo
+        # construction site (create_table / from_bytes / _unpack_chain) is
+        # protected — not just the create_table call path.
+        for c in self.columns:
+            if not isinstance(c, Column):
+                raise TypeError(
+                    f"TableInfo expects Column instances, "
+                    f"got {type(c).__name__}: {c!r}"
+                )
+
     @property
     def schema(self) -> list[tuple[str, str]]:
         """Read-only ``[(name, type)]`` projection for row_codec and other
@@ -156,16 +167,11 @@ class Catalog:
     ) -> None:
         if name in self.tables:
             raise ValueError(f"table {name!r} already exists")
-        schema_list = list(schema)
-        if schema_list and not all(isinstance(c, Column) for c in schema_list):
-            bad = next(c for c in schema_list if not isinstance(c, Column))
-            raise TypeError(
-                f"create_table expects Column instances, got {type(bad).__name__}: {bad!r}"
-            )
-        cols: tuple[Column, ...] = tuple(schema_list)
+        # Column type-check lives in TableInfo.__post_init__ — single source
+        # of truth for every TableInfo construction site.
         self.tables[name] = TableInfo(
             name=name,
-            columns=cols,
+            columns=tuple(schema),
             root_page_id=root_page_id,
             next_page_id=next_page_id,
         )

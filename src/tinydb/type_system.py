@@ -51,15 +51,6 @@ def parse_text_literal(s: str) -> str:
     return inner
 
 
-def parse_bool_literal(s: str) -> bool:
-    u = s.upper()
-    if u == "TRUE":
-        return True
-    if u == "FALSE":
-        return False
-    raise ValueError(f"invalid bool literal: {s!r}")
-
-
 def _format_type_params(type_name: str, params: tuple) -> str:
     """Render ``'VARCHAR(10,) [5]'`` style suffix; empty when params empty."""
     if not params:
@@ -215,6 +206,7 @@ class _TextCodec:
     name = "TEXT"
 
     def encode_py(self, value):
+        self.validate(value)
         data = value.encode("utf-8")
         return struct.pack(">H", len(data)) + data
 
@@ -242,6 +234,7 @@ class _BoolCodec:
     aliases = ("BOOLEAN",)
 
     def encode_py(self, value):
+        self.validate(value)
         return b"\x01" if value else b"\x00"
 
     def decode_bytes(self, buf, offset):
@@ -301,9 +294,10 @@ class _VarcharCodec:
         self.max_len = max_len
     def _check(self, n: int) -> None:
         if n > self.max_len:
-            raise CodecError(f"VARCHAR({self.max_len}) length {n} exceeds max")
+            raise CodecError(f"{self.name}({self.max_len}) length {n} exceeds max")
     def encode_py(self, value):
-        data = value.encode("utf-8"); self._check(len(data))
+        self.validate(value)
+        data = value.encode("utf-8")
         return struct.pack(">H", len(data)) + data
     def decode_bytes(self, buf, offset):
         if offset + 2 > len(buf):
@@ -317,7 +311,7 @@ class _VarcharCodec:
         return v
     def validate(self, value):
         if not isinstance(value, str):
-            raise CodecError(f"expected str for VARCHAR, got {type(value).__name__}")
+            raise CodecError(f"expected str for {self.name}, got {type(value).__name__}")
         self._check(len(value.encode("utf-8")))
 
 
@@ -325,8 +319,8 @@ class _CharCodec(_VarcharCodec):
     """CHAR(N): fixed-length UTF-8 string with right-space padding (SQL92 PAD SPACE)."""
     name = "CHAR"
     def encode_py(self, value):
+        self.validate(value)
         d = value.encode("utf-8")
-        if len(d) > self.max_len: raise CodecError(f"CHAR({self.max_len}) length {len(d)} exceeds max")
         return struct.pack(">H", self.max_len) + (value + " " * (self.max_len - len(d))).encode("utf-8")
 
 
@@ -340,10 +334,11 @@ class _DecimalCodec:
         self._factor, self._max_abs = 10 ** scale, 10 ** (precision - scale)
     def _to_scaled(self, value):
         scaled = round(value * self._factor)
-        if abs(scaled) >= 2**63: raise OverflowError(f"DECIMAL({self.precision},{self.scale}) scaled value overflow")
-        if abs(value) >= self._max_abs: raise OverflowError(f"DECIMAL({self.precision},{self.scale}) value {value} out of range")
+        if abs(scaled) >= 2**63: raise CodecError(f"DECIMAL({self.precision},{self.scale}) scaled value overflow")
+        if abs(value) >= self._max_abs: raise CodecError(f"DECIMAL({self.precision},{self.scale}) value {value} out of range")
         return scaled
     def encode_py(self, value):
+        self.validate(value)
         return struct.pack(">q", self._to_scaled(value))
     def decode_bytes(self, buf, offset):
         if offset + 8 > len(buf): raise ValueError(f"DECIMAL({self.precision},{self.scale}) decode truncated")
@@ -360,6 +355,7 @@ class _DateCodec:
     """DATE: days since UTC epoch (1970-01-01). 4-byte signed big-endian."""
     name = "DATE"
     def encode_py(self, value):
+        self.validate(value)
         return struct.pack(">i", (value - _EPOCH_DATE).days)
     def decode_bytes(self, buf, offset):
         (days,) = struct.unpack_from(">i", buf, offset)
@@ -375,8 +371,9 @@ class _TimeCodec:
     """TIME: seconds since midnight UTC. 4-byte unsigned big-endian."""
     name = "TIME"
     def encode_py(self, value):
+        self.validate(value)
         s = value.hour * 3600 + value.minute * 60 + value.second
-        if not 0 <= s <= 86399: raise ValueError(f"TIME out of range: {s}")
+        if not 0 <= s <= 86399: raise CodecError(f"{self.name} out of range: {s}")
         return struct.pack(">I", s)
     def decode_bytes(self, buf, offset):
         (s,) = struct.unpack_from(">I", buf, offset)
@@ -394,6 +391,7 @@ class _TimestampCodec:
     """TIMESTAMP: seconds since UTC epoch. 8-byte signed big-endian. Naive datetime."""
     name = "TIMESTAMP"
     def encode_py(self, value):
+        self.validate(value)
         return struct.pack(">q", int((value - _EPOCH_DT).total_seconds()))
     def decode_bytes(self, buf, offset):
         (s,) = struct.unpack_from(">q", buf, offset)

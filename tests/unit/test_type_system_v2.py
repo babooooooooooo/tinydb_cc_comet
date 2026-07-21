@@ -151,9 +151,9 @@ def test_smallint_codec_2byte_size():
 
 def test_smallint_codec_overflow_raises():
     codec = codec_for("SMALLINT")
-    with pytest.raises(OverflowError, match="SMALLINT out of range"):
+    with pytest.raises(CodecError, match="SMALLINT out of range"):
         codec.encode_py(32768)
-    with pytest.raises(OverflowError, match="SMALLINT out of range"):
+    with pytest.raises(CodecError, match="SMALLINT out of range"):
         codec.encode_py(-32769)
 
 
@@ -175,9 +175,9 @@ def test_bigint_codec_8byte_size():
 
 def test_bigint_codec_overflow_raises():
     codec = codec_for("BIGINT")
-    with pytest.raises(OverflowError, match="BIGINT out of range"):
+    with pytest.raises(CodecError, match="BIGINT out of range"):
         codec.encode_py(2**63)
-    with pytest.raises(OverflowError, match="BIGINT out of range"):
+    with pytest.raises(CodecError, match="BIGINT out of range"):
         codec.encode_py(-(2**63) - 1)
 
 
@@ -324,16 +324,16 @@ def test_decimal_codec_zero_scale():
 def test_decimal_codec_precision_overflow():
     codec = codec_for("DECIMAL", (5, 2))
     # DECIMAL(5,2): value range is [-999.99, 999.99]
-    with pytest.raises(OverflowError, match=r"DECIMAL\(5,2\) value .* out of range"):
+    with pytest.raises(CodecError, match=r"DECIMAL\(5,2\) value .* out of range"):
         codec.encode_py(1000.00)
-    with pytest.raises(OverflowError, match=r"DECIMAL\(5,2\) value .* out of range"):
+    with pytest.raises(CodecError, match=r"DECIMAL\(5,2\) value .* out of range"):
         codec.encode_py(-1000.00)
 
 
 def test_decimal_codec_scaled_overflow():
     codec = codec_for("DECIMAL", (18, 6))
     # DECIMAL(18,6): value range is [-10^12, 10^12 - 10^-6]
-    with pytest.raises(OverflowError):
+    with pytest.raises(CodecError):
         codec.encode_py(1e13)  # exceeds 10^12
 
 

@@ -1318,11 +1318,12 @@ class Executor:
         bt = self.index_manager.get_btree(ti.name, col_name)
         if bt is None:
             return None
-        try:
-            key = codec_for(col_obj.type, col_obj.type_params).encode_py(lit_value)
-            ref = self.index_manager.lookup_key(ti.name, col_name, key)
-        except CodecError:
-            ref = None
+        # Encode the literal; any CodecError (range, length, type) must propagate
+        # so the caller sees the invalid WHERE predicate rather than a silent [].
+        # Pre-change behavior raised OverflowError/TypeError here, which already
+        # propagated — the post-F2+F3+F6 CodecError swallow was a regression.
+        key = codec_for(col_obj.type, col_obj.type_params).encode_py(lit_value)
+        ref = self.index_manager.lookup_key(ti.name, col_name, key)
         if ref is None:
             return []
         fast_rows = self._read_row_by_slot(ti, ref)
