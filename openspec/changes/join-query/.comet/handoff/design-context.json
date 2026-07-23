@@ -1,0 +1,16 @@
+{
+  "change": "join-query",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "f46067b9987374e0d93babf39cb7fba7f26d4d7547346d73bf23e06e8c2fa812",
+  "files": [
+    { "path": "openspec/changes/join-query/proposal.md", "sha256": "c7ccf9cc01048186507019416ec71a9d2f756fa0ec1065409e1a79b66ab990d3" },
+    { "path": "openspec/changes/join-query/design.md", "sha256": "3b960dd74c3179dd34b955b8d049c028c554d765a38eef5d5871fcf2279c3741" },
+    { "path": "openspec/changes/join-query/tasks.md", "sha256": "8ec56e082fbcbe1d57b52e20ee7c399184c8cfd6abb3f3b88dd9022ba080f5ce" },
+    { "path": "openspec/changes/join-query/specs/python-api/spec.md", "sha256": "e0d87e97846670aacf536d75d38185ec8eae6caa9b59abc8766bcb628560dfa6" },
+    { "path": "openspec/changes/join-query/specs/sql-join-query/spec.md", "sha256": "ba235ea3fd5dd0875f5b6e2192c9bff136e957acb5b2fe02a9408bb8fc111c69" },
+    { "path": "openspec/changes/join-query/specs/sql-minimal-parser/spec.md", "sha256": "dec06c30422157848b673c47459147404b77c346148f7e73f43398b6e75cdd69" }
+  ]
+}

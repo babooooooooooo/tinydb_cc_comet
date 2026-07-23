@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/join-query/proposal.md",
+  "openspec_design": "openspec/changes/join-query/design.md",
+  "openspec_tasks": "openspec/changes/join-query/tasks.md",
+  "openspec_delta_spec": "openspec/changes/join-query/specs/python-api/spec.md",
+  "handoff_context": "openspec/changes/join-query/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/join-query/.comet/handoff/design-context.md"
+}
