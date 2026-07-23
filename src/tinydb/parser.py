@@ -106,25 +106,96 @@ class Insert:
 class Select:
     """SELECT <cols> FROM <table> [WHERE <expr>] [ORDER BY ...] [LIMIT N] [OFFSET N].
 
-    Engine-v1 upgrade: columns is tuple, where holds Expr, order_by/limit/offset
-    default to empty/None for backward compatibility with MVP instances.
+    Engine-v1: columns is tuple, where holds Expr, order_by/limit/offset
+    default to empty/None for backward compat with MVP instances.
 
-    tinydb-aggregation extension: select_items / group_by / having /
-    aggregate_aliases trigger the 5-phase aggregation pipeline in the
-    executor when ``aggregate_aliases`` or ``group_by`` is non-empty.
+    Aggregation extension: select_items / group_by / having /
+    aggregate_aliases trigger the 5-phase aggregation pipeline.
+
+    tinydb-join-query (T2): ``from_`` is the FROM ``TableRef``; ``joins``
+    is 0..N ``JoinClause`` in left-deep order. ``table`` equals
+    ``from_.name`` for backward compat with v0.1 single-table executors.
     """
 
     table: str
-    columns: tuple  # tuple[str, ...]  ("*" or column names)
-    where: Optional[Any] = None      # Expr (EqualsExpr | AndExpr | OrExpr | NotExpr)
-    order_by: tuple = ()              # tuple[OrderByItem, ...]
+    columns: tuple
+    where: Optional[Any] = None
+    order_by: tuple = ()
     limit: Optional[int] = None
     offset: Optional[int] = None
     # --- tinydb-aggregation (T2) ---
-    select_items: tuple = ()           # tuple[SelectItem, ...]
-    group_by: tuple = ()               # tuple[str, ...]
-    having: Optional[object] = None    # AggregateCall | tuple[col, op, lit] | None
-    aggregate_aliases: tuple = ()      # tuple[str, ...]
+    select_items: tuple = ()
+    group_by: tuple = ()
+    having: Optional[object] = None
+    aggregate_aliases: tuple = ()
+    # --- tinydb-join-query (T2) ---
+    from_: Optional["TableRef"] = None
+    joins: tuple = ()
+    line: int = 0
+    col: int = 0
+
+
+# --- tinydb-join-query (T2): FROM / JOIN AST nodes -------------------------
+
+
+@dataclass(frozen=True)
+class TableRef:
+    """FROM / JOIN 子句中的表引用。"""
+
+    name: str
+    alias: Optional[str] = None
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class JoinKey:
+    """USING / NATURAL 等值键（resolver 阶段构造；parser 阶段不出现）。
+
+    字段顺序遵循 Design Doc §5.1：位置在前，标签 / source 在后。
+    """
+
+    left_col: int
+    right_col: int
+    label: str
+    source_left: str
+    source_right: str
+
+
+@dataclass(frozen=True)
+class JoinOnPredicate:
+    """JOIN ON 后的基础列对列比较（Task 2 范围；Task 8 扩展为复合 AND/OR/NOT）。"""
+
+    left: "ColumnRef"
+    op: str  # one of '=' '<' '>' '<=' '>=' '!='
+    right: "ColumnRef"
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class JoinClause:
+    """FROM 后追加的 JOIN 子句。
+
+    ``kind`` 是 ``INNER`` / ``LEFT`` / ``RIGHT`` / ``FULL`` / ``CROSS``；裸 JOIN
+    与 ``LEFT/RIGHT/FULL OUTER JOIN`` 分别规范化为 ``INNER`` / ``LEFT|RIGHT|FULL``。
+    """
+
+    kind: str
+    right: TableRef
+    on_expr: Optional[Any] = None
+    using_keys: tuple = ()  # tuple[str, ...]
+    natural: bool = False
+    line: int = 0
+    col: int = 0
+
+
+@dataclass(frozen=True)
+class ColumnRef:
+    """限定列引用；``qualifier`` 为 ``None`` 表示裸列。"""
+
+    qualifier: Optional[str]
+    name: str
     line: int = 0
     col: int = 0
 
@@ -144,10 +215,18 @@ class Delete:
 
 @dataclass(frozen=True)
 class EqualsExpr:
-    """MVP-compatible: ``col = literal`` comparison."""
+    """MVP-compatible: ``col = literal`` comparison.
+
+    tinydb-join-query (T2): ``qualifier`` carries the optional table alias
+    prefix when the column reference is qualified (e.g. ``u.id = 1``).
+    Defaults to ``None`` so legacy single-table tests keep working.
+    Equality is purely structural on (column, value, qualifier) — no
+    source-position fields, matching pre-T2 expectations.
+    """
 
     column: str
     value: Any
+    qualifier: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -178,10 +257,15 @@ class NotExpr:
 
 @dataclass(frozen=True)
 class OrderByItem:
-    """ORDER BY item: column + ASC/DESC."""
+    """ORDER BY item: column + ASC/DESC.
+
+    tinydb-join-query (T2): ``qualifier`` carries optional table alias for
+    qualified references (e.g. ``ORDER BY u.id``). Defaults to ``None``.
+    """
 
     column: str
     descending: bool = False
+    qualifier: Optional[str] = None
 
 
 # --- tinydb-aggregation AST nodes -------------------------------------------
@@ -212,12 +296,16 @@ class SelectItem:
       - kind='star'         (SELECT *)
       - kind='column'       (IDENT [AS alias])
       - kind='aggregate'    (AggregateCall)
+
+    tinydb-join-query (T2): ``qualifier`` is set when the projection column
+    is qualified (e.g. ``SELECT u.id``); defaults to ``None``.
     """
 
     kind: str                          # 'star' | 'column' | 'aggregate'
     name: Optional[str] = None         # column name (column kind)
     alias: Optional[str] = None        # explicit alias (column kind, or aggregate alias)
     aggregate: Optional[AggregateCall] = None  # aggregate detail (aggregate kind)
+    qualifier: Optional[str] = None    # tinydb-join-query (T2): optional table alias
 
 
 # --- engine-v1 UPDATE statement ----------------------------------------------
@@ -688,6 +776,7 @@ class _Parser:
     # --- SELECT [cols] FROM <table> [WHERE ...] ----------------------------
 
     def _parse_select(self) -> Select:
+        """Parse SELECT statement; populates ``from_`` and ``joins`` (T2)."""
         kw = self.expect_keyword("SELECT")
 
         # tinydb-aggregation (T3): parse projection items via the shared
@@ -702,10 +791,12 @@ class _Parser:
             raise ParseError(ft.line, ft.col, "expected FROM")
         self.advance()
 
-        t = self.peek()
-        if t.type != "IDENT":
-            raise ParseError(t.line, t.col, "expected table name")
-        table = self.advance().value
+        # tinydb-join-query (T2): FROM <table_ref> + JOIN chain.
+        from_ref = self._parse_table_ref()
+        joins = self._parse_join_chain()
+
+        # Legacy ``table`` field kept for v0.1 single-table executors.
+        table = from_ref.name
 
         where = self._parse_where()
 
@@ -751,6 +842,177 @@ class _Parser:
             group_by=group_by,
             having=having,
             aggregate_aliases=aggregate_aliases,
+            # --- tinydb-join-query (T2) ---
+            from_=from_ref,
+            joins=joins,
+        )
+
+    # --- tinydb-join-query (T2): FROM / JOIN helpers ------------------------
+
+    def _parse_table_ref(self) -> TableRef:
+        """Parse ``IDENT [AS IDENT | IDENT]`` after FROM or JOIN.
+
+        接受三种形式：``FROM users`` / ``FROM users AS u`` / ``FROM users u``。
+        隐式 alias（无 ``AS``）是常见 SQL 习惯。``TableRef.line / col`` 指向
+        ``name`` token。
+        """
+        t = self.peek()
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected table name")
+        name_tok = self.advance()
+        alias = None
+        if self._peek_kw("AS"):
+            # 显式 AS <ident>
+            self.advance()
+            a = self.peek()
+            if a.type != "IDENT":
+                raise ParseError(a.line, a.col, "expected alias after AS")
+            alias = self.advance().value
+        elif (
+            not self.at_end()
+            and self.peek().type == "IDENT"
+        ):
+            # 隐式 alias：``FROM users u``。下一 token 是 IDENT（不是
+            # KEYWORD），故不会误吃 JOIN/INNER/LEFT 等。
+            alias = self.advance().value
+        return TableRef(name=name_tok.value, alias=alias,
+                        line=name_tok.line, col=name_tok.col)
+
+    def _parse_join_chain(self) -> tuple:
+        """Parse zero or more JOIN clauses until a non-JOIN keyword.
+
+        返回 left-deep 顺序的 ``JoinClause`` 元组；NATURAL 前缀由
+        ``_parse_join_clause`` 内部消费。
+        """
+        joins: list = []
+        while self._peek_join_start():
+            joins.append(self._parse_join_clause())
+        return tuple(joins)
+
+    def _peek_join_start(self) -> bool:
+        """True if the next token could begin a JOIN clause (含 NATURAL 前缀)。"""
+        t = self.peek()
+        return (
+            t.type == "KEYWORD"
+            and t.value in {
+                "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL",
+            }
+        )
+
+    def _parse_join_clause(self) -> JoinClause:
+        """Parse ``[NATURAL] [kind] JOIN right [ON p | USING (cols)]``.
+
+        ``first_tok`` 在 NATURAL 已 consume 时指向 NATURAL，否则指向 JOIN 关
+        键字；用于错误位置与 ``JoinClause.line / col``。
+        """
+        first_tok = self.peek()
+        natural = False
+        if first_tok.type == "KEYWORD" and first_tok.value == "NATURAL":
+            self.advance()
+            natural = True
+            kind_tok = self.peek()
+        else:
+            kind_tok = first_tok
+
+        if kind_tok.type == "KEYWORD" and kind_tok.value in {
+            "INNER", "LEFT", "RIGHT", "FULL", "CROSS",
+        }:
+            kind = self.advance().value
+            if kind in {"LEFT", "RIGHT", "FULL"} and self._peek_kw("OUTER"):
+                self.advance()
+            if not self._peek_kw("JOIN"):
+                tok = self.peek()
+                raise ParseError(
+                    tok.line, tok.col, "expected JOIN after join kind",
+                )
+            self.advance()
+        elif kind_tok.type == "KEYWORD" and kind_tok.value == "JOIN":
+            kind = "INNER"
+            self.advance()
+        else:
+            raise ParseError(
+                first_tok.line, first_tok.col,
+                "expected JOIN keyword",
+            )
+
+        right = self._parse_table_ref()
+
+        on_expr = None
+        using_keys: tuple = ()
+        if self._peek_kw("USING"):
+            self.advance()
+            self.expect("PUNCT", "(")
+            keys: list = []
+            while True:
+                c = self.peek()
+                if c.type != "IDENT":
+                    raise ParseError(c.line, c.col, "expected column in USING")
+                keys.append(self.advance().value)
+                if self._peek_punct(","):
+                    self.advance()
+                    continue
+                break
+            self.expect("PUNCT", ")")
+            using_keys = tuple(keys)
+        elif self._peek_kw("ON"):
+            self.advance()
+            on_expr = self._parse_join_predicate()
+        elif kind != "CROSS" and not natural:
+            # 缺键错误：位置指向 first_tok（NATURAL 或 JOIN 关键字）
+            raise ParseError(
+                first_tok.line, first_tok.col,
+                "JOIN requires ON or USING clause (or NATURAL)",
+            )
+
+        return JoinClause(
+            kind=kind, right=right, on_expr=on_expr,
+            using_keys=using_keys, natural=natural,
+            line=first_tok.line, col=first_tok.col,
+        )
+
+    def _parse_join_predicate(self) -> JoinOnPredicate:
+        """Parse JOIN ON 后基础列对列比较（Task 2 范围；Task 8 扩展 AND/OR/NOT）。"""
+        left = self._parse_qualified_column_ref()
+        op_tok = self.peek()
+        if op_tok.type != "PUNCT" or op_tok.value not in {
+            "=", "<", ">", "<=", ">=", "!=",
+        }:
+            raise ParseError(
+                op_tok.line, op_tok.col,
+                "JOIN ON predicate must start with column comparison "
+                "(complex AND/OR expressions deferred to Task 8)",
+            )
+        self.advance()
+        right = self._parse_qualified_column_ref()
+        return JoinOnPredicate(
+            left=left, op=op_tok.value, right=right,
+            line=left.line, col=left.col,
+        )
+
+    def _parse_qualified_column_ref(self) -> ColumnRef:
+        """Parse ``qualifier.column`` or bare ``column`` -> ``ColumnRef``.
+
+        Used by ``_parse_join_predicate`` for ON operands; canonical
+        column-reference form for resolver / plan layers.
+        """
+        t = self.peek()
+        if t.type != "IDENT":
+            raise ParseError(t.line, t.col, "expected column name")
+        first_tok = self.advance()
+        if self._peek_punct("."):
+            self.advance()
+            cn = self.peek()
+            if cn.type != "IDENT":
+                raise ParseError(
+                    cn.line, cn.col, "expected column after '.'",
+                )
+            return ColumnRef(
+                qualifier=first_tok.value, name=self.advance().value,
+                line=t.line, col=t.col,
+            )
+        return ColumnRef(
+            qualifier=None, name=first_tok.value,
+            line=first_tok.line, col=first_tok.col,
         )
 
     # --- ORDER BY / LIMIT / OFFSET ---------------------------------------
@@ -768,14 +1030,28 @@ class _Parser:
             ct = self.peek()
             if ct.type != "IDENT":
                 raise ParseError(ct.line, ct.col, "expected column in ORDER BY")
-            col = self.advance().value
+            col_tok = self.advance()
+            col = col_tok.value
+            # tinydb-join-query (T2): ``qualifier.column`` accepted.
+            qualifier = None
+            if self._peek_punct("."):
+                self.advance()
+                cn2 = self.peek()
+                if cn2.type != "IDENT":
+                    raise ParseError(
+                        cn2.line, cn2.col, "expected column after '.'",
+                    )
+                qualifier = col
+                col = self.advance().value
             desc = False
             if self._peek_kw("ASC"):
                 self.advance()
             elif self._peek_kw("DESC"):
                 self.advance()
                 desc = True
-            items.append(OrderByItem(column=col, descending=desc))
+            items.append(OrderByItem(
+                column=col, descending=desc, qualifier=qualifier,
+            ))
             if self._peek_punct(","):
                 self.advance()
                 continue
@@ -931,7 +1207,19 @@ class _Parser:
         ct = self.peek()
         if ct.type != "IDENT":
             raise ParseError(ct.line, ct.col, "expected column in WHERE")
-        cname = self.advance().value
+        cname_tok = self.advance()
+        cname = cname_tok.value
+        # tinydb-join-query (T2): recognise ``qualifier.column`` form.
+        qualifier = None
+        if self._peek_punct("."):
+            self.advance()
+            cn2 = self.peek()
+            if cn2.type != "IDENT":
+                raise ParseError(
+                    cn2.line, cn2.col, "expected column after '.'",
+                )
+            qualifier = cname
+            cname = self.advance().value
         op_tok = self.advance()
         if op_tok.type != "PUNCT" or op_tok.value not in SUPPORTED_OPS:
             op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
@@ -940,7 +1228,7 @@ class _Parser:
                 f"operator {op_repr} not supported; MVP supports only =",
             )
         lit_val = self._parse_literal_value()
-        return EqualsExpr(column=cname, value=lit_val)
+        return EqualsExpr(column=cname, value=lit_val, qualifier=qualifier)
 
     def _parse_literal_value(self):
         """Dispatch the next token to a literal decoder.
@@ -1075,7 +1363,19 @@ class _Parser:
 
         if t.type != "IDENT":
             raise ParseError(t.line, t.col, "expected column or aggregate function")
-        name = self.advance().value
+        name_tok = self.advance()
+        name = name_tok.value
+        # tinydb-join-query (T2): recognise ``qualifier.column`` form.
+        qualifier = None
+        if self._peek_punct("."):
+            self.advance()
+            cn2 = self.peek()
+            if cn2.type != "IDENT":
+                raise ParseError(
+                    cn2.line, cn2.col, "expected column after '.'",
+                )
+            qualifier = name
+            name = self.advance().value
         alias = None
         if self._is_keyword(self.peek(), "AS"):
             self.advance()
@@ -1083,7 +1383,9 @@ class _Parser:
             if ident.type != "IDENT":
                 raise ParseError(ident.line, ident.col, "expected alias after AS")
             alias = self.advance().value
-        return SelectItem(kind="column", name=name, alias=alias)
+        return SelectItem(
+            kind="column", name=name, alias=alias, qualifier=qualifier,
+        )
 
     def _parse_aggregate_call(self) -> AggregateCall:
         """Parse COUNT(*) | (COUNT|SUM|AVG|MIN|MAX) '(' (IDENT | '*') ')'."""
@@ -1105,13 +1407,28 @@ class _Parser:
         return AggregateCall(func=func, arg=arg, line=func_tok.line, col=func_tok.col)
 
     def _parse_col_list(self) -> tuple:
-        """Parse comma-separated IDENT list for GROUP BY."""
+        """Parse comma-separated IDENT list for GROUP BY.
+
+        tinydb-join-query (T2): accepts ``qualifier.column`` form, emitted
+        as the literal string ``"qualifier.column"`` so the existing
+        ``group_by: tuple[str, ...]`` shape is preserved. Resolver splits
+        the qualifier back out when building the join plan.
+        """
         cols: list = []
         while True:
             t = self.peek()
             if t.type != "IDENT":
                 raise ParseError(t.line, t.col, "expected column name in GROUP BY")
-            cols.append(self.advance().value)
+            first = self.advance().value
+            if self._peek_punct("."):
+                self.advance()
+                cn2 = self.peek()
+                if cn2.type != "IDENT":
+                    raise ParseError(
+                        cn2.line, cn2.col, "expected column after '.'",
+                    )
+                first = f"{first}.{self.advance().value}"
+            cols.append(first)
             if self._peek_punct(","):
                 self.advance()
                 continue
