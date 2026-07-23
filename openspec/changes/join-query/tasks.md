@@ -2,6 +2,9 @@
 
 - [x] 1.1 先编写 tokenizer 回归测试：JOIN/INNER/LEFT/RIGHT/FULL/OUTER/CROSS/ON/USING/NATURAL 关键字大小写、限定名中的 `.`、非法连续限定符和错误位置。
 - [x] 1.2 扩展 tokenizer 的关键字和标点分类，保持 v0.1 字面量、注释和既有标点行为不变。
+- [x] 1.3 编写 parser AST 测试，覆盖 TableRef / JoinClause / JoinKey / JoinOnPredicate / ColumnRef 结构与 NATURAL 前缀 / OUTER 可选 / USING 多列 / 列对列 ON / 缺键错误位置等边界。
+- [x] 1.4 在 parser.py 添加 TableRef / JoinClause / JoinKey / JoinOnPredicate / ColumnRef AST 与 `[NATURAL] [kind] JOIN right [ON/USING]` 解析，保持 v0.1 单表 SELECT 与 aggregation / engine-v1 / acid / constraints parser 全部通过。
+- [x] 1.5 把 JOIN AST / 限定列 / 错误位置策略回写到 Design Doc §5.1 引用并保留 JoinOnPredicate doc 补充为 follow-up deviation。
 
 ## 2. 名称解析与合并 schema
 
