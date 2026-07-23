@@ -835,6 +835,8 @@ git commit -m "feat(errors): add ResolutionError hierarchy (AmbiguousColumn, Dup
 
 ### Task 4: Resolver 模块（来源映射 + 合并 schema + JoinKey 解析）
 
+- [x] Task 4: Resolver 模块（来源映射 + 合并 schema + JoinKey 解析） — subagent-driven: implementer 05dc6b1 + reviewer APPROVED_WITH_CONCERNS IMPORTANT _fold_equals_expr 4-tuple follow-up Task 7.3 to 3-tuple MINOR multi-NATURAL outer_kind clobbering MINOR docstring trailing-newline cosmetic accept 4 plan deviations
+
 **Files:**
 - Create: `src/tinydb/resolver.py`
 - Create: `tests/unit/test_resolver.py`

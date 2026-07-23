@@ -8,10 +8,10 @@
 
 ## 2. 名称解析与合并 schema
 
-- [ ] 2.1 先编写 resolver 测试：表/别名映射、重复别名、未知表、限定列、唯一裸列、歧义裸列、USING 缺失/类型不兼容和 NATURAL 共同列发现。
-- [ ] 2.2 新建独立 resolver 模块，按 FROM/JOIN 左到右构造来源映射和合并 schema。
-- [ ] 2.3 统一解析 SELECT、ON、WHERE、ORDER BY、GROUP BY、HAVING 和聚合参数，输出稳定的列位置/标签。
-- [x] 2.4 (partial) 在 errors 层级定义 ResolutionError + 6 子类型契约（Task 3 已交付：UnknownSource / UnknownQualifiedColumn / AmbiguousColumn / DuplicateAlias / MissingUsingKey / IncompatibleKeyTypes）。
+- [x] 2.1 编写 resolver 测试：表/别名映射、重复别名、未知表、限定列、唯一裸列、歧义裸列、USING 缺失/类型不兼容和 NATURAL 共同列发现（Task 4 已交付：14 测试，13 pass + 1 skip composite ON → Task 8）。
+- [x] 2.2 新建独立 resolver 模块 `src/tinydb/resolver.py`，按 FROM/JOIN 左到右构造来源映射和合并 schema（Task 4 已交付：320 行，ResolvedSource / ResolvedPlan / _build_source_map / _resolve_using_or_natural / _make_resolver / resolve / _fold_expr）。
+- [ ] 2.3 统一解析 SELECT、ON、WHERE、ORDER BY、GROUP BY、HAVING 和聚合参数，输出稳定的列位置/标签（Task 4 部分交付 WHERE/ON/GROUP/ORDER，SELECT projection 留给 Task 5/6，HAVING 留给 Task 6）。
+- [x] 2.4 (partial) 实现 USING 等值 JoinKey 和 NATURAL 同名 JoinKey 共同列发现；合并键输出标签（Task 4 已交付：_resolve_using_or_natural）；错误层级 ResolutionError + 6 子类型（Task 3 已交付）。
 
 ## 3. LogicalPlan 中间层
 
