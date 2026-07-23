@@ -95,6 +95,8 @@ base-ref: 1ca8179b1fd9864102704d396e8e976a0d49d168
 
 ### Task 1: Tokenizer 关键字与 `.` 标点扩展
 
+- [x] Task 1: Tokenizer 关键字与 `.` 标点扩展 — subagent-driven: implementer 2417ecb + reviewer APPROVED_WITH_CONCERNS MINOR spec_id markers deferred
+
 **Files:**
 - Modify: `src/tinydb/tokenizer.py:13-33`（KEYWORDS 集合）、`:142-145`（PUNCT 分支）
 - Modify: `tests/unit/test_tokenizer.py`（追加测试用例）

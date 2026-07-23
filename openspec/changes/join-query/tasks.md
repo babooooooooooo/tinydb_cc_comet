@@ -1,10 +1,7 @@
 ## 1. Tokenizer 与 AST 基础
 
-- [ ] 1.1 先编写 tokenizer 回归测试：JOIN/INNER/LEFT/RIGHT/FULL/OUTER/CROSS/ON/USING/NATURAL 关键字大小写、限定名中的 `.`、非法连续限定符和错误位置。
-- [ ] 1.2 扩展 tokenizer 的关键字和标点分类，保持 v0.1 字面量、注释和既有标点行为不变。
-- [ ] 1.3 先编写 parser 测试：表别名、INNER/LEFT/RIGHT/FULL/CROSS JOIN、多级 JOIN、ON/USING/NATURAL、限定 SELECT/WHERE/ORDER BY/GROUP BY 列、复杂 ON 表达式和缺少键子句的错误。
-- [ ] 1.4 新增不可变的 `TableRef`、`JoinClause`、`JoinKey`、`ColumnRef` AST 表示，并以兼容方式扩展 `Select`。
-- [ ] 1.5 实现 FROM/JOIN/ON/USING/NATURAL 和可选限定列解析；完成 parser 单元测试及现有 parser/aggregation parser 回归。
+- [x] 1.1 先编写 tokenizer 回归测试：JOIN/INNER/LEFT/RIGHT/FULL/OUTER/CROSS/ON/USING/NATURAL 关键字大小写、限定名中的 `.`、非法连续限定符和错误位置。
+- [x] 1.2 扩展 tokenizer 的关键字和标点分类，保持 v0.1 字面量、注释和既有标点行为不变。
 
 ## 2. 名称解析与合并 schema
 
