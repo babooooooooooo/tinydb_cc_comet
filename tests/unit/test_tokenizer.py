@@ -207,3 +207,105 @@ def test_tokenizer_does_not_treat_null_as_ident():
     null_tokens = [t for t in tokens if t.value == "NULL"]
     assert len(null_tokens) == 1
     assert null_tokens[0].type == "KEYWORD"
+
+
+# --- tinydb-join-query (Task 1): JOIN / OUTER / CROSS / ON / USING / NATURAL ---
+# Per Design Doc §5.1, the tokenizer must emit the new JOIN-family keywords
+# as KEYWORD tokens and must emit '.' as a PUNCT token. Regression tests for
+# the existing single-table keyword / literal recognition are also included.
+
+
+@pytest.mark.unit
+def test_tokenize_join_keywords_are_recognized():
+    tokens = tokenize("SELECT * FROM a JOIN b ON a.id = b.id")
+    kw_values = [t.value for t in tokens if t.type == "KEYWORD"]
+    assert "JOIN" in kw_values
+    assert "ON" in kw_values
+    # Case-insensitive: lowercase 'join' must still tokenize as KEYWORD 'JOIN'
+    tokens_lc = tokenize("select * from a join b")
+    assert any(
+        t.type == "KEYWORD" and t.value == "JOIN"
+        for t in tokens_lc
+    ), "lowercase 'join' should be recognized as KEYWORD 'JOIN'"
+
+
+@pytest.mark.unit
+def test_tokenize_all_join_kind_keywords():
+    for kw in ("INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "USING", "NATURAL"):
+        tokens = tokenize(f"SELECT * FROM a {kw} JOIN b")
+        assert any(
+            t.type == "KEYWORD" and t.value == kw for t in tokens
+        ), f"{kw} missing from keyword stream"
+
+
+@pytest.mark.unit
+def test_tokenize_dot_punctuation_for_qualified_columns():
+    tokens = tokenize("SELECT u.id FROM users u")
+    dots = [t for t in tokens if t.type == "PUNCT" and t.value == "."]
+    assert len(dots) == 1, f"expected exactly one '.' PUNCT, got {len(dots)}"
+    # "SELECT u.id": S(1) E(2) L(3) E(4) C(5) T(6) ' '(7) u(8) .(9) i(10) d(11)
+    assert dots[0].line == 1 and dots[0].col == 9
+
+
+@pytest.mark.unit
+def test_tokenize_consecutive_dots_emit_two_puncts():
+    """Per Design Doc §5.1, the tokenizer must accept '.' as PUNCT. Two
+    consecutive '.'s emit two PUNCT tokens — the parser (Task 2) is
+    responsible for the semantic 'consecutive dots are illegal' check."""
+    tokens = tokenize("SELECT u..id FROM t")
+    dots = [t for t in tokens if t.type == "PUNCT" and t.value == "."]
+    assert len(dots) == 2
+    idents = [t.value for t in tokens if t.type == "IDENT"]
+    assert "u" in idents and "id" in idents
+
+
+@pytest.mark.unit
+def test_tokenize_leading_dot_emits_punct():
+    """'.id' starts with '.' which is now a valid PUNCT, followed by
+    IDENT('id'). The tokenizer must not raise; the parser rejects this
+    qualified-name pattern."""
+    tokens = tokenize("SELECT .id FROM t")
+    dots = [t for t in tokens if t.type == "PUNCT" and t.value == "."]
+    assert len(dots) == 1
+    assert any(t.type == "IDENT" and t.value == "id" for t in tokens)
+
+
+@pytest.mark.unit
+def test_tokenize_trailing_dot_emits_punct():
+    """'u.' scans as IDENT(u) + PUNCT(.) — also a parser-rejected form
+    (empty column name after qualifier) but the tokenizer must accept it."""
+    tokens = tokenize("SELECT u. FROM t")
+    dots = [t for t in tokens if t.type == "PUNCT" and t.value == "."]
+    assert len(dots) == 1
+
+
+@pytest.mark.unit
+def test_tokenize_preserves_existing_keywords_and_literals():
+    """Regression: FROM / WHERE / SELECT / TEXT / INT keywords and string /
+    int literals must remain unchanged after the JOIN keyword additions."""
+    tokens = tokenize("SELECT 'abc', 123 FROM t WHERE id = 1")
+    assert any(t.type == "TEXT" and t.value == "abc" for t in tokens)
+    assert any(t.type == "INT" and t.value == 123 for t in tokens)
+    assert any(t.type == "KEYWORD" and t.value == "SELECT" for t in tokens)
+    assert any(t.type == "KEYWORD" and t.value == "FROM" for t in tokens)
+    assert any(t.type == "KEYWORD" and t.value == "WHERE" for t in tokens)
+
+
+@pytest.mark.unit
+def test_tokenize_dot_inside_float_literal_is_not_punct():
+    """Regression: 3.14 must remain a single FLOAT token; the embedded '.'
+    must NOT be emitted as a separate PUNCT. The float-literal branch in the
+    tokenizer consumes the '.' greedily before reaching the PUNCT branch."""
+    tokens = tokenize("SELECT 3.14 FROM t")
+    floats = [t for t in tokens if t.type == "FLOAT"]
+    assert len(floats) == 1 and floats[0].value == 3.14
+    # No '.' PUNCT in the stream when the only '.' is inside a float literal.
+    dots = [t for t in tokens if t.type == "PUNCT" and t.value == "."]
+    assert dots == []
+
+
+@pytest.mark.unit
+def test_tokenize_as_keyword_is_recognized():
+    """AS is the alias introducer (Task 2); tokenizer must emit KEYWORD."""
+    tokens = tokenize("SELECT * FROM users AS u")
+    assert any(t.type == "KEYWORD" and t.value == "AS" for t in tokens)

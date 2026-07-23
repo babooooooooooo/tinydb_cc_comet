@@ -30,6 +30,9 @@ KEYWORDS = {
     # --- tinydb-aggregation (T1): aggregate keywords ---
     "COUNT", "SUM", "AVG", "MIN", "MAX",
     "GROUP", "BY", "HAVING",
+    # --- tinydb-join-query (T1): JOIN-family keywords + AS alias marker ---
+    "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS",
+    "ON", "USING", "NATURAL", "AS",
 }
 # TRUE / FALSE excluded from KEYWORDS: they emit BOOL literals (Task 13 spec).
 
@@ -140,7 +143,10 @@ def tokenize(sql: str) -> list[Token]:
             continue
         # punctuation
         # --- tinydb-aggregation: '!' added so HAVING != is parseable as a PUNCT.
-        if c in "(),;=*<>!":
+        # --- tinydb-join-query (T1): '.' added so `u.id` qualified names tokenize
+        # as IDENT('u') PUNCT('.') IDENT('id'). Consecutive / leading / trailing
+        # dot patterns are rejected by the parser (Task 2).
+        if c in "(),;=*<>!.":
             tokens.append(Token("PUNCT", c, line, col))
             i, line, col = _advance(i, line, col, c)
             continue
