@@ -77,3 +77,64 @@ class PageFull(TinydbError):
 
 
 class CatalogFull(TinydbError): ...
+
+
+# --- tinydb-join-query (T3): name resolution errors -----------------------
+
+class ResolutionError(ExecutionError):
+    """名称解析阶段抛出的错误基类（未知表 / 限定列 / 歧义 / USING 缺失 等）。"""
+
+
+class UnknownSource(ResolutionError):
+    """FROM / JOIN 中的表名或别名不在 catalog。"""
+
+    def __init__(self, qualifier_or_name: str):
+        super().__init__(f"unknown table or alias: {qualifier_or_name!r}")
+        self.qualifier_or_name = qualifier_or_name
+
+
+class UnknownQualifiedColumn(ResolutionError):
+    """限定列 `qualifier.column` 在 source_map 中无对应。"""
+
+    def __init__(self, qualifier: str, column: str):
+        super().__init__(f"unknown column {column!r} in source {qualifier!r}")
+        self.qualifier = qualifier
+        self.column = column
+
+
+class AmbiguousColumn(ResolutionError):
+    """裸列名在多个 source 中同时存在。"""
+
+    def __init__(self, column: str, sources):
+        s = tuple(sources)
+        super().__init__(f"ambiguous column {column!r} in sources {s!r}")
+        self.column = column
+        self.sources = s
+
+
+class DuplicateAlias(ResolutionError):
+    """同一别名指向多个 source。"""
+
+    def __init__(self, alias: str, source1: str, source2: str):
+        super().__init__(f"duplicate alias {alias!r}: {source1!r} vs {source2!r}")
+        self.alias = alias
+        self.source1 = source1
+        self.source2 = source2
+
+
+class MissingUsingKey(ResolutionError):
+    """USING 列表中的列在某一侧 source 缺失。"""
+
+    def __init__(self, column: str, side: str):
+        super().__init__(f"USING column {column!r} missing from {side!r} source")
+        self.column = column
+        self.side = side
+
+
+class IncompatibleKeyTypes(ResolutionError):
+    """USING / NATURAL 共同列类型不可比较。"""
+
+    def __init__(self, left_type: str, right_type: str):
+        super().__init__(f"incompatible USING/NATURAL key types: {left_type!r} vs {right_type!r}")
+        self.left_type = left_type
+        self.right_type = right_type
