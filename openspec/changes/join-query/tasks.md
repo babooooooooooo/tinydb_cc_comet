@@ -11,7 +11,7 @@
 - [ ] 2.1 先编写 resolver 测试：表/别名映射、重复别名、未知表、限定列、唯一裸列、歧义裸列、USING 缺失/类型不兼容和 NATURAL 共同列发现。
 - [ ] 2.2 新建独立 resolver 模块，按 FROM/JOIN 左到右构造来源映射和合并 schema。
 - [ ] 2.3 统一解析 SELECT、ON、WHERE、ORDER BY、GROUP BY、HAVING 和聚合参数，输出稳定的列位置/标签。
-- [ ] 2.4 实现 USING 等值 JoinKey、NATURAL 同名 JoinKey 和合并键输出标签；定义 JOIN 错误契约并在错误层级中提供可诊断错误。
+- [x] 2.4 (partial) 在 errors 层级定义 ResolutionError + 6 子类型契约（Task 3 已交付：UnknownSource / UnknownQualifiedColumn / AmbiguousColumn / DuplicateAlias / MissingUsingKey / IncompatibleKeyTypes）。
 
 ## 3. LogicalPlan 中间层
 

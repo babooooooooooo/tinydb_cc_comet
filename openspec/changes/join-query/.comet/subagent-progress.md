@@ -19,7 +19,7 @@
 |-----------|------|------|-----------|---------------|----------------|----------|------|
 | Task 1 Tokenizer 关键字与 `.` 标点 | done | 2417ecb | 7 fail → 29 pass (tokenizer) + 698 pass (regression) | APPROVED_WITH_CONCERNS (MINOR: spec_id markers deferred to Task 2) | 0 | partial: input parsing | [x] |
 | Task 2 Parser AST + FROM/JOIN 解析 | done | 961af68 | 14 fail → 30 pass (parser) + 712 pass (full) | APPROVED_WITH_CONCERNS (MINOR parser.py 1509 vs ≤1300; JoinOnPredicate doc补充; ORDER/GROUP qualifier test gaps) | 0 | parser.py +209 over budget | [x] |
-| Task 3 ResolutionError 子类型 | pending | — | — | — | 0 | — | ☐ |
+| Task 3 ResolutionError 子类型 | done | b081c6e | 8 fail → 8 pass (join_errors) + 720 pass (full) | APPROVED_WITH_CONCERNS (MINOR test unused pytest import; missing attr/message regression asserts; ACCEPT errors.py 140/140 at budget) | 0 | public API: 6 new errors + 4 AST re-exports | [x] |
 | Task 4 Resolver 模块 | pending | — | — | — | 0 | — | ☐ |
 | Task 5 LogicalPlan 中间层 | pending | — | — | — | 0 | — | ☐ |
 | Task 6 INNER/CROSS JOIN 执行 | pending | — | — | — | 0 | — | ☐ |

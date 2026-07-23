@@ -635,6 +635,8 @@ git commit -m "feat(parser): add TableRef/JoinClause/JoinKey/JoinOnPredicate/Col
 
 ### Task 3: 错误类型契约 + ResolutionError 子类型
 
+- [x] Task 3: 错误类型契约 + ResolutionError 子类型 — subagent-driven: implementer b081c6e + reviewer APPROVED_WITH_CONCERNS MINOR test unused pytest import MINOR missing regression asserts for attrs/messages ACCEPT errors.py 140/140 at budget
+
 **Files:**
 - Modify: `src/tinydb/errors.py`（追加 `ResolutionError` 及 6 个子类型）
 - Modify: `src/tinydb/__init__.py`（再导出）
