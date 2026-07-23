@@ -53,6 +53,9 @@ class ResolvedPlan:
     having_resolved: Any
     aggregate_resolved: tuple
     outer_kind: Optional[str] = None
+    # --- tinydb-join-query (T6): per-Join 切分，chained JOIN 时按 join 出现顺序 ---
+    per_join_keys: tuple = ()  # tuple[tuple[JoinKey, ...], ...] 按 join 顺序
+    per_join_on_resolved: tuple = ()  # tuple[Any, ...] 按 join 顺序
 
 
 def _source_id_for(name: str, alias: Optional[str]) -> str:
@@ -196,10 +199,14 @@ def _fold_equals_expr(expr: EqualsExpr, resolver: Callable) -> tuple:
 
 
 def _fold_join_predicate(pred: JoinOnPredicate, resolver: Callable) -> tuple:
-    """fold ``JoinOnPredicate`` -> ``(op, left_pos, right_pos_or_lit)``。"""
-    lpos, _ = resolver((pred.left.qualifier, pred.left.name))
-    rpos, _ = resolver((pred.right.qualifier, pred.right.name))
-    return (pred.op, lpos, rpos)
+    """fold ``JoinOnPredicate`` -> ``(op, left_pos, right_pos, l_src_id, r_src_id)``。
+
+    保留 source_id 以便执行层在每个 Join 节点上把 source-local 位置 remap 到
+    subtree-local 位置（chained JOIN 时 left 子树是复合的，无法直接用 source-local pos）。
+    """
+    lpos, lsrc = resolver((pred.left.qualifier, pred.left.name))
+    rpos, rsrc = resolver((pred.right.qualifier, pred.right.name))
+    return (pred.op, lpos, rpos, lsrc.source_id, rsrc.source_id)
 
 
 def _fold_expr(expr: Any, resolver: Callable) -> Any:
@@ -271,6 +278,8 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     resolver = _make_resolver(sources)
 
     merged_keys: list = []
+    per_join_keys: list = []
+    per_join_on_resolved: list = []
     outer_kind: Optional[str] = None
 
     # 计算 merged_keys 与外连接 kind（NATURAL 无共同列时记录）。
@@ -291,6 +300,7 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
             join, left_src, right_src, left_ti, right_ti,
         )[0]
         merged_keys.extend(keys)
+        per_join_keys.append(keys)
         if join.natural and not keys:
             outer_kind = join.kind
 
@@ -301,6 +311,10 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     on_resolved = tuple(
         _fold_expr(j.on_expr, resolver) for j in ast.joins if j.on_expr is not None
     )
+    # per-Join ON：可能为 None（USING/CROSS）
+    per_join_on_resolved = tuple(
+        _fold_expr(j.on_expr, resolver) for j in ast.joins
+    )
     where_resolved = (
         _fold_expr(ast.where, resolver) if ast.where is not None else None
     )
@@ -309,6 +323,8 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
         sources=sources,
         output_schema=output_schema,
         merged_keys=tuple(merged_keys),
+        per_join_keys=tuple(per_join_keys),
+        per_join_on_resolved=tuple(per_join_on_resolved),
         column_resolver=resolver,
         on_resolved=on_resolved,
         where_resolved=where_resolved,

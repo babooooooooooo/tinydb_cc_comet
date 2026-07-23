@@ -111,15 +111,18 @@ def build_plan(ast: Select, catalog: Catalog) -> LogicalPlan:
     ]
 
     # 左深构造 Join 节点。
-    # merged_keys 是 resolver 阶段按 join 出现顺序 flat-append 的所有 USING/NATURAL keys。
-    # 单 JOIN 场景（Task 5 范围）所有 merged_keys 都属于唯一 Join；多 JOIN 顺序切分
-    # 留给 Task 6/7 实际 JOIN 执行场景。
+    # 每个 Join 节点只用自己那一层的 keys 和 on_expr（resolver 提供 per_join_* 字段）；
+    # 这样 chained JOIN 时各层独立 evaluate 各自的 ON 谓词。
     current: LogicalPlan = scans[0]
-    for join_ast, scan in zip(ast.joins, scans[1:]):
+    for i, (join_ast, scan) in enumerate(zip(ast.joins, scans[1:])):
+        per_keys = rp.per_join_keys[i] if i < len(rp.per_join_keys) else ()
+        per_on = rp.per_join_on_resolved[i] if i < len(rp.per_join_on_resolved) else None
+        # 包装为 tuple-of-tuples 以便执行层 for pred in node.on_expr 正确迭代
+        on_expr_for_node: Any = (per_on,) if per_on is not None else ()
         current = Join(
             kind=join_ast.kind, left=current, right=scan,
-            keys=rp.merged_keys,
-            on_expr=rp.on_resolved,
+            keys=per_keys,
+            on_expr=on_expr_for_node,
             natural=join_ast.natural,
         )
 

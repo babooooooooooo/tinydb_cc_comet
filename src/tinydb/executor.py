@@ -1219,6 +1219,17 @@ class Executor:
         on the legacy path. ``database.py`` wraps both into ``Row`` based
         on the parser's projected column names (``stmt.columns``).
         """
+        # --- tinydb-join-query (T6): JOIN dispatch ---
+        if stmt.joins:
+            from tinydb.plan import build_plan
+            from tinydb._join_executor import JoinExecutor
+            from tinydb.database import Row
+            plan = build_plan(stmt, self.catalog)
+            je = JoinExecutor(self)
+            rows, schema = je.execute_plan(plan)
+            cols = self._join_output_columns(stmt, schema)
+            return [Row(values=tuple(r), columns=cols) for r in rows]
+
         ti = self.catalog.get_table(stmt.table)
         if ti is None:
             raise ExecutionError(f"table {stmt.table!r} does not exist")
@@ -1289,6 +1300,17 @@ class Executor:
                 proj_idx.append(name_to_idx[cname])
 
         return proj_idx, aggregate_path
+
+    # --- tinydb-join-query (T6): JOIN output columns ----------------------
+
+    def _join_output_columns(self, stmt: Select, schema: list) -> tuple:
+        """按 JoinExecutor 返回的 schema 构造 Row 列名。
+
+        SELECT * 路径下，schema 已经包含限定列名（来自 resolver.output_schema）。
+        限定 SELECT 路径下，schema 已经是 Project 节点按 ``items`` 顺序产出的
+        标签列表 —— 直接透传即可。
+        """
+        return tuple(schema)
 
     def _exec_indexed_select(
         self,

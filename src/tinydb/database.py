@@ -28,6 +28,15 @@ class Row:
             raise AttributeError(name)
         return self.values[self.columns.index(name)]
 
+    def __getitem__(self, key):
+        """支持 ``r["u.id"]`` 这类含点列名的下标访问（tinydb-join-query T6）。
+        非 str key 走默认 tuple-like 索引（兼容 ``r[0]``）。"""
+        if isinstance(key, str):
+            if key not in self.columns:
+                raise KeyError(key)
+            return self.values[self.columns.index(key)]
+        return self.values[key]
+
     def __iter__(self) -> Iterator[Any]:
         return iter(self.values)
 
@@ -94,6 +103,10 @@ class Database:
 
         last = stmts.statements[-1] if stmts.statements else None
         if isinstance(last, Select) and results:
+            # --- tinydb-join-query (T6): JOIN path 已是 list[Row]，跳过二次包装 ---
+            if last.joins:
+                if results and isinstance(results[0], Row):
+                    return results
             ti = self.catalog.get_table(last.table)
             if ti is not None:
                 cols = tuple(n for n, _ in ti.schema) if last.columns == ("*",) else tuple(last.columns)
