@@ -15,10 +15,10 @@
 
 ## 3. LogicalPlan 中间层
 
-- [ ] 3.1 先编写 plan 构造测试：单表计划、左深多表计划、各种 Join kind、ON/USING/NATURAL key 字段、节点字段、子节点顺序和无副作用构造。
-- [ ] 3.2 新建不可变 plan 模块，定义 Scan、Join、Filter、Aggregate、Sort、Project、Limit 等逻辑节点。
-- [ ] 3.3 实现从 Select AST 到 LogicalPlan 的构造，集中完成名称解析、隐式 NATURAL key 生成和阶段顺序编排。
-- [ ] 3.4 为单表 Select 保留 v0.1 indexed/scan/aggregation 路径或等价适配，并添加单表计划回归护栏。
+- [x] 3.1 编写 plan 构造测试：单表计划、左深多表计划、各种 Join kind、ON/USING/NATURAL key 字段、节点字段、子节点顺序和无副作用构造（Task 5 已交付：9 测试，catalog/pager 副作用自由验证）。
+- [x] 3.2 新建不可变 plan 模块 `src/tinydb/plan.py`，定义 Scan / Join / Filter / Aggregate / Sort / Project / Limit 等逻辑节点（Task 5 已交付：221 行，frozen dataclass + Union 类型别名 + format_plan）。
+- [x] 3.3 (partial) 实现从 Select AST 到 LogicalPlan 的构造 `build_plan(ast, catalog)`，集中完成名称解析、隐式 NATURAL key 生成和阶段顺序编排（Task 5 已交付：单 JOIN 完整，multi-JOIN keys/expr 切分留给 Task 6/7，Aggregate group_keys/aggregates 实际填充留给 Task 6/8）。
+- [ ] 3.4 为单表 Select 保留 v0.1 indexed/scan/aggregation 路径或等价适配，并添加单表计划回归护栏（Task 5 已实现单表 plan；执行层适配留给 Task 6/8）。
 
 ## 4. INNER/CROSS JOIN 执行
 

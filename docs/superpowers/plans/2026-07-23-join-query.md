@@ -1270,6 +1270,8 @@ git commit -m "feat(resolver): add source-map + merged-schema + USING/NATURAL Jo
 
 ### Task 5: LogicalPlan 中间层（plan 模块 + build_plan + format）
 
+- [x] Task 5: LogicalPlan 中间层（plan 模块 + build_plan + format） — subagent-driven: implementer 8433fe0 + reviewer APPROVED_WITH_CONCERNS PREVENTIVE-C1 multi-JOIN keys/expr 切分 留 Task 6/7 PREVENTIVE-C2 Aggregate group_keys/aggregates 空壳 留 Task 6/8 accept 4 plan deviations accept Limit bottom-up order
+
 **Files:**
 - Create: `src/tinydb/plan.py`
 - Create: `tests/unit/test_plan.py`
