@@ -13,6 +13,10 @@ from tinydb.parser import (
     AggregateCall, SelectItem,
     TableRef, JoinClause, JoinKey, ColumnRef,
 )
+from tinydb.plan import (
+    LogicalPlan, Scan, Join, Filter, Aggregate, Sort, Project, Limit,
+    build_plan, format_plan,
+)
 
 __version__ = "0.1.0"
 
@@ -22,6 +26,8 @@ __all__ = [
     "EqualsExpr", "AndExpr", "OrExpr", "NotExpr", "OrderByItem",
     "AggregateCall", "SelectItem",
     "TableRef", "JoinClause", "JoinKey", "ColumnRef",
+    "LogicalPlan", "Scan", "Join", "Filter", "Aggregate", "Sort", "Project", "Limit",
+    "build_plan", "format_plan",
     "TinydbError", "TokenError", "ParseError", "ExecutionError",
     "ResolutionError", "AmbiguousColumn", "DuplicateAlias",
     "UnknownSource", "UnknownQualifiedColumn", "MissingUsingKey", "IncompatibleKeyTypes",
