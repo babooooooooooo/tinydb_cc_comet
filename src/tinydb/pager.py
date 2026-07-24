@@ -12,7 +12,13 @@ residue require an explicit migration path and raise SchemaMismatch.
 import mmap
 import os
 
-from tinydb.errors import InvalidDatabaseFile, SchemaMismatch, UnsupportedSchemaVersion
+from tinydb._filelock import FileLock, _HAS_FCNTL
+from tinydb.errors import (
+    DatabaseLocked,
+    InvalidDatabaseFile,
+    SchemaMismatch,
+    UnsupportedSchemaVersion,
+)
 from tinydb.wal import Wal
 
 MAGIC = b'TINYDB\x00\x03'  # 8 bytes; version byte at offset 7
@@ -32,7 +38,7 @@ class Pager:
     integration methods (``wal_append_*``, ``write_main_page``, ``fsync_main``).
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, locking: bool = True):
         self._path = path
         self._is_memory = path == ":memory:"
         self._file = None
@@ -43,12 +49,34 @@ class Pager:
         # WAL integration (Task 2). Lazy-initialized via ``_get_or_open_wal``.
         self._wal: "Wal | None" = None
         self._wal_path: str | None = None
+        # Concurrency control (Task 2 of tinydb-concurrency-control):
+        # per-fd fcntl.flock. ``locking`` kwarg defaults to True; skip for
+        # ``:memory:`` or explicit ``locking=False``. ``_HAS_FCNTL=False``
+        # with ``locking=True`` raises ImportError (fail-fast, not silent
+        # degradation).
+        locking_requested = locking and not self._is_memory
+        self._is_locking_enabled = locking_requested and _HAS_FCNTL
+        if locking_requested and not _HAS_FCNTL:
+            raise ImportError(
+                "tinydb concurrency control requires fcntl (Linux/WSL only)"
+            )
+        self._file_lock: "FileLock | None" = None
 
         if self._is_memory:
             page = self._alloc_page(0)
             self._init_page0(page)
         else:
             self._open_file()
+            # Acquire cross-process flock now that fd is open. On failure
+            # close fd to avoid leaking, then propagate DatabaseLocked.
+            if self._is_locking_enabled and self._file is not None:
+                self._file_lock = FileLock(self._file.fileno(), self._path)
+                try:
+                    self._file_lock.try_acquire()
+                except DatabaseLocked:
+                    self._file.close()
+                    self._file = None
+                    raise
             self._init_wal()
 
     def _open_file(self) -> None:
@@ -197,7 +225,12 @@ class Pager:
         return 1
 
     def close(self) -> None:
-        """Release mmap, file handle, and any open WAL handle."""
+        """Release mmap, file handle, file lock, and any open WAL handle."""
+        if self._file_lock is not None:
+            try:
+                self._file_lock.release()
+            finally:
+                self._file_lock = None
         if self._wal is not None:
             try:
                 self._wal.close()

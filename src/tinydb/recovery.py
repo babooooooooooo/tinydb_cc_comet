@@ -76,7 +76,12 @@ def _truncate_wal_to(wal_path: str, offset: int) -> None:
 
 def _apply_committed(main_path: str, pending: dict[int, dict[int, bytes]], status: dict[int, str]) -> None:
     from tinydb.pager import Pager
-    p = Pager(main_path)
+    # ``locking=False``: the outer Pager (caller of Recovery.replay) already
+    # holds the cross-process flock; opening a new fd on the same file and
+    # trying to acquire LOCK_EX | LOCK_NB would EWOULDBLOCK (Linux flock is
+    # per-fd, not per-process). The inner Pager is only used to write pages
+    # and fsync — no lock acquisition needed.
+    p = Pager(main_path, locking=False)
     try:
         for txn_id in sorted(pending.keys()):
             if status.get(txn_id) != "committed":
