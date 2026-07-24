@@ -57,8 +57,14 @@
 
 ## 8. 全面验证与文档
 
-- [ ] 8.1 增加 JOIN parser、resolver、plan、执行、组合语义的 unit/integration/property/E2E 测试和 golden SQL，覆盖 ON/USING/NATURAL。
-- [ ] 8.2 运行完整 pytest、覆盖率、pyflakes 和 OpenSpec strict validation；覆盖率不得低于 v0.1 基线。
-- [ ] 8.3 审计新增模块行数和 `executor.py` 变化，确保 JOIN 逻辑保持模块化并记录偏差。
+- [x] 8.1 增加 JOIN parser、resolver、plan、执行、组合语义的 unit/integration/property/E2E 测试和 golden SQL，覆盖 ON/USING/NATURAL。
+- [x] 8.2 运行完整 pytest、覆盖率、pyflakes 和 OpenSpec strict validation；覆盖率不得低于 v0.1 基线。
+- [x] 8.3 审计新增模块行数和 `executor.py` 变化，确保 JOIN 逻辑保持模块化并记录偏差。
+- [x] 8.4 更新 `docs/MVP_LIMITATIONS.md`、README 或操作手册中的单表限制和 v0.2 JOIN 能力说明。
+- [x] 8.5 生成 JOIN change 验证报告，记录基线、测试结果、覆盖率、已知限制和与 `cli-enhancement` 的计划接口依赖。
+
+**Task 10 closeout**: commits `3262279` (DV-T9-1 fix) + `cbbac20` (golden SQL) + `0e0e221` (conftest exclusion) + `1798bdb` (docs) + `d0c00f8` (coverage boost) + `a82e449` (verify report). 8 E2E golden pass; full suite 796 pass + 1 skip (baseline 783+1 → +8 from golden). Final reviewer verdict: APPROVED_WITH_CONCERNS — all 15 Design Doc §11 acceptance items PASS (1 MINOR CONCERN: OpenSpec CLI missing → manual verification); architecture quality all PASS; integration verification all prior-layer tests pass (aggregation 17/17, ACID 6/6, constraints, engine-v1 10/10); deviations HONEST (6 recorded in verify report §5). Coverage 92.36% (new modules ≥85% threshold). 2 MINOR follow-ups recorded: (a) `LogicalPlan.format()` instance method not implemented (module-level `format_plan()` only); (b) SELECT-clause `_project_row` raises `ValueError` instead of `UnknownQualifiedColumn`. Both non-blocking.
+
+**Final reviewer verdict (opus tier)**: RECOMMENDATION: APPROVE — high-quality 10-task build, clean 3-module separation, ACID preserved, complete ResolutionError hierarchy, honest deviation reporting.
 - [ ] 8.4 更新 `docs/MVP_LIMITATIONS.md`、README 或操作手册中的单表限制和 v0.2 JOIN 能力说明。
 - [ ] 8.5 生成 JOIN change 验证报告，记录基线、测试结果、覆盖率、已知限制和与 `cli-enhancement` 的计划接口依赖。
