@@ -39,11 +39,13 @@
 
 ## 6. JOIN 后查询阶段
 
-- [ ] 6.1 先编写 JOIN + WHERE/投影/SELECT * 测试，覆盖限定列、USING/NATURAL 合并键、未知列、歧义列和输出顺序。
-- [ ] 6.2 让过滤、投影和 wildcard 展开消费合并 schema 与 resolver，保留单表裸列标签。
-- [ ] 6.3 先编写 JOIN + GROUP BY/HAVING/COUNT/SUM 等聚合测试，并将聚合 helper 适配为合并 schema。
-- [ ] 6.4 先编写 JOIN + ORDER BY/LIMIT/OFFSET 测试，确保排序发生在限制之前并支持限定排序键。
-- [ ] 6.5 回归现有 aggregation、group/having、sort、limit/offset 测试。
+- [x] 6.1 先编写 JOIN + WHERE/投影/SELECT * 测试，覆盖限定列、USING/NATURAL 合并键、未知列、歧义列和输出顺序。
+- [x] 6.2 让过滤、投影和 wildcard 展开消费合并 schema 与 resolver，保留单表裸列标签。
+- [x] 6.3 先编写 JOIN + GROUP BY/HAVING/COUNT/SUM 等聚合测试，并将聚合 helper 适配为合并 schema。
+- [x] 6.4 先编写 JOIN + ORDER BY/LIMIT/OFFSET 测试，确保排序发生在限制之前并支持限定排序键。
+- [x] 6.5 回归现有 aggregation、group/having、sort、limit/offset 测试。
+
+**Task 8 closeout**: commit `cd1a512` (impl) + `630c176` (dead-code cleanup). 8 unit + 25 integration + 2 property tests pass; full suite 773 pass + 1 skip (baseline 765+1 → +8 from new tests). Reviewer spec PASS + code-quality APPROVED_WITH_CONCERNS (4 MINOR: dead `_resolve_order_key` removed; ambiguous bare column error message; HAVING not yet `qualifier.col` parser-aware; `AggregateCall.arg` tuple-length branching). Module budgets: `_join_executor.py` 671/700 (within), `resolver.py` 559/500 (+59 — NEW deviation: T8 fold of GROUP BY/HAVING/ORDER BY + `_merged_position` helper), `plan.py` 223/350 (within), `parser.py` 1520/1300 (+220 — pre-existing Task 2 C3 deviation, +11 net from T8). Coverage 91.95%. Task 6 I-3 follow-up completed: GROUP BY over JOIN now properly aggregates (not silent fallback).
 
 ## 7. Python API 与计划消费接口
 
