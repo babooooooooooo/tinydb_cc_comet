@@ -156,8 +156,6 @@ class JoinExecutor:
         """
         out: list = []
         # 处理 left 中的列：合并键保留为 label，非合并键保留 qualified 名
-        merge_pairs = {(k.left_col, k.right_col, k.label) for k in node.keys}
-        merge_left_labels = {k.label for k in node.keys}
         merge_left_idx = {k.left_col: k.label for k in node.keys}
         for i, col in enumerate(left_schema):
             if i in merge_left_idx:
