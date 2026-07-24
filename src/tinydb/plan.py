@@ -174,12 +174,6 @@ def build_plan(ast: Select, catalog: Catalog) -> LogicalPlan:
     return current
 
 
-def _resolve_order_key(it, rp) -> int:
-    """ORDER BY ``OrderByItem`` → merged schema 中的列位置。"""
-    pos, _ = rp.column_resolver((getattr(it, "qualifier", None), it.column))
-    return pos
-
-
 # --- 格式（稳定缩进文本，供 .explain 打印） --------------------------------
 
 
