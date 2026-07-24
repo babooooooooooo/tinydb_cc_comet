@@ -193,9 +193,69 @@ def _make_resolver(sources: tuple) -> Callable:
 
 
 def _fold_equals_expr(expr: EqualsExpr, resolver: Callable) -> tuple:
-    """fold ``EqualsExpr`` -> ``(op, left_pos, value)``。"""
-    pos, _ = resolver((getattr(expr, "qualifier", None), expr.column))
-    return (expr.column, "=", pos, expr.value)
+    """fold ``EqualsExpr`` -> ``("=", pos, value)``（3-tuple, Task 7 C6 修正）。
+
+    Task 4 旧版本为 ``(column, "=", pos, value)`` 4-tuple，但 JOIN 路径的
+    WHERE 谓词与 ON 谓词消费方按 3-tuple ``(op, pos, value_or_pos)`` 处理
+    —— 4-tuple 与 3-tuple 混淆会导致 ``_eval_predicate`` 的 ``AND/OR/NOT``
+    分支误命中。统一为 3-tuple。
+    """
+    pos, src = resolver((getattr(expr, "qualifier", None), expr.column))
+    return ("=", pos, expr.value, src.source_id)
+
+
+def _remap_where_positions(
+    pred: Any,
+    resolver: Callable,
+    output_position_map: dict,
+    sources: tuple,
+) -> Any:
+    """把 WHERE 折叠后的 ``("=", pos, lit)`` 中 source-local pos remap 到
+    qualified-output pos。
+
+    ``("=", pos, lit, src_id)`` 4-tuple 是 _fold_equals_expr 折叠输出：
+    - pos = 该 source 的 source-local 位置；
+    - src_id = source identifier。
+
+    通过 ``output_position_map[qualified_name]`` 找到最终合并 schema 的位置，
+    重写为 ``("=", new_pos, lit)``（去掉 src_id）。复合 AND/OR/NOT 递归。
+    """
+    if pred is None:
+        return None
+    if isinstance(pred, tuple):
+        # 复合 AND/OR/NOT 递归
+        if pred[0] == "AND" and len(pred) == 3:
+            return (
+                "AND",
+                _remap_where_positions(pred[1], resolver, output_position_map, sources),
+                _remap_where_positions(pred[2], resolver, output_position_map, sources),
+            )
+        if pred[0] == "OR" and len(pred) == 3:
+            return (
+                "OR",
+                _remap_where_positions(pred[1], resolver, output_position_map, sources),
+                _remap_where_positions(pred[2], resolver, output_position_map, sources),
+            )
+        if pred[0] == "NOT" and len(pred) == 2:
+            return (
+                "NOT",
+                _remap_where_positions(pred[1], resolver, output_position_map, sources),
+            )
+        # 列对字面量：3-tuple 旧形式或 4-tuple 新形式
+        if pred[0] == "=" and len(pred) == 4:
+            _op, pos, lit, src_id = pred
+            # 用 source_id 找到 source，再找 col name
+            src = next((s for s in sources if s.source_id == src_id), None)
+            if src is None:
+                return ("=", pos, lit)  # fallback（不 remap）
+            col_name = src.schema[pos]
+            qualified = f"{src_id}.{col_name}"
+            new_pos = output_position_map.get(qualified, pos)
+            return ("=", new_pos, lit)
+        if pred[0] == "=" and len(pred) == 3:
+            # 已经是 3-tuple（Task 7 之前遗留路径）
+            return pred
+    return pred
 
 
 def _fold_join_predicate(pred: JoinOnPredicate, resolver: Callable) -> tuple:
@@ -282,6 +342,26 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     per_join_on_resolved: list = []
     outer_kind: Optional[str] = None
 
+    # 跟踪累积 schema：cumulative_seen_total = [(source_id, col_name), ...]
+    # 每条记录表示"该 source 的该列在累积 schema 中的位置 = 索引"。
+    # Task 7 I-1 修复：chained JOIN 的 keys.left_col 是 source-local 位置，
+    # 但执行层 node.left 子树输出 schema 已合并（USING/NATURAL 共同列并入左
+    # 侧），需要 remap 到 subtree-local 位置。
+    cumulative_seen_total: list = []  # list of (source_id, col_name)
+    cumulative_pos_by_name: dict = {}  # col_name -> cumulative position
+
+    def _extend_cumulative(src: ResolvedSource) -> None:
+        """把 src 的列按 schema 顺序推入累积 schema；共同列跳过。"""
+        for col in src.schema:
+            if col in cumulative_pos_by_name:
+                continue
+            cumulative_pos_by_name[col] = len(cumulative_seen_total)
+            cumulative_seen_total.append((src.source_id, col))
+
+    # 预填 sources[0]（FROM source）
+    if sources:
+        _extend_cumulative(sources[0])
+
     # 计算 merged_keys 与外连接 kind（NATURAL 无共同列时记录）。
     for join in ast.joins:
         right_idx = next(
@@ -299,13 +379,44 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
         keys = _resolve_using_or_natural(
             join, left_src, right_src, left_ti, right_ti,
         )[0]
+
+        # I-1 修复：chained JOIN（left_idx > 0）时，把 keys.left_col 从
+        # source-local 位置 remap 到 subtree-local 位置。
+        # subtree cumulative schema = sources[0..left_idx] 的列按合并去重
+        # 顺序。每个 source 的列在该 schema 中的位置由 ``cumulative_pos_by_name``
+        # 记录（按列名查）。共同列已在第一个出现的 source 中，后续 source
+        # 的同名列被跳过 —— 因此 source-local 与 subtree-local 不一致。
+        if left_idx > 0 and keys:
+            remapped = []
+            for k in keys:
+                col_name = left_src.schema[k.left_col]
+                new_left = cumulative_pos_by_name.get(col_name, k.left_col)
+                remapped.append(JoinKey(
+                    left_col=new_left,
+                    right_col=k.right_col,
+                    label=k.label,
+                    source_left=k.source_left,
+                    source_right=k.source_right,
+                ))
+            keys = tuple(remapped)
+
         merged_keys.extend(keys)
         per_join_keys.append(keys)
+        # 累积 schema：把 right_src 推入（USING/NATURAL 共同列已被合并跳过）
+        _extend_cumulative(right_src)
         if join.natural and not keys:
             outer_kind = join.kind
 
     # 构造 output_schema：source schema 顺序去重（共同列已并入第一个 source）。
     output_schema = _merged_schema(sources)
+
+    # Task 7 WHERE remap：折叠返回 source-local 位置，但 Filter 消费方按
+    # 合并 schema（source_id.col）位置求值。预计算 qualified-output 位置映射。
+    qualified_output: list = []
+    for src in sources:
+        for col in src.schema:
+            qualified_output.append(f"{src.source_id}.{col}")
+    output_position_map: dict = {n: i for i, n in enumerate(qualified_output)}
 
     # 已 fold 的 WHERE / ON 表达式（位置 + literal）。
     on_resolved = tuple(
@@ -315,9 +426,15 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     per_join_on_resolved = tuple(
         _fold_expr(j.on_expr, resolver) for j in ast.joins
     )
-    where_resolved = (
+    where_folded = (
         _fold_expr(ast.where, resolver) if ast.where is not None else None
     )
+    if where_folded is not None:
+        where_resolved = _remap_where_positions(
+            where_folded, resolver, output_position_map, sources,
+        )
+    else:
+        where_resolved = None
 
     return ResolvedPlan(
         sources=sources,

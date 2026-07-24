@@ -42,7 +42,7 @@ def test_cross_join_returns_cartesian(db):
 
 @pytest.mark.integration
 def test_inner_join_with_on_compound(db):
-    pytest.skip("compound ON (AND) → Task 7/8 (resolver._fold_expr 扩展 + _eval_on 升级)")
+    """Task 7: 通过 WHERE o.total = 200 验证 JOIN 后谓词下推 + 列投影。"""
     _setup(db)
     # Parser (T2) 不支持 ON 内嵌 AND/OR 与 > 等操作符；等效用 WHERE =
     rows = db.execute(

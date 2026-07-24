@@ -1,17 +1,24 @@
-"""JOIN 执行：nested-loop INNER / CROSS baseline（Task 6）。
+"""JOIN 执行：nested-loop INNER / CROSS / LEFT / RIGHT / FULL（Task 6 + Task 7）。
 
-设计依据：Design Doc §3.2 / §4.1 / §4.2 / §5.3。事务读路由由 executor 负责，
-本模块仅消费 plan 树并在必要时调 ``executor._scan_table``。LEFT/RIGHT/FULL/
-NATURAL outer、复合 ON、GROUP BY 关联等扩展留待后续 task。
+设计依据：Design Doc §3.2 / §4.1 / §4.2 / §4.4 / §5.3。事务读路由由 executor 负责，
+本模块仅消费 plan 树并在必要时调 ``executor._scan_table``。
 
 ON 谓词的位置语义：resolver 折叠后的 ``on_expr`` 是 ``(op, lpos, rpos, l_src_id,
 r_src_id)``，其中 ``lpos`` / ``rpos`` 是 source-local 位置（在该 source 的 schema
 中）。chained JOIN 时 left 子树是复合的，因此执行层需把 source-local 位置 remap
 到 subtree-local 位置 —— 实现见 :meth:`_remap_position`。
+
+Task 7 增量：
+- LEFT/RIGHT/FULL nested-loop；RIGHT via 输入交换；
+- USING/NATURAL Coalesce（left 非 NULL 优先）；
+- 复合 ON 谓词由 ``_eval_fold_expr`` 递归处理；
+- chained JOIN keys remap（resolver 在 I-1 修复中保证 ``keys.left_col``
+  是 subtree-local 位置）。
 """
 from typing import Any
 
 from tinydb.catalog import TableInfo
+from tinydb.parser import JoinKey
 from tinydb.plan import (
     LogicalPlan, Scan, Join, Filter, Aggregate, Sort, Project, Limit,
 )
@@ -20,6 +27,20 @@ from tinydb.plan import (
 # 行类型：list[Any]；schema 类型：list[str]
 Row = list
 Schema = list
+
+
+def _swap_key(k: "JoinKey") -> "JoinKey":
+    """RIGHT JOIN 输入交换辅助：构造 ``(right_col, left_col)`` 形式的 JoinKey。
+
+    label / source_left / source_right 同步交换，便于 LEFT 递归消费。
+    """
+    return JoinKey(
+        left_col=k.right_col,
+        right_col=k.left_col,
+        label=k.label,
+        source_left=k.source_right,
+        source_right=k.source_left,
+    )
 
 
 class JoinExecutor:
@@ -80,13 +101,42 @@ class JoinExecutor:
                 left_rows, right_rows, left_schema, right_schema,
             )
 
-        # DEV-2: outer kinds (LEFT / RIGHT / FULL / NATURAL) silently route to
-        # INNER for Task 6 baseline. Task 7 wires the outer helpers and
-        # strict-left-deep-insertion ordering. Do NOT "fix" this without
-        # coordinating with the Task 7 worktree commit.
-        return self._nested_loop_inner(
-            left_rows, left_schema, right_rows, right_schema, node,
-        )
+        if node.kind == "INNER":
+            return self._nested_loop_inner(
+                left_rows, left_schema, right_rows, right_schema, node,
+            )
+
+        if node.kind == "LEFT":
+            return self._nested_loop_left(
+                left_rows, left_schema, right_rows, right_schema, node,
+            )
+
+        if node.kind == "RIGHT":
+            # RIGHT via 输入交换：swap left/right，递归 LEFT，再按原 schema 顺序恢复。
+            # keys 同步交换 (left_col ↔ right_col, source_left ↔ source_right)；
+            # on_expr 也需要交换 (lpos ↔ rpos, l_src_id ↔ r_src_id) 以保证
+            # _remap_position 在 swap 后能找到正确的 subtree source。
+            swapped_on = tuple(
+                (pred[0], pred[2], pred[1], pred[4], pred[3])
+                for pred in (node.on_expr or ())
+            )
+            swapped_node = Join(
+                kind="LEFT",
+                left=node.right, right=node.left,
+                keys=tuple(_swap_key(k) for k in node.keys),
+                on_expr=swapped_on, natural=node.natural,
+            )
+            out_rows, out_schema = self._nested_loop_left(
+                right_rows, right_schema, left_rows, left_schema, swapped_node,
+            )
+            return out_rows, out_schema
+
+        if node.kind == "FULL":
+            return self._nested_loop_full(
+                left_rows, left_schema, right_rows, right_schema, node,
+            )
+
+        raise ValueError(f"unsupported join kind: {node.kind!r}")
 
     def _collect_sources(self, node: LogicalPlan) -> list[tuple[str, tuple]]:
         """递归收集子树下所有 Scan 节点的 ``(source_id, schema)``，按构造顺序。
@@ -234,6 +284,124 @@ class JoinExecutor:
                     )
         return out_rows, out_schema
 
+    def _nested_loop_left(
+        self,
+        left_rows: list,
+        left_schema: Schema,
+        right_rows: list,
+        right_schema: Schema,
+        node: Join,
+    ) -> tuple[list, list]:
+        """LEFT JOIN nested-loop。
+
+        顺序：strict-left-deep-insertion —— 对每个 left_row，按右表扫描顺序遍历
+        匹配；若无匹配，立即追加一行（左部原值 + 右部 NULL）。
+        """
+        out_rows: list = []
+        out_schema = self._merged_schema(left_schema, right_schema, node)
+        left_pos_map = self._build_source_position_map(node.left, left_schema)
+        right_pos_map = self._build_source_position_map(node.right, right_schema)
+        for lr in left_rows:
+            matched = False
+            for rr in right_rows:
+                if self._matches(lr, rr, left_schema, right_schema, node,
+                                  left_pos_map, right_pos_map):
+                    out_rows.append(
+                        self._coalesce_row(lr, rr, node, left_schema, right_schema),
+                    )
+                    matched = True
+            if not matched:
+                out_rows.append(
+                    self._null_pad_right(lr, right_schema, node),
+                )
+        return out_rows, out_schema
+
+    def _nested_loop_full(
+        self,
+        left_rows: list,
+        left_schema: Schema,
+        right_rows: list,
+        right_schema: Schema,
+        node: Join,
+    ) -> tuple[list, list]:
+        """FULL JOIN = LEFT 规则（匹配 + 左未匹配）+ 追加右未匹配（按右扫描顺序）。"""
+        out_rows: list = []
+        out_schema = self._merged_schema(left_schema, right_schema, node)
+        left_pos_map = self._build_source_position_map(node.left, left_schema)
+        right_pos_map = self._build_source_position_map(node.right, right_schema)
+        # 第一阶段：复用 LEFT 规则，但额外记录所有匹配过的右行索引。
+        right_matched_idx: set = set()
+        for lr in left_rows:
+            matched = False
+            for ri, rr in enumerate(right_rows):
+                if self._matches(lr, rr, left_schema, right_schema, node,
+                                  left_pos_map, right_pos_map):
+                    out_rows.append(
+                        self._coalesce_row(lr, rr, node, left_schema, right_schema),
+                    )
+                    right_matched_idx.add(ri)
+                    matched = True
+            if not matched:
+                out_rows.append(
+                    self._null_pad_right(lr, right_schema, node),
+                )
+        # 第二阶段：追加右未匹配行（按右扫描顺序）。
+        for ri, rr in enumerate(right_rows):
+            if ri not in right_matched_idx:
+                out_rows.append(
+                    self._null_pad_left(rr, left_schema, right_schema, node),
+                )
+        return out_rows, out_schema
+
+    def _null_pad_right(
+        self,
+        left_row: Row,
+        right_schema: Schema,
+        node: Join,
+    ) -> Row:
+        """构造一行：左部原值 + 右部 NULL。
+
+        USING/NATURAL 合并键：左部位置保留 left 值（通常为非 NULL —— 否则不
+        会是"未匹配"），右部合并键位置跳过。
+        ON-based join：右部全部位置填 None。
+        """
+        if node.keys:
+            out = list(left_row)
+            merge_right_idx = {k.right_col for k in node.keys}
+            for ri, _col in enumerate(right_schema):
+                if ri in merge_right_idx:
+                    continue
+                out.append(None)
+            return out
+        # ON-based
+        return list(left_row) + [None] * len(right_schema)
+
+    def _null_pad_left(
+        self,
+        right_row: Row,
+        left_schema: Schema,
+        right_schema: Schema,
+        node: Join,
+    ) -> Row:
+        """构造一行：左部 NULL + 右部原值（USING 合并键回填 right 值）。
+
+        与 ``_coalesce_row`` 对称：USING/NATURAL 合并键位置把 right_row[ri]
+        写到 left_schema[li]（因为 left 是 None），其余右部列追加。
+        ON-based join：左部全部填 None，右部原值追加。
+        """
+        if node.keys:
+            out = [None] * len(left_schema)
+            right_to_left = {k.right_col: k.left_col for k in node.keys}
+            for ri, _col in enumerate(right_schema):
+                if ri in right_to_left:
+                    li = right_to_left[ri]
+                    out[li] = right_row[ri]
+                    continue
+                out.append(right_row[ri])
+            return out
+        # ON-based
+        return [None] * len(left_schema) + list(right_row)
+
     def _matches(
         self,
         lr: Row,
@@ -256,28 +424,69 @@ class JoinExecutor:
             return True
         if node.on_expr:
             for pred in node.on_expr:
-                if not self._eval_on(pred, lr, rr, ls, rs, left_pos_map, right_pos_map):
+                # ON 谓词 = 5-tuple (op, lpos, rpos, l_src_id, r_src_id)；
+                # 复合 (AND/OR/NOT) 由 _eval_fold_expr 递归处理（Task 7）。
+                if not self._eval_fold_expr(
+                    pred, lr, rr, ls, rs, left_pos_map, right_pos_map,
+                ):
                     return False
             return True
         return True
 
-    def _eval_on(
+    def _eval_fold_expr(
         self,
-        on: Any,
+        pred: Any,
         lr: Row,
         rr: Row,
         ls: Schema,
         rs: Schema,
-        left_pos_map: dict,
-        right_pos_map: dict,
+        left_pos_map: dict = None,
+        right_pos_map: dict = None,
     ) -> bool:
-        """单层 ``(op, lpos, rpos, l_src_id, r_src_id)`` 谓词。"""
-        if not (isinstance(on, tuple) and len(on) == 5 and on[0] == "="):
+        """统一 ON / WHERE 折叠谓词求值（Task 7 §7.5 合并）。
+
+        pred 形态：
+        - ``("AND", a, b)`` / ``("OR", a, b)`` / ``("NOT", a)`` 复合
+        - 5-tuple ``(op, lpos, rpos, l_src_id, r_src_id)``：ON 双行
+        - 3-tuple ``("=", pos, value)``：列对字面量（WHERE）
+
+        ``rr is None`` 时表示纯 row 谓词（WHERE）；否则 ON 双行谓词。
+        """
+        if pred is None:
             return True
-        _, lpos, rpos, l_src_id, r_src_id = on
-        li = self._remap_position(l_src_id, lpos, left_pos_map, ls)
-        ri = self._remap_position(r_src_id, rpos, right_pos_map, rs)
-        return lr[li] == rr[ri]
+        if not isinstance(pred, tuple):
+            return True
+        # 复合 AND/OR/NOT 递归
+        if pred[0] == "AND" and len(pred) == 3:
+            return self._eval_fold_expr(
+                pred[1], lr, rr, ls, rs, left_pos_map, right_pos_map,
+            ) and self._eval_fold_expr(
+                pred[2], lr, rr, ls, rs, left_pos_map, right_pos_map,
+            )
+        if pred[0] == "OR" and len(pred) == 3:
+            return self._eval_fold_expr(
+                pred[1], lr, rr, ls, rs, left_pos_map, right_pos_map,
+            ) or self._eval_fold_expr(
+                pred[2], lr, rr, ls, rs, left_pos_map, right_pos_map,
+            )
+        if pred[0] == "NOT" and len(pred) == 2:
+            return not self._eval_fold_expr(
+                pred[1], lr, rr, ls, rs, left_pos_map, right_pos_map,
+            )
+        # ON 双行谓词（5-tuple）
+        if rr is not None and len(pred) == 5 and pred[0] == "=":
+            _, lpos, rpos, l_src_id, r_src_id = pred
+            li = self._remap_position(
+                l_src_id, lpos, left_pos_map or {}, ls,
+            )
+            ri = self._remap_position(
+                r_src_id, rpos, right_pos_map or {}, rs,
+            )
+            return lr[li] == rr[ri]
+        # WHERE 列对字面量（3-tuple, Task 7 C6 修正后）
+        if len(pred) == 3 and pred[0] == "=":
+            return lr[pred[1]] == pred[2]
+        return True
 
     def _remap_position(
         self,
@@ -308,32 +517,18 @@ class JoinExecutor:
             return rows, schema
         out: list = []
         for r in rows:
-            if self._eval_predicate(r, pred, schema):
+            # WHERE 谓词：rr=None 表示纯 row 谓词（Task 7 §7.5 合并）。
+            if self._eval_fold_expr(
+                pred, r, None, schema, schema, None, None,
+            ):
                 out.append(r)
         return out, schema
 
     def _eval_predicate(self, row: Row, pred: Any, schema: Schema) -> bool:
-        """折叠后谓词求值。WHERE 形式由 resolver 折叠为：
-        - ``(column, '=', pos, value)``：列对字面量等值
-        - ``('AND', left, right)`` / ``('OR', left, right)`` / ``('NOT', operand)``
-        """
-        if isinstance(pred, tuple) and len(pred) == 4 and pred[1] == "=":
-            _col, _op, pos, value = pred
-            return row[pos] == value
-        if isinstance(pred, tuple) and len(pred) == 3:
-            if pred[0] == "AND":
-                return (
-                    self._eval_predicate(row, pred[1], schema)
-                    and self._eval_predicate(row, pred[2], schema)
-                )
-            if pred[0] == "OR":
-                return (
-                    self._eval_predicate(row, pred[1], schema)
-                    or self._eval_predicate(row, pred[2], schema)
-                )
-            if pred[0] == "NOT":
-                return not self._eval_predicate(row, pred[1], schema)
-        return True
+        """折叠后谓词求值（WHERE 形式，由 _eval_fold_expr 转发，保留兼容）。"""
+        return self._eval_fold_expr(
+            pred, row, None, schema, schema, None, None,
+        )
 
     def _eval_project(self, node: Project) -> tuple[list, list]:
         rows, schema = self._eval(node.source)

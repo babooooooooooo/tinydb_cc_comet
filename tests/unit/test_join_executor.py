@@ -195,3 +195,153 @@ def test_inner_join_with_qualified_projection(catalog):
     assert len(rows) == 2
     pairs = {(r[0], r[1]) for r in rows}
     assert pairs == {("alice", 1), ("bob", 2)}
+
+
+# --- Task 7: LEFT / RIGHT / FULL + USING/NATURAL Coalesce ----------------
+
+
+def test_left_join_emits_unmatched_left_row_with_nulls(catalog):
+    fe = _FakeExecutor(
+        catalog=catalog,
+        table_rows={
+            "users": [[1, "a"], [2, "b"], [3, "c"]],  # u=3 无订单
+            "orders": [[10, 1, 100], [11, 2, 200]],
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT u.id, o.id FROM users u LEFT JOIN orders o ON u.id = o.user_id",
+        catalog,
+    )
+    rows, _ = exe.execute_plan(plan)
+    # 3 行：u=1->o=10, u=2->o=11, u=3(NULL)
+    assert len(rows) == 3
+    # u=3 行右部为 NULL
+    by_u = {r[0]: r[1] for r in rows}
+    assert by_u[3] is None
+
+
+def test_right_join_preserves_right_unmatched(catalog):
+    fe = _FakeExecutor(
+        catalog=catalog,
+        table_rows={
+            "users": [[1, "a"], [2, "b"]],
+            "orders": [[10, 1, 100], [11, 2, 200], [12, 99, 0]],  # o.user_id=99 无用户
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT u.id, o.id FROM users u RIGHT JOIN orders o ON u.id = o.user_id",
+        catalog,
+    )
+    rows, _ = exe.execute_plan(plan)
+    # 3 行：u=1->o=10, u=2->o=11, NULL->o=12
+    assert len(rows) == 3
+    # 末尾是右未匹配行
+    assert rows[-1][0] is None and rows[-1][1] == 12
+
+
+def test_full_join_emits_both_unmatched(catalog):
+    fe = _FakeExecutor(
+        catalog=catalog,
+        table_rows={
+            "users": [[1, "a"], [2, "b"], [3, "c"]],
+            "orders": [[10, 1, 100], [11, 99, 200]],  # u=3 无订单；o.user_id=99 无用户
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT u.id, o.id FROM users u FULL JOIN orders o ON u.id = o.user_id",
+        catalog,
+    )
+    rows, _ = exe.execute_plan(plan)
+    # 4 行：u=1->o=10, NULL(u=3), NULL(o.user_id=99->o=11)
+    assert len(rows) == 4
+
+
+def test_left_join_with_using_emits_coalesced_id(catalog):
+    fe = _FakeExecutor(
+        catalog=catalog,
+        table_rows={
+            "users": [[1, "a"], [2, "b"]],
+            "orders": [[1, 1, 100], [2, 2, 200]],
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT * FROM users u LEFT JOIN orders o USING (id)",
+        catalog,
+    )
+    rows, schema = exe.execute_plan(plan)
+    # schema 含 'id'（合并）+ 'name' + 'user_id' + 'total'
+    assert "id" in schema
+    assert schema.count("id") == 1
+
+
+def test_using_chained_join_merges_keys(catalog):
+    """I-1 修复：``USING (...) JOIN ... USING (...)`` chained JOIN 应正确合并键。
+
+    第二个 USING(id) 的左源是 Join 子树（输出 schema 已合并），需要 remap
+    ``k.left_col``（orders.id 是 source-local 位置 0）→ subtree-local 位置
+    （合并后的 'id' 位置 0）。
+    """
+    c2 = Catalog()
+    c2.create_table(
+        "users",
+        tuple([Column("id", "INT"), Column("name", "TEXT")]),
+        root_page_id=2, next_page_id=2,
+    )
+    c2.create_table(
+        "orders",
+        tuple([Column("id", "INT"), Column("user_id", "INT")]),
+        root_page_id=3, next_page_id=3,
+    )
+    c2.create_table(
+        "audit",
+        tuple([Column("id", "INT"), Column("note", "TEXT")]),
+        root_page_id=4, next_page_id=4,
+    )
+    fe = _FakeExecutor(
+        catalog=c2,
+        table_rows={
+            "users": [[1, "a"], [2, "b"]],
+            "orders": [[1, 1, 100], [2, 2, 200]],
+            "audit": [[1, "x"], [2, "y"], [3, "z"]],  # audit.id=3 无匹配
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT * FROM users u JOIN orders o USING (id) "
+        "LEFT JOIN audit a USING (id)",
+        c2,
+    )
+    rows, schema = exe.execute_plan(plan)
+    # 合并 schema：['id', 'name', 'user_id', 'note']
+    assert "id" in schema and schema.count("id") == 1
+    # audit.id=3 无左侧匹配（LEFT audit）→ 不应输出未匹配行
+    # LEFT audit 表示左表全保留、右表缺则 NULL；audit 是右表
+    # 期望 2 行（u=1 匹配 a=1, u=2 匹配 a=2）
+    assert len(rows) == 2
+    for r in rows:
+        assert r[0] in (1, 2)
+
+
+def test_using_coalesce_picks_right_when_left_null(catalog):
+    """USING 合并键 Coalesce：left NULL 时取 right。"""
+    from tinydb._join_executor import JoinExecutor as _JE
+    from tinydb.plan import Join as _Join
+    from tinydb.parser import JoinKey as _JK
+    je = _JE(None)
+    join = _Join(
+        kind="LEFT", left=None, right=None,
+        keys=(_JK(label="id", source_left="u", source_right="o",
+                   left_col=0, right_col=0),),
+        on_expr=(), natural=False,
+    )
+    left = [None, "a"]
+    right = [1, 100]
+    out = je._coalesce_row(left, right, join, ["id", "name"], ["id", "total"])
+    # 合并键 'id'：left[0]=None → right[0]=1
+    assert out[0] == 1
+    assert out[1] == "a"
+    assert out[2] == 100
