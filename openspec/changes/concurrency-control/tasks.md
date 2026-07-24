@@ -14,11 +14,18 @@
 
 ## 3. Pager 层跨进程文件锁
 
-- [ ] 3.1 在 `Pager.__init__` 中，于 `self._file` 打开后（非 `:memory:` 路径），调用 `fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)`；捕获 `BlockingIOError`（`EWOULDBLOCK`）并抛出 `DatabaseLocked(self._path)`
-- [ ] 3.2 当 `self._is_memory` 为 True 时跳过 `fcntl.flock` 调用
-- [ ] 3.3 当通过新的 `Pager(path, locking=True)` 关键字参数（从 `Database.__init__` 透传）传入 `locking=False` 时跳过 `fcntl.flock` 调用
-- [ ] 3.4 验证 `Pager.close()` 关闭 `self._file`（已实现）— 无需新增代码，OS 在 fd 关闭时自动释放 flock
-- [ ] 3.5 在 `tests/unit/test_pager_lock.py` 中新增单元测试：在临时文件上顺序两次打开 Pager，断言第一次关闭后第二次打开成功
+- [x] 3.1 在 `Pager.__init__` 中，于 `self._file` 打开后（非 `:memory:` 路径），调用 `fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)`；捕获 `BlockingIOError`（`EWOULDBLOCK`）并抛出 `DatabaseLocked(self._path)` — commit `fbacf39`
+- [x] 3.2 当 `self._is_memory` 为 True 时跳过 `fcntl.flock` 调用 — commit `fbacf39`
+- [x] 3.3 当通过新的 `Pager(path, locking=True)` 关键字参数（从 `Database.__init__` 透传）传入 `locking=False` 时跳过 `fcntl.flock` 调用 — commit `fbacf39`
+- [x] 3.4 验证 `Pager.close()` 关闭 `self._file`（已实现）— commit `fbacf39`（在 `close()` 中先调 `self._file_lock.release()` 再关闭 fd，幂等 close 仍安全）
+- [x] 3.5 在 `tests/unit/test_pager_lock.py` 中新增单元测试：在临时文件上顺序两次打开 Pager，断言第一次关闭后第二次打开成功 — commit `fbacf39`（13 tests）
+
+## 4. Recovery 与锁的交互
+
+- [x] 4.1 验证 `Pager.__init__` 在 `_open_file()` 返回后才调用 `_init_wal()`（即 flock 已持有后再触发 replay） — commit `fbacf39`（`__init__` 中 `_open_file()` → `_file_lock.try_acquire()` → `_init_wal()` 顺序确认）
+- [x] 4.2 修正 design doc 第 252 行错误：实测 Linux flock 是 per-open-file-description（不同 fd 独立计数），同一进程在新 fd 上的 `flock(LOCK_EX | LOCK_NB)` 会 EWOULDBLOCK。修正方案：内层 `Pager` 在 `recovery._apply_committed` 中以 `locking=False` 构造（commit `fbacf39`）；跨进程隔离由外层 Pager 的 flock 单点保证
+- [ ] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）— 待 Task 8
+- [ ] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）— 待 Task 8 收尾
 
 ## 4. Recovery 与锁的交互
 

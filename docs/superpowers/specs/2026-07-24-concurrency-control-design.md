@@ -249,10 +249,11 @@ class DatabaseLocked(TinydbError):
 4. `Pager.__init__` 调 `_init_wal()`
 5. `_init_wal()` → 若 WAL 非空 → `Recovery.replay(wal)` → `_apply_committed(main_path, ...)`
 6. `_apply_committed` 构造 `Pager(main_path)` → 它的 `_open_file()` 打开同文件新 fd → 它的 `try_acquire()` 在新 fd 上调 `fcntl.flock(LOCK_EX)`
-7. Linux fcntl：锁是 per-fd，非 per-process。同进程在新 fd 上的第二次 `flock(LOCK_EX)` 独立成功。
-8. replay 结束后，内层 `Pager` 被关闭 → 它的锁释放。外层 `Pager` 的锁仍持有。
+7. **Linux fcntl 锁是 per-open-file-description（同一进程在新 fd 上的 `flock(LOCK_EX | LOCK_NB)` 会 EWOULDBLOCK，errno 11）**——与早先设计文档假设的「per-process 语义」相反（`flock(2)` man page 已明确为 per-ofd）。
+8. **修正**：内层 `Pager` 在 `recovery._apply_committed` 中以 `locking=False` 构造，绕过自身的 flock 获取；外层 `Pager` 仍持有 flock 贯穿整个 replay，跨进程隔离语义由外层单点保证。
+9. replay 结束后，内层 `Pager` 被关闭 → 外层 `Pager` 的锁仍持有。
 
-**边界情况**：若 OS 限制同一进程的同一 fd 只能持一个 EX 锁（部分平台 / 文件系统），步骤 7 可能失败。**缓解**：在 `errors.py` 中将 recovery 标注为 best-effort；若在特殊文件系统上失败，用户可通过未来的 `Database.__init__(recovery_locking=False)` 关闭 recovery 锁（本次 change 不包含）。
+**边界情况**：本实现依赖「外层 Pager 的 flock 覆盖整个 replay」语义。在未来若需要支持 recovery 时显式放弃锁（例如在线备份、跨节点迁移），应新增 `Database.__init__(recovery_locking=False)` 选项（本次 change 不包含）。
 
 `recovery.py` 中既有的 `_REPLAY_IN_PROGRESS` 模块级 guard **保留**为已知 deviation（在 `proposal.md` Impact 与本设计风险章节均有记录）。本 change 不重构它。
 
