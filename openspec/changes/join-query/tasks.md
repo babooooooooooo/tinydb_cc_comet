@@ -10,7 +10,7 @@
 
 - [x] 2.1 编写 resolver 测试：表/别名映射、重复别名、未知表、限定列、唯一裸列、歧义裸列、USING 缺失/类型不兼容和 NATURAL 共同列发现（Task 4 已交付：14 测试，13 pass + 1 skip composite ON → Task 8）。
 - [x] 2.2 新建独立 resolver 模块 `src/tinydb/resolver.py`，按 FROM/JOIN 左到右构造来源映射和合并 schema（Task 4 已交付：320 行，ResolvedSource / ResolvedPlan / _build_source_map / _resolve_using_or_natural / _make_resolver / resolve / _fold_expr）。
-- [ ] 2.3 统一解析 SELECT、ON、WHERE、ORDER BY、GROUP BY、HAVING 和聚合参数，输出稳定的列位置/标签（Task 4 部分交付 WHERE/ON/GROUP/ORDER，SELECT projection 留给 Task 5/6，HAVING 留给 Task 6）。
+- [x] 2.3 统一解析 SELECT、ON、WHERE、ORDER BY、GROUP BY、HAVING 和聚合参数，输出稳定的列位置/标签（Task 4 部分交付 WHERE/ON/GROUP/ORDER；Task 5 完成 SELECT projection；Task 8 完成 GROUP BY / HAVING / ORDER BY 限定列支持；HAVING 完整路径由 Task 8 交付）。
 - [x] 2.4 (partial) 实现 USING 等值 JoinKey 和 NATURAL 同名 JoinKey 共同列发现；合并键输出标签（Task 4 已交付：_resolve_using_or_natural）；错误层级 ResolutionError + 6 子类型（Task 3 已交付）。
 
 ## 3. LogicalPlan 中间层
@@ -18,7 +18,7 @@
 - [x] 3.1 编写 plan 构造测试：单表计划、左深多表计划、各种 Join kind、ON/USING/NATURAL key 字段、节点字段、子节点顺序和无副作用构造（Task 5 已交付：9 测试，catalog/pager 副作用自由验证）。
 - [x] 3.2 新建不可变 plan 模块 `src/tinydb/plan.py`，定义 Scan / Join / Filter / Aggregate / Sort / Project / Limit 等逻辑节点（Task 5 已交付：221 行，frozen dataclass + Union 类型别名 + format_plan）。
 - [x] 3.3 (partial) 实现从 Select AST 到 LogicalPlan 的构造 `build_plan(ast, catalog)`，集中完成名称解析、隐式 NATURAL key 生成和阶段顺序编排（Task 5 已交付：单 JOIN 完整，multi-JOIN keys/expr 切分留给 Task 6/7，Aggregate group_keys/aggregates 实际填充留给 Task 6/8）。
-- [ ] 3.4 为单表 Select 保留 v0.1 indexed/scan/aggregation 路径或等价适配，并添加单表计划回归护栏（Task 5 已实现单表 plan；执行层适配留给 Task 6/8）。
+- [x] 3.4 为单表 Select 保留 v0.1 indexed/scan/aggregation 路径或等价适配，并添加单表计划回归护栏（Task 5 已实现单表 plan；Task 6 executor dispatch 保留 `if stmt.joins:` 早分支；Task 8 验证单表聚合 17/17 通过）。
 
 ## 4. INNER/CROSS JOIN 执行
 
@@ -66,5 +66,3 @@
 **Task 10 closeout**: commits `3262279` (DV-T9-1 fix) + `cbbac20` (golden SQL) + `0e0e221` (conftest exclusion) + `1798bdb` (docs) + `d0c00f8` (coverage boost) + `a82e449` (verify report). 8 E2E golden pass; full suite 796 pass + 1 skip (baseline 783+1 → +8 from golden). Final reviewer verdict: APPROVED_WITH_CONCERNS — all 15 Design Doc §11 acceptance items PASS (1 MINOR CONCERN: OpenSpec CLI missing → manual verification); architecture quality all PASS; integration verification all prior-layer tests pass (aggregation 17/17, ACID 6/6, constraints, engine-v1 10/10); deviations HONEST (6 recorded in verify report §5). Coverage 92.36% (new modules ≥85% threshold). 2 MINOR follow-ups recorded: (a) `LogicalPlan.format()` instance method not implemented (module-level `format_plan()` only); (b) SELECT-clause `_project_row` raises `ValueError` instead of `UnknownQualifiedColumn`. Both non-blocking.
 
 **Final reviewer verdict (opus tier)**: RECOMMENDATION: APPROVE — high-quality 10-task build, clean 3-module separation, ACID preserved, complete ResolutionError hierarchy, honest deviation reporting.
-- [ ] 8.4 更新 `docs/MVP_LIMITATIONS.md`、README 或操作手册中的单表限制和 v0.2 JOIN 能力说明。
-- [ ] 8.5 生成 JOIN change 验证报告，记录基线、测试结果、覆盖率、已知限制和与 `cli-enhancement` 的计划接口依赖。
