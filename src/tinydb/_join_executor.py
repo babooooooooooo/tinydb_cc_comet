@@ -80,6 +80,10 @@ class JoinExecutor:
                 left_rows, right_rows, left_schema, right_schema,
             )
 
+        # DEV-2: outer kinds (LEFT / RIGHT / FULL / NATURAL) silently route to
+        # INNER for Task 6 baseline. Task 7 wires the outer helpers and
+        # strict-left-deep-insertion ordering. Do NOT "fix" this without
+        # coordinating with the Task 7 worktree commit.
         return self._nested_loop_inner(
             left_rows, left_schema, right_rows, right_schema, node,
         )
@@ -184,20 +188,11 @@ class JoinExecutor:
         ``k.right_col``）跳过。
         """
         out = list(left_row)
-        merge_right_idx = {k.right_col for k in node.keys}
-        merge_left_idx_to_label = {k.left_col: k.label for k in node.keys}
+        right_to_left = {k.right_col: k.left_col for k in node.keys}
         for ri, _col in enumerate(right_schema):
-            if ri in merge_right_idx:
-                # 找到对应的 left 位置（merge label 在 left 中的位置）。
-                # left_schema 是 qualified schema，但 merge label 是 unqualified；
-                # 此处用 left_schema 索引位置（与 _merged_schema 一致）。
-                # Coalesce: left 为 None 时取 right
-                li = next(
-                    li for li, label in merge_left_idx_to_label.items()
-                    if label == next(
-                        k.label for k in node.keys if k.right_col == ri
-                    )
-                )
+            if ri in right_to_left:
+                # 合并键：Coalesce — left 为 None 时取 right。
+                li = right_to_left[ri]
                 if out[li] is None and right_row[ri] is not None:
                     out[li] = right_row[ri]
                 continue
