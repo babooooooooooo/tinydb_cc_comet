@@ -1,0 +1,4 @@
+Row(u.id=1, o.id=10)
+Row(u.id=1, o.id=20)
+Row(u.id=2, o.id=10)
+Row(u.id=2, o.id=20)

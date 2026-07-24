@@ -1,0 +1,5 @@
+CREATE TABLE u(id INT);
+CREATE TABLE o(id INT);
+INSERT INTO u(id) VALUES (1), (2);
+INSERT INTO o(id) VALUES (10), (20);
+SELECT u.id, o.id FROM u CROSS JOIN o;
