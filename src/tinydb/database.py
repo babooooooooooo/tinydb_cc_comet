@@ -117,7 +117,9 @@ class Database:
         from tinydb.errors import ExecutionError as _EE
         from tinydb.plan import build_plan as _bp
         stmts = parse(tokenize(sql))
-        last = stmts.statements[-1]
+        last = stmts.statements[-1] if stmts.statements else None
+        if last is None:
+            raise _EE("explain_plan: empty SQL")
         if not isinstance(last, Select):
             raise _EE("explain_plan: only SELECT is supported")
         return _bp(last, self.catalog)

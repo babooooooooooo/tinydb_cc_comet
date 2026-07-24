@@ -46,3 +46,10 @@ def test_explain_plan_raises_on_non_select(db):
     _setup(db)
     with pytest.raises(tinydb.ExecutionError):
         db.explain_plan("CREATE TABLE x(id INT)")
+
+
+@pytest.mark.integration
+def test_explain_plan_raises_on_empty_sql(db):
+    """DV-T9-1: explain_plan("") must raise ExecutionError, not raw IndexError."""
+    with pytest.raises(tinydb.ExecutionError):
+        db.explain_plan("")
