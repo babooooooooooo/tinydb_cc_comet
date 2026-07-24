@@ -1,8 +1,8 @@
 ## 1. 基础 — 锁原语与异常类型
 
-- [ ] 1.1 在 `src/tinydb/errors.py` 中新增 `DatabaseLocked(TinydbError)` 异常类，带 `path` 属性，消息格式清晰可定位
-- [ ] 1.2 在 `Pager` 上新增 `Optional[threading.RLock]` 字段（`_lock: threading.RLock | None = None`），用于单 Pager 实例内部的进程内互斥（防御性兜底）
-- [ ] 1.3 验证 `fcntl` 在目标平台（Linux/WSL）可正常导入；添加 `try/except ImportError` 降级路径，并设置模块级 `_HAS_FCNTL` 标志
+- [x] 1.1 在 `src/tinydb/errors.py` 中新增 `DatabaseLocked(TinydbError)` 异常类，带 `path` 属性，消息格式清晰可定位 — commit `7f62d5c`
+- [x] 1.2 在 `Pager` 上新增 `Optional[threading.RLock]` 字段（`_lock: threading.RLock | None = None`），用于单 Pager 实例内部的进程内互斥（防御性兜底） — **decision: 不加**（design doc Q1 决策：Database 层 RLock 已覆盖所有 `execute()` 路径，直接 Pager 访问为非公开 API）
+- [x] 1.3 验证 `fcntl` 在目标平台（Linux/WSL）可正常导入；添加 `try/except ImportError` 降级路径，并设置模块级 `_HAS_FCNTL` 标志 — commit `7f62d5c`（在 `src/tinydb/_filelock.py` 中实现）
 
 ## 2. Database 层线程锁
 
