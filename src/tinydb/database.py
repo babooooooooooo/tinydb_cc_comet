@@ -9,6 +9,7 @@ from tinydb.executor import Executor
 from tinydb.index_manager import IndexManager
 from tinydb.pager import Pager
 from tinydb.parser import parse, Select
+from tinydb.plan import LogicalPlan  # noqa: F401  # explain_plan return-type annotation only
 from tinydb.tokenizer import tokenize
 
 
@@ -60,31 +61,23 @@ class Database:
         """
         self.pager = Pager(path)
         self.catalog = Catalog.from_bytes(self.pager.read_page(1))
-        # IndexManager holds B+tree indexes per (table, indexed-column).
-        # For pre-existing tables (post-reopen), rebuild indexes from a
-        # full table scan so lookups reflect on-disk data; for fresh tables
-        # this builds empty B-trees that INSERTs will populate incrementally.
+        # IndexManager: B+tree indexes per (table, col). For pre-existing
+        # tables (post-reopen) rebuild via full scan so lookups reflect
+        # on-disk data; for fresh tables INSERTs populate incrementally.
         self.index_manager = IndexManager(self.pager)
         self.executor = Executor(self.pager, self.catalog, self.index_manager)
-        # Back-reference so Executor can install index-pager wrappers when
-        # CREATE TABLE adds a new table mid-session.
-        self.executor._database_ref = self
+        self.executor._database_ref = self  # mid-session CREATE TABLE hooks
         self._index_pagers: Dict[Tuple[str, str], Any] = {}
-        # Existing tables: rebuild indexes from a full scan (rebuild_for_table
-        # will populate empty B-trees if no rows are passed) and install
-        # _IndexPager wrappers so subsequent B+tree allocations are tracked.
-        # Also rebuild the Executor's per-table data page list by walking
-        # each table's contiguous data chain — the in-memory list maintained
-        # during a session isn't persisted, so reopening must re-discover
-        # extension pages that were appended past the root.
+        # Existing tables: rebuild indexes, install _IndexPager wrappers,
+        # and re-discover each table's data-page chain (extension pages
+        # past the root aren't persisted in the in-memory list).
         for ti in self.catalog.tables.values():
             self.index_manager.rebuild_for_table(ti)
             self._install_index_pagers(ti.name)
             self.executor._table_data_pages[ti.name] = (
                 self.executor._rebuild_data_pages_from_chain(ti)
             )
-        # New tables (created via CREATE TABLE during this session) install
-        # their wrappers inside Executor._exec_create_table.
+        # New tables mid-session install wrappers via _exec_create_table.
 
     def execute(self, sql: str) -> list[Row]:
         """Run one statement or ``;``-separated script; return final result.
@@ -103,7 +96,7 @@ class Database:
 
         last = stmts.statements[-1] if stmts.statements else None
         if isinstance(last, Select) and results:
-            # --- tinydb-join-query (T6): JOIN path 已是 list[Row]，跳过二次包装 ---
+            # T6: JOIN path already returns list[Row]; skip re-wrap.
             if last.joins:
                 if results and isinstance(results[0], Row):
                     return results
@@ -112,6 +105,22 @@ class Database:
                 cols = tuple(n for n, _ in ti.schema) if last.columns == ("*",) else tuple(last.columns)
                 results = [Row(values=tuple(r), columns=cols) for r in results]
         return results
+
+    def explain_plan(self, sql: str) -> "LogicalPlan":
+        """Build a LogicalPlan from a SELECT without executing it.
+
+        Read-only: tokenizes + parses + builds the immutable plan tree.
+        Never calls the executor, scans tables or touches Pager/WAL.
+        Final statement must be ``SELECT``; non-SELECT raises
+        ``ExecutionError`` (parse errors propagate as ``ParseError``).
+        """
+        from tinydb.errors import ExecutionError as _EE
+        from tinydb.plan import build_plan as _bp
+        stmts = parse(tokenize(sql))
+        last = stmts.statements[-1]
+        if not isinstance(last, Select):
+            raise _EE("explain_plan: only SELECT is supported")
+        return _bp(last, self.catalog)
 
     def close(self) -> None:
         """Flush + close the Pager. Idempotent; ``close()`` runs even if ``flush()`` raises."""
