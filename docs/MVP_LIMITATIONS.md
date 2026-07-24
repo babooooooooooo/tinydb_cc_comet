@@ -74,3 +74,9 @@ Known limitations:
 - **WAL fsync error semantics**: if `fsync(main)` fails after pages are written, recovery replays the COMMIT record to reach the same final state (idempotent — the same pages are written again).
 - **Page-level WAL**: every PAGE_WRITE record carries an entire 4 KB page. Small row updates produce large WAL entries. Row-level WAL is out of scope.
 - **Recovery depends on file-system atomicity**: assumes `<db>.wal` writes do not interleave at byte granularity. POSIX append-mode writes are typically atomic up to `PIPE_BUF`; non-POSIX filesystems (some FUSE mounts, NFS without strict semantics) may produce torn records that recovery handles by truncating to the corruption boundary.
+
+## v0.2 JOIN 内存限制
+
+JOIN 路径在 v0.2 采用 nested-loop + 物化宽行策略，无硬性行数上限。极大结果集
+（如 100 万行 × 100 万行的 CROSS JOIN）会消耗大量内存。建议在 application 层
+显式加 LIMIT 或在 WHERE 中加过滤条件以缩小中间结果。

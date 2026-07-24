@@ -235,3 +235,25 @@ Reports for each release change are at `docs/superpowers/reports/`; the latest i
 | `errors.py` | 79 | `TinydbError`, `ConstraintViolation`, `InvalidDatabaseFile`, … |
 
 See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for what MVP does NOT do.
+
+## 多表 JOIN（v0.2 新增）
+
+支持 `INNER` / `LEFT` / `RIGHT` / `FULL` / `CROSS JOIN`；连接条件可选 `ON` / `USING (col, ...)` / `NATURAL`；支持表别名与限定列引用 `u.id`；JOIN 结果继续走现有 `WHERE` / `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT` / `OFFSET` 与聚合函数。
+
+示例（结合 GROUP BY + HAVING + ORDER BY + LIMIT）：
+
+```sql
+SELECT u.id, o.id, SUM(o.total) AS s
+FROM users u
+JOIN orders o ON u.id = o.uid
+GROUP BY u.id
+HAVING SUM(o.total) > 100
+ORDER BY s DESC
+LIMIT 10;
+```
+
+USING / NATURAL 合并键采用 `Coalesce` 语义：左边非空取左边，否则取右边，两边都 `NULL` 则为 `NULL`。合并键标签为非限定的列名。
+
+错误诊断：未知表 → `UnknownSource`；歧义裸列 → `AmbiguousColumn`；USING 列缺失 → `MissingUsingKey`；类型不兼容 → `IncompatibleKeyTypes`。所有解析错误都是 `tinydb.ResolutionError`（`ExecutionError` 的子类）。
+
+已知限制（`docs/MVP_LIMITATIONS.md` § v0.2 JOIN 内存限制）：nested-loop + 物化宽行策略无硬性行数上限；极大结果集（百万级 × 百万级 CROSS JOIN）会消耗大量内存。建议在 application 层显式加 `LIMIT` 或在 `WHERE` 中加过滤条件。
