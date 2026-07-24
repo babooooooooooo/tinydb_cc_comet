@@ -27,13 +27,6 @@
 - [ ] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）— 待 Task 8
 - [ ] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）— 待 Task 8 收尾
 
-## 4. Recovery 与锁的交互
-
-- [ ] 4.1 验证 `Pager.__init__` 在 `_open_file()` 返回后才调用 `_init_wal()`（即 flock 已持有后再触发 replay）。若顺序相反则调换
-- [ ] 4.2 验证 `recovery.py` 中的 `_apply_committed` 构造的 `Pager(main_path)` 能在同一 fd 上重新获取 flock（同进程 → flock 累加 → 成功）。新增单元测试断言不死锁
-- [ ] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）
-- [ ] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）
-
 ## 5. 跨进程集成测试
 
 - [ ] 5.1 创建 `tests/integration/concurrency/__init__.py` 与 `tests/integration/concurrency/_driver.py`，提供 subprocess 驱动辅助：打开 DB、执行 `execute()` 可调用对象、将结果以 JSON 写入 stdout 后退出
