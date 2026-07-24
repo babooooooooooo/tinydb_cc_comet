@@ -6,6 +6,7 @@ from tinydb.errors import (
     ResolutionError, AmbiguousColumn, DuplicateAlias,
     UnknownSource, UnknownQualifiedColumn, MissingUsingKey, IncompatibleKeyTypes,
     ConstraintViolation, PageFull, CatalogFull,
+    DatabaseLocked,
 )
 from tinydb.parser import (
     CreateTable, DropTable, Insert, Delete, Select, Update,
@@ -32,4 +33,5 @@ __all__ = [
     "ResolutionError", "AmbiguousColumn", "DuplicateAlias",
     "UnknownSource", "UnknownQualifiedColumn", "MissingUsingKey", "IncompatibleKeyTypes",
     "ConstraintViolation", "PageFull", "CatalogFull",
+    "DatabaseLocked",
 ]
