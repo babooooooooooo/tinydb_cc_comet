@@ -38,7 +38,16 @@ _REOPEN_DIRECTIVE = "__REOPEN__"
 
 def pytest_generate_tests(metafunc):
     if "golden_sql" in metafunc.fixturenames:
-        files = sorted(SQL_DIR.rglob("*.sql"))
+        # Recursive, but skip the ``join/`` subtree: those scenarios have a
+        # dedicated runner (``tests/e2e/test_join_queries.py``) which uses
+        # a different output shape (full Database.execute() return value,
+        # not the conftest's per-statement ``(no rows)`` envelope). Including
+        # them here would double-collect and break the existing byte
+        # comparison.
+        files = sorted(
+            p for p in SQL_DIR.rglob("*.sql")
+            if "join" not in p.relative_to(SQL_DIR).parts
+        )
         # ``indirect=True`` routes the parameter through the fixture
         # (via ``request.param``) instead of substituting the raw
         # path into the test, so the fixture can run the SQL and

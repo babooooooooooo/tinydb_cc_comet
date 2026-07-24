@@ -162,3 +162,178 @@ def test_parser_is_pure_deterministic():
     a = parse(tokenize(sql))
     b = parse(tokenize(sql))
     assert a.statements[0].columns == b.statements[0].columns
+
+
+# --- tinydb-join-query (Task 2): FROM/JOIN/ON/USING/NATURAL AST parsing -----
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-001")
+def test_parse_table_alias_with_as():
+    """`FROM users AS u` produces TableRef(name='users', alias='u') with no joins."""
+    from tinydb.parser import Select
+    stmt = parse(tokenize("SELECT u.id FROM users AS u"))
+    sel = stmt.statements[0]
+    assert isinstance(sel, Select)
+    assert sel.from_.name == "users"
+    assert sel.from_.alias == "u"
+    assert sel.joins == ()
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-002")
+def test_parse_inner_join_with_on():
+    """`INNER JOIN ... ON ...` produces a JoinClause with kind='INNER' and on_expr set."""
+    from tinydb.parser import JoinClause, JoinOnPredicate
+    stmt = parse(tokenize(
+        "SELECT * FROM users u INNER JOIN orders o ON u.id = o.user_id"
+    ))
+    sel = stmt.statements[0]
+    assert len(sel.joins) == 1
+    j = sel.joins[0]
+    assert isinstance(j, JoinClause)
+    assert j.kind == "INNER"
+    assert j.right.name == "orders" and j.right.alias == "o"
+    assert isinstance(j.on_expr, JoinOnPredicate)
+    assert j.using_keys == () and j.natural is False
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-003")
+def test_parse_left_outer_join_is_left_kind():
+    """`LEFT OUTER JOIN` collapses to kind='LEFT'."""
+    stmt = parse(tokenize(
+        "SELECT * FROM users LEFT OUTER JOIN orders ON users.id = orders.user_id"
+    ))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "LEFT"
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-004")
+def test_parse_using_keys():
+    """`JOIN ... USING (id, code)` produces using_keys tuple; on_expr is None."""
+    stmt = parse(tokenize(
+        "SELECT * FROM users JOIN orders USING (id, code)"
+    ))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "INNER"
+    assert j.using_keys == ("id", "code")
+    assert j.on_expr is None
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-005")
+def test_parse_natural_left_join():
+    """`NATURAL LEFT JOIN` sets natural=True; no on_expr / no using_keys."""
+    stmt = parse(tokenize("SELECT * FROM users NATURAL LEFT JOIN profiles"))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "LEFT"
+    assert j.natural is True
+    assert j.on_expr is None and j.using_keys == ()
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-006")
+def test_parse_chained_multi_joins():
+    """`a JOIN b ... JOIN c ...` produces two JoinClauses with right names 'b' and 'c'."""
+    stmt = parse(tokenize(
+        "SELECT * FROM a JOIN b ON a.id = b.aid JOIN c ON b.id = c.bid"
+    ))
+    sel = stmt.statements[0]
+    assert len(sel.joins) == 2
+    assert sel.joins[0].right.name == "b"
+    assert sel.joins[1].right.name == "c"
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-007")
+def test_parse_qualified_column_in_select_and_where():
+    """`SELECT u.id ... WHERE u.id = 1` retains qualifier on SelectItem and EqualsExpr."""
+    stmt = parse(tokenize("SELECT u.id FROM users u WHERE u.id = 1"))
+    sel = stmt.statements[0]
+    first_item = sel.select_items[0]
+    assert first_item.kind == "column"
+    # qualifier is exposed on SelectItem via the T2 extension
+    assert getattr(first_item, "qualifier", None) == "u"
+    assert first_item.name == "id"
+    # EqualsExpr.qualifier carries the qualifier
+    assert sel.where is not None
+    assert getattr(sel.where, "qualifier", None) == "u"
+    assert sel.where.column == "id"
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-008")
+def test_parse_join_without_on_or_using_raises():
+    """`FROM a JOIN b` (no key clause) raises ParseError pointing at JOIN keyword."""
+    with pytest.raises(ParseError) as exc:
+        parse(tokenize("SELECT * FROM users JOIN orders"))
+    # Position must point to the JOIN keyword (line >= 1); message mentions ON or USING.
+    assert exc.value.line >= 1
+    assert "ON" in str(exc.value) or "USING" in str(exc.value)
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-009")
+def test_parse_cross_join_does_not_require_key():
+    """`CROSS JOIN` requires no ON/USING; kind='CROSS'."""
+    stmt = parse(tokenize("SELECT * FROM users CROSS JOIN orders"))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "CROSS"
+    assert j.on_expr is None and j.using_keys == () and j.natural is False
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-010")
+def test_parse_existing_single_table_select_unchanged():
+    """Regression: single-table SELECT still parses with joins=() and from_ set."""
+    stmt = parse(tokenize(
+        "SELECT id, name FROM users WHERE id = 1 ORDER BY id LIMIT 5"
+    ))
+    sel = stmt.statements[0]
+    assert sel.from_.name == "users" and sel.from_.alias is None
+    assert sel.joins == ()
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-011")
+def test_parse_full_outer_join_is_full_kind():
+    """`FULL OUTER JOIN` collapses to kind='FULL'."""
+    stmt = parse(tokenize(
+        "SELECT * FROM users FULL OUTER JOIN orders ON users.id = orders.user_id"
+    ))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "FULL"
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-012")
+def test_parse_right_join_is_right_kind():
+    """`RIGHT JOIN` keeps kind='RIGHT'."""
+    stmt = parse(tokenize(
+        "SELECT * FROM users RIGHT JOIN orders ON users.id = orders.user_id"
+    ))
+    j = stmt.statements[0].joins[0]
+    assert j.kind == "RIGHT"
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-013")
+def test_parse_table_ref_without_alias_has_none():
+    """`FROM users` (no AS) yields TableRef with alias=None."""
+    stmt = parse(tokenize("SELECT id FROM users"))
+    sel = stmt.statements[0]
+    assert sel.from_.alias is None
+
+
+@pytest.mark.unit
+@pytest.mark.spec_id("REQ-JOIN-PARSE-014")
+def test_parse_join_on_with_complex_predicate_raises():
+    """Task 2 scope: ON predicate must be a column comparison. AND / OR / NOT
+    triggers a ParseError hinting that compound predicates are deferred to Task 8."""
+    with pytest.raises(ParseError):
+        parse(tokenize(
+            "SELECT * FROM users u LEFT JOIN orders o "
+            "ON u.id = o.user_id AND o.total > 10"
+        ))

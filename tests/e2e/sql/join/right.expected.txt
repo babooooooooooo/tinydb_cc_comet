@@ -1,0 +1,2 @@
+Row(u.id=1, o.id=10)
+Row(u.id=None, o.id=11)

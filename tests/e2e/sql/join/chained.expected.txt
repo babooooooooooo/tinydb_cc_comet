@@ -1,0 +1,2 @@
+Row(a.id=1, b.id=1, c.id=1)
+Row(a.id=2, b.id=2, c.id=2)
