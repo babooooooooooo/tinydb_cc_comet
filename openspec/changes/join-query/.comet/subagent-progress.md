@@ -22,7 +22,7 @@
 | Task 3 ResolutionError 子类型 | done | b081c6e | 8 fail → 8 pass (join_errors) + 720 pass (full) | APPROVED_WITH_CONCERNS (MINOR test unused pytest import; missing attr/message regression asserts; ACCEPT errors.py 140/140 at budget) | 0 | public API: 6 new errors + 4 AST re-exports | [x] |
 | Task 4 Resolver 模块 | done | 05dc6b1 | 14 fail → 13 pass + 1 skip (resolver) + 733 pass (full) | APPROVED_WITH_CONCERNS (IMPORTANT _fold_equals_expr 4-tuple → Task 7.3 3-tuple; MINOR multi-NATURAL outer_kind clobbering; 4 MINOR cosmetic; ACCEPT 4 plan deviations) | 0 | resolver.py 320/450 budget; cross-module imports stable | [x] |
 | Task 5 LogicalPlan 中间层 | done | 8433fe0 | 9 fail → 9 pass (plan) + 742 pass (full) | APPROVED_WITH_CONCERNS (PREVENTIVE-C1 multi-JOIN keys/expr 切分→Task 6/7; PREVENTIVE-C2 Aggregate 空壳→Task 6/8; 4 Plan deviations accepted; Limit bottom-up) | 0 | plan.py 221/350 budget; public API 9 new exports | [x] |
-| Task 6 INNER/CROSS JOIN 执行 | pending | — | — | — | 0 | — | ☐ |
+| Task 6 INNER/CROSS JOIN 执行 | done | 4009b94 + a1692c7 + 39b0c61 | 13 pass + 1 skip (join tests) + 755 pass + 2 skip (full) | spec ✅; quality APPROVED_WITH_CONCERNS (I-1 chained USING→Task 7 test; I-2 nested-next() fixed in 39b0c61; I-3 silent _eval_aggregate→Task 8 fail-loud; I-4 DEV-2 marker fixed in 39b0c61) | 0 | executor.py +22/30 budget; _join_executor.py 411/450; 6 NEW file | [x] |
 | Task 7 LEFT/RIGHT/FULL + USING/NATURAL Coalesce | pending | — | — | — | 0 | — | ☐ |
 | Task 8 JOIN 后阶段 (WHERE/GROUP/HAVING/ORDER/LIMIT) | pending | — | — | — | 0 | — | ☐ |
 | Task 9 Python API (Row.__getitem__ + explain_plan) | pending | — | — | — | 0 | — | ☐ |
@@ -30,7 +30,7 @@
 
 ## 当前阶段
 
-`dispatch Task 2`：re-dispatch after plan-fix（见「Plan 修复」节）。
+`dispatch Task 7 implementer`：LEFT/RIGHT/FULL + USING/NATURAL Coalesce + ON 复合谓词 + 修复 resolver `_fold_equals_expr` 3-tuple（C6 follow-up） + 多级外连接与严格左深顺序（property 测试）+ 验证 USING/NATURAL + chained JOIN（I-1 follow-up） + 解除 DEV-2 INNER fallback 标记。
 
 ## Plan 修复（coordinator-only）
 

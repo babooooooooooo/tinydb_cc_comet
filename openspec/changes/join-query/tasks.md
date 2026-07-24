@@ -22,10 +22,12 @@
 
 ## 4. INNER/CROSS JOIN 执行
 
-- [ ] 4.1 先编写集成测试：两表等值连接、多级连接、复杂 ON、USING、NATURAL、空表和 CROSS 笛卡尔积，以及列顺序/标签。
-- [ ] 4.2 新建 JOIN 执行 helper，实现事务读路由下的 nested-loop INNER/CROSS JOIN。
-- [ ] 4.3 在 Executor SELECT dispatch 中仅为包含 JOIN 的查询委派 plan/JOIN helper，避免继续膨胀 `executor.py`。
-- [ ] 4.4 验证 JOIN 路径不绕过 `_txn_read_page`、WAL 缓冲或 `_IndexPager`，并完成 ACID 读事务回归。
+- [x] 4.1 先编写集成测试：两表等值连接、多级连接、复杂 ON、USING、NATURAL、空表和 CROSS 笛卡尔积，以及列顺序/标签。
+- [x] 4.2 新建 JOIN 执行 helper，实现事务读路由下的 nested-loop INNER/CROSS JOIN。
+- [x] 4.3 在 Executor SELECT dispatch 中仅为包含 JOIN 的查询委派 plan/JOIN helper，避免继续膨胀 `executor.py`。
+- [x] 4.4 验证 JOIN 路径不绕过 `_txn_read_page`、WAL 缓冲或 `_IndexPager`，并完成 ACID 读事务回归。
+
+**Task 6 closeout**: commit `4009b94` (impl) + `a1692c7` (pyflakes fix) + `39b0c61` (coalesce reverse-map + DEV-2 marker). Reviewer spec ✅ + code-quality APPROVED_WITH_CONCERNS. Carry-over follow-ups: **I-1** chained USING/NATURAL merge correctness (Task 7 adds USING×USING chained test) and **I-3** silent `_eval_aggregate` (Task 8 raises NotImplementedError for GROUP BY over JOIN).
 
 ## 5. LEFT/RIGHT/FULL JOIN 与 NULL 语义
 
