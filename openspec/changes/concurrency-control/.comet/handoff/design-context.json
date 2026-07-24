@@ -1,0 +1,14 @@
+{
+  "change": "concurrency-control",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "e67d6b6173d5a6f269bf0a8c8d1a2132b26bf15a8d0cbf85e7ddafb9c7a7e720",
+  "files": [
+    { "path": "openspec/changes/concurrency-control/proposal.md", "sha256": "3a7ff430dd13ebf8a1ec875bb47e75b4ac1ab236b1500d5975e207c74bb4eebc" },
+    { "path": "openspec/changes/concurrency-control/design.md", "sha256": "45bd3982d54844c749495d937b509de7a257a15d8517231d26bb0cb8fffcf736" },
+    { "path": "openspec/changes/concurrency-control/tasks.md", "sha256": "df469bbe0334c945a34ca238c1e813ccb98205b60f76e93f5561a186676dcb41" },
+    { "path": "openspec/changes/concurrency-control/specs/concurrency-control/spec.md", "sha256": "d26b403cdd4cf8f5ef6a3c045ff6cdf71de5345866c10c1c4ac9b1e05daade2d" }
+  ]
+}

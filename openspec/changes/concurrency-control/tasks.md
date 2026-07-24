@@ -1,0 +1,63 @@
+## 1. 基础 — 锁原语与异常类型
+
+- [ ] 1.1 在 `src/tinydb/errors.py` 中新增 `DatabaseLocked(TinydbError)` 异常类，带 `path` 属性，消息格式清晰可定位
+- [ ] 1.2 在 `Pager` 上新增 `Optional[threading.RLock]` 字段（`_lock: threading.RLock | None = None`），用于单 Pager 实例内部的进程内互斥（防御性兜底）
+- [ ] 1.3 验证 `fcntl` 在目标平台（Linux/WSL）可正常导入；添加 `try/except ImportError` 降级路径，并设置模块级 `_HAS_FCNTL` 标志
+
+## 2. Database 层线程锁
+
+- [ ] 2.1 在 `Database.__init__` 上添加 `locking: bool = True` 关键字参数；`locking=True` 时构造 `self._lock: threading.RLock | None = threading.RLock()`，`locking=False` 时设为 `None`
+- [ ] 2.2 用 `with self._lock:`（非 None 时）包装 `Database.execute()` 函数体；保持可重入语义
+- [ ] 2.3 用 `with self._lock:`（非 None 时）包装 `Database.explain_plan()` 函数体
+- [ ] 2.4 更新 `Database.close()` 以释放锁状态（语义层面 — `RLock` 无强制释放；通过关闭 Pager 释放底层 fd，从而 OS 释放 flock）
+- [ ] 2.5 在 `src/tinydb/__init__.py` 中导出 `DatabaseLocked`
+
+## 3. Pager 层跨进程文件锁
+
+- [ ] 3.1 在 `Pager.__init__` 中，于 `self._file` 打开后（非 `:memory:` 路径），调用 `fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)`；捕获 `BlockingIOError`（`EWOULDBLOCK`）并抛出 `DatabaseLocked(self._path)`
+- [ ] 3.2 当 `self._is_memory` 为 True 时跳过 `fcntl.flock` 调用
+- [ ] 3.3 当通过新的 `Pager(path, locking=True)` 关键字参数（从 `Database.__init__` 透传）传入 `locking=False` 时跳过 `fcntl.flock` 调用
+- [ ] 3.4 验证 `Pager.close()` 关闭 `self._file`（已实现）— 无需新增代码，OS 在 fd 关闭时自动释放 flock
+- [ ] 3.5 在 `tests/unit/test_pager_lock.py` 中新增单元测试：在临时文件上顺序两次打开 Pager，断言第一次关闭后第二次打开成功
+
+## 4. Recovery 与锁的交互
+
+- [ ] 4.1 验证 `Pager.__init__` 在 `_open_file()` 返回后才调用 `_init_wal()`（即 flock 已持有后再触发 replay）。若顺序相反则调换
+- [ ] 4.2 验证 `recovery.py` 中的 `_apply_committed` 构造的 `Pager(main_path)` 能在同一 fd 上重新获取 flock（同进程 → flock 累加 → 成功）。新增单元测试断言不死锁
+- [ ] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）
+- [ ] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）
+
+## 5. 跨进程集成测试
+
+- [ ] 5.1 创建 `tests/integration/concurrency/__init__.py` 与 `tests/integration/concurrency/_driver.py`，提供 subprocess 驱动辅助：打开 DB、执行 `execute()` 可调用对象、将结果以 JSON 写入 stdout 后退出
+- [ ] 5.2 `test_multiprocess_writers.py`：派生 4 个子进程；每个插入 250 条不同行；父进程打开 DB 断言总行数 == 1000 且无重复 ID
+- [ ] 5.3 `test_multiprocess_reader_writer.py`：派生 1 个 writer（循环 INSERT）和 1 个 reader（循环 SELECT），运行 2 秒；断言无异常抛出且 reader 的 row-counts 单调非减
+- [ ] 5.4 `test_multiprocess_locked_open.py`：进程 A 持有 DB 打开；进程 B 打开并断言 100 ms 内抛出 `DatabaseLocked`
+- [ ] 5.5 `test_lock_release_on_close.py`：进程 A 打开后关闭；进程 B 在 A 关闭后立即打开并断言成功
+
+## 6. 多线程单元测试
+
+- [ ] 6.1 `tests/unit/concurrency/test_threading_inserts.py`：8 线程 × 每线程 100 次 INSERT 到同一表 → 最终行数 == 800，所有 ID 唯一
+- [ ] 6.2 `tests/unit/concurrency/test_threading_updates.py`：4 线程 × 每线程 200 次 UPDATE，作用在不重叠行子集上 → 最终状态匹配预期更新（无丢失写）
+- [ ] 6.3 `tests/unit/concurrency/test_threading_memory.py`：与 6.1 相同但用 `Database(":memory:")` — 必须 NOT 调用 fcntl（通过 monkey-patch 或平台守卫断言）
+- [ ] 6.4 `tests/unit/concurrency/test_locking_off.py`：在 `locking=False` 路径下，monkey-patch `fcntl.flock` 并断言它未被调用；断言 `threading.RLock` 也未被构造
+- [ ] 6.5 `tests/unit/concurrency/test_reentrant_lock.py`：方法 `Database._exec_helper()` 在 `execute()` 内部调用另一个 `Database.execute()`，断言不死锁
+
+## 7. 测试基础设施与覆盖率
+
+- [ ] 7.1 更新 `tests/conftest.py`（或新建），让现有非并发测试默认使用 `Database(path, locking=False)`，避免 796 个基线测试产生 flock 开销
+- [ ] 7.2 本地运行完整测试套件（`pytest`），确认通过且覆盖率 ≥ 92%，0 个新增失败
+- [ ] 7.3 验证并发测试模块合计覆盖 `database.py`、`pager.py`、`errors.py` 新增锁相关分支 ≥ 80%
+- [ ] 7.4 完整测试套件连续运行 5 次，检测因锁顺序引入的 flaky 测试
+
+## 8. 文档
+
+- [ ] 8.1 在 `README.md` 中新增 "Concurrency" 章节，说明：`Database(path, locking=True)` 默认行为、单线程 opt-out、仅 Linux flock、`:memory:` 行为
+- [ ] 8.2 更新 `docs/superpowers/specs/concurrency-control.md`（在 `docs/superpowers/specs/` 下新建文件），汇总 `specs/concurrency-control/spec.md` 中的公开契约
+- [ ] 8.3 若 `CHANGELOG.md` 存在，新增条目记录新增的 `locking` 参数与跨进程锁保证
+
+## 9. 最终验证
+
+- [ ] 9.1 运行 `comet-guard concurrency-control open --apply` 并确认 `ALL CHECKS PASSED`
+- [ ] 9.2 确认 `.comet.yaml` 中 `phase` 已推进到 `design`
+- [ ] 9.3 交接给 `/comet-design` 阶段（Comet 流程下一步）

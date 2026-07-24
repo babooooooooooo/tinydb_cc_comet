@@ -1,0 +1,8 @@
+{
+  "openspec_proposal": "openspec/changes/concurrency-control/proposal.md",
+  "openspec_design": "openspec/changes/concurrency-control/design.md",
+  "openspec_tasks": "openspec/changes/concurrency-control/tasks.md",
+  "openspec_delta_spec": "openspec/changes/concurrency-control/specs/concurrency-control/spec.md",
+  "handoff_context": "openspec/changes/concurrency-control/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/concurrency-control/.comet/handoff/design-context.md"
+}
