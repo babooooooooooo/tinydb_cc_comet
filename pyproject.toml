@@ -7,13 +7,17 @@ name = "tinydb"
 version = "0.1.0"
 description = "Minimal embedded relational database (MVP)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pygments>=2.18",
+    "prompt_toolkit>=3.0.0",
+]
 
 [project.scripts]
 tinydb-repl = "tinydb.repl:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "hypothesis>=6", "pytest-cov>=4"]
+repl = ["pygments>=2.18", "prompt_toolkit>=3.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
