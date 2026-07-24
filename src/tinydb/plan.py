@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from tinydb.catalog import Catalog
-from tinydb.parser import Select
+from tinydb.parser import Select, default_alias
 from tinydb.resolver import resolve
 
 
@@ -58,6 +58,7 @@ class Aggregate:
     source: "LogicalPlan"
     group_keys: tuple                # tuple[int, ...]
     aggregates: tuple                # tuple[AggregateCall, ...]
+    having: Any = None               # (aggregate-output position, op, literal)
 
 
 @dataclass(frozen=True)
@@ -130,21 +131,19 @@ def build_plan(ast: Select, catalog: Catalog) -> LogicalPlan:
     if rp.where_resolved is not None:
         current = Filter(source=current, predicate=rp.where_resolved)
 
-    # Aggregate（仅当 SELECT 命中聚合或 GROUP BY；Task 5 范围内仅构造空壳）。
-    if ast.aggregate_aliases or ast.group_by:
+    # Aggregate consumes the merged JOIN schema and emits group keys followed
+    # by aggregate values. HAVING is evaluated against that emitted schema.
+    if rp.group_resolved or rp.aggregate_resolved:
         current = Aggregate(
             source=current,
-            group_keys=tuple(),
-            aggregates=tuple(),
+            group_keys=rp.group_resolved,
+            aggregates=rp.aggregate_resolved,
+            having=rp.having_resolved,
         )
 
-    # Sort
-    if ast.order_by:
-        keys = tuple(
-            (_resolve_order_key(it, rp), it.descending)
-            for it in ast.order_by
-        )
-        current = Sort(source=current, keys=keys)
+    # Sort keys are already positions in either merged or aggregate output.
+    if rp.order_resolved:
+        current = Sort(source=current, keys=rp.order_resolved)
 
     # Limit（在 Project 之前，便于提前截断排序后行数）。
     if ast.limit is not None or ast.offset is not None:
@@ -159,9 +158,13 @@ def build_plan(ast: Select, catalog: Catalog) -> LogicalPlan:
                 star = True
                 items.append(("", "star"))
             elif si.kind == "column":
-                items.append((si.alias or si.name, ("col", getattr(si, "qualifier", None), si.name)))
+                duplicate = sum(si.name in source.schema for source in rp.sources) > 1
+                label = si.alias or (
+                    f"{si.qualifier}.{si.name}" if si.qualifier and duplicate else si.name
+                )
+                items.append((label, ("col", getattr(si, "qualifier", None), si.name)))
             elif si.kind == "aggregate":
-                items.append((si.alias or "", ("agg", si.aggregate)))
+                items.append((si.alias or default_alias(si.aggregate), ("agg", si.aggregate)))
     else:
         # legacy columns（v0.1 单表 SELECT id, name 路径）
         for c in ast.columns:

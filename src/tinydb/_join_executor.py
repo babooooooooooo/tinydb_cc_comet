@@ -542,20 +542,7 @@ class JoinExecutor:
         if node.star:
             return rows, schema
         out_rows: list = []
-        # label 优先取显式 alias；alias 含 '.' 或 qualifier 非空时升级为限定名。
-        new_labels: list = []
-        for label, expr in node.items:
-            if label and "." in label:
-                new_labels.append(label)
-                continue
-            if isinstance(expr, tuple) and len(expr) == 3 and expr[0] == "col":
-                _tag, qualifier, name = expr
-                if qualifier:
-                    new_labels.append(f"{qualifier}.{name}")
-                    continue
-                new_labels.append(label or name)
-                continue
-            new_labels.append(label or "")
+        new_labels = [label for label, _expr in node.items]
         for r in rows:
             projected = []
             for _label, expr in node.items:
@@ -565,25 +552,33 @@ class JoinExecutor:
         return out_rows, new_labels
 
     def _project_expr(self, expr: Any, row: Row, schema: Schema) -> Any:
-        """Project 子项求值：``("col", qualifier, name)`` / ``"star"`` / ``("agg", ...)``。
-
-        子树 schema 已 qualified（如 ``'u.id'``）；当 ``qualifier`` 非空时优先
-        按 ``qualifier.name`` 精确匹配，否则 fallback 到 unqualified ``name``。
-        """
+        """Evaluate a column projection against the current schema."""
         if expr == "star":
-            return None
+            raise ValueError("star projection must use Project.star passthrough")
         if isinstance(expr, tuple) and len(expr) == 3 and expr[0] == "col":
             _tag, qualifier, name = expr
-            if qualifier:
-                qualified = f"{qualifier}.{name}"
-                if qualified in schema:
-                    return row[schema.index(qualified)]
-            if name in schema:
-                return row[schema.index(name)]
-            return None
+            pos = self._resolve_col(name, qualifier, schema)
+            return row[pos]
         if isinstance(expr, tuple) and len(expr) == 2 and expr[0] == "agg":
-            return None
-        return None
+            agg = expr[1]
+            label = agg.alias or self._default_alias(agg)
+            if label not in schema:
+                raise ValueError(f"aggregate {label!r} not in schema {schema!r}")
+            return row[schema.index(label)]
+        raise ValueError(f"unsupported project expression: {expr!r}")
+
+    def _resolve_col(self, name: str, qualifier: Any, schema: Schema) -> int:
+        """Resolve qualified columns exactly and bare columns by unique suffix."""
+        if qualifier is not None:
+            qualified = f"{qualifier}.{name}"
+            if qualified in schema:
+                return schema.index(qualified)
+        if name in schema:
+            return schema.index(name)
+        suffix_hits = [i for i, label in enumerate(schema) if label.endswith(f".{name}")]
+        if len(suffix_hits) == 1:
+            return suffix_hits[0]
+        raise ValueError(f"column {name!r} not in schema {schema!r}")
 
     def _eval_limit(self, node: Limit) -> tuple[list, list]:
         rows, schema = self._eval(node.source)
@@ -604,5 +599,78 @@ class JoinExecutor:
         return rows, schema
 
     def _eval_aggregate(self, node: Aggregate) -> tuple[list, list]:
-        """Task 6 baseline：JOIN 树上方挂 Aggregate = fallback 到 source 求值（无聚合）。"""
-        return self._eval(node.source)
+        """Group merged JOIN rows, compute aggregates, then apply HAVING."""
+        rows, schema = self._eval(node.source)
+        if node.group_keys:
+            out_rows, out_schema = self._aggregate_grouped(
+                rows, schema, node.group_keys, node.aggregates,
+            )
+        else:
+            out_rows, out_schema = self._aggregate_single(
+                rows, schema, node.aggregates,
+            )
+        if node.having is not None:
+            pos, op, literal = node.having
+            out_rows = [r for r in out_rows if self._compare(r[pos], op, literal)]
+        return out_rows, out_schema
+
+    def _aggregate_single(
+        self, rows: list, schema: Schema, aggregates: tuple,
+    ) -> tuple[list, list]:
+        values = [self._compute_aggregate(a, rows, schema) for a in aggregates]
+        labels = [a.alias or self._default_alias(a) for a in aggregates]
+        return [values], labels
+
+    def _aggregate_grouped(
+        self, rows: list, schema: Schema, group_keys: tuple, aggregates: tuple,
+    ) -> tuple[list, list]:
+        groups: dict = {}
+        for row in rows:
+            key = tuple(row[pos] for pos in group_keys)
+            groups.setdefault(key, []).append(row)
+        out_rows = [
+            list(key) + [self._compute_aggregate(a, group, schema) for a in aggregates]
+            for key, group in groups.items()
+        ]
+        labels = [schema[pos] for pos in group_keys]
+        labels.extend(a.alias or self._default_alias(a) for a in aggregates)
+        return out_rows, labels
+
+    def _compute_aggregate(self, agg: Any, rows: list, schema: Schema) -> Any:
+        if agg.arg == "*":
+            values = rows
+        elif isinstance(agg.arg, tuple) and agg.arg[0] == "position":
+            values = [row[agg.arg[1]] for row in rows]
+        else:
+            raise NotImplementedError(
+                f"aggregate argument {agg.arg!r} lacks merged-schema position",
+            )
+        non_null = [value for value in values if value is not None]
+        if agg.func == "COUNT":
+            return len(values) if agg.arg == "*" else len(non_null)
+        if agg.func == "SUM":
+            return sum(non_null) if non_null else None
+        if agg.func == "AVG":
+            return sum(non_null) / len(non_null) if non_null else None
+        if agg.func == "MIN":
+            return min(non_null) if non_null else None
+        if agg.func == "MAX":
+            return max(non_null) if non_null else None
+        raise ValueError(f"unsupported aggregate: {agg.func!r}")
+
+    @staticmethod
+    def _default_alias(agg: Any) -> str:
+        if agg.arg == "*":
+            return "count"
+        return agg.func.lower()
+
+    @staticmethod
+    def _compare(value: Any, op: str, literal: Any) -> bool:
+        operations = {
+            "=": lambda a, b: a == b, "!=": lambda a, b: a != b,
+            ">": lambda a, b: a > b, "<": lambda a, b: a < b,
+            ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b,
+        }
+        if op not in operations:
+            raise ValueError(f"unsupported HAVING operator: {op!r}")
+        return operations[op](value, literal)

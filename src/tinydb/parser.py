@@ -1388,7 +1388,7 @@ class _Parser:
         )
 
     def _parse_aggregate_call(self) -> AggregateCall:
-        """Parse COUNT(*) | (COUNT|SUM|AVG|MIN|MAX) '(' (IDENT | '*') ')'."""
+        """Parse COUNT(*) or an aggregate over a bare/qualified column."""
         func_tok = self.peek()
         func = self.advance().value
         self.expect("PUNCT", "(")
@@ -1402,7 +1402,18 @@ class _Parser:
                     col_tok.line, col_tok.col,
                     "expected column or * in aggregate",
                 )
-            arg = ("column", self.advance().value)
+            first = self.advance().value
+            if self._peek_punct("."):
+                self.advance()
+                name_tok = self.peek()
+                if name_tok.type != "IDENT":
+                    raise ParseError(
+                        name_tok.line, name_tok.col,
+                        "expected column after '.' in aggregate",
+                    )
+                arg = ("column", first, self.advance().value)
+            else:
+                arg = ("column", first)
         self.expect("PUNCT", ")")
         return AggregateCall(func=func, arg=arg, line=func_tok.line, col=func_tok.col)
 
@@ -1436,14 +1447,14 @@ class _Parser:
         return tuple(cols)
 
     def _parse_having_expr(self):
-        """Parse HAVING clause: aggregate_call OR (IDENT op literal)."""
+        """Parse HAVING ``aggregate-or-column operator literal``."""
         if self._is_keyword(self.peek(), "COUNT", "SUM", "AVG", "MIN", "MAX"):
-            return self._parse_aggregate_call()
-
-        ct = self.peek()
-        if ct.type != "IDENT":
-            raise ParseError(ct.line, ct.col, "expected column in HAVING")
-        cname = self.advance().value
+            left = self._parse_aggregate_call()
+        else:
+            ct = self.peek()
+            if ct.type != "IDENT":
+                raise ParseError(ct.line, ct.col, "expected column in HAVING")
+            left = self.advance().value
 
         op_tok = self.advance()
         if op_tok.type != "PUNCT" or op_tok.value not in _HAVING_OPS:
@@ -1456,7 +1467,7 @@ class _Parser:
         lit = self.advance()
         if lit.type not in _LITERAL_TYPES:
             raise ParseError(lit.line, lit.col, "expected literal in HAVING")
-        return (cname, op_tok.value, lit.value)
+        return (left, op_tok.value, lit.value)
 
     def _is_keyword(self, t, *names: str) -> bool:
         """Return True if ``t`` matches any of the named keywords.
@@ -1489,10 +1500,10 @@ def default_alias(agg: AggregateCall) -> str:
         return "count"
     if (
         isinstance(agg.arg, tuple)
-        and len(agg.arg) == 2
+        and len(agg.arg) in (2, 3)
         and agg.arg[0] == "column"
     ):
-        return f"{agg.func.lower()}_{agg.arg[1]}"
+        return f"{agg.func.lower()}_{agg.arg[-1]}"
     return f"{agg.func.lower()}"
 
 

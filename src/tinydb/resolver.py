@@ -13,6 +13,7 @@ from tinydb.errors import (
 )
 from tinydb.parser import (
     Select, JoinClause, JoinOnPredicate, JoinKey, TableRef, ColumnRef,
+    AggregateCall, default_alias,
     EqualsExpr, AndExpr, OrExpr, NotExpr,
 )
 from tinydb.type_system import validate_compare_types
@@ -286,22 +287,58 @@ def _fold_expr(expr: Any, resolver: Callable) -> Any:
     raise ValueError(f"unsupported expr node: {type(expr).__name__}")
 
 
-def _fold_group_by(group_by: tuple, resolver: Callable) -> tuple:
-    """fold GROUP BY ``("u.id", ...)`` -> ``(pos, label)`` 元组列表。"""
-    out: list = []
-    for col in group_by:
-        q, n = _split_qualified(col)
-        pos, src = resolver((q, n))
-        out.append((pos, f"{src.source_id}.{n}" if q else n))
-    return tuple(out)
+def _merged_position(
+    qualifier: Optional[str],
+    name: str,
+    resolver: Callable,
+    output_position_map: dict,
+) -> int:
+    """Resolve a column to its position in the qualified JOIN output schema."""
+    source_pos, source = resolver((qualifier, name))
+    qualified = f"{source.source_id}.{name}"
+    if qualified not in output_position_map:
+        raise UnknownQualifiedColumn(source.source_id, name)
+    return output_position_map.get(qualified, source_pos)
 
 
-def _fold_order_by(order_by: tuple, resolver: Callable) -> tuple:
-    """fold ORDER BY ``OrderByItem`` 列表 -> ``(pos, descending)`` 元组列表。"""
+def _fold_group_by(
+    group_by: tuple,
+    resolver: Callable,
+    output_position_map: dict,
+) -> tuple:
+    """Fold GROUP BY references to merged-schema positions."""
+    return tuple(
+        _merged_position(*_split_qualified(col), resolver, output_position_map)
+        for col in group_by
+    )
+
+
+def _fold_order_by(
+    order_by: tuple,
+    resolver: Callable,
+    output_position_map: dict,
+    aliases: dict,
+    group_positions: tuple,
+    aggregate_query: bool,
+) -> tuple:
+    """Fold ORDER BY references to positions in the Sort input schema."""
     out: list = []
     for item in order_by:
-        pos, src = resolver((item.qualifier, item.column))
-        out.append((pos, item.descending, f"{src.source_id}.{item.column}" if item.qualifier else item.column))
+        if item.qualifier is None and item.column in aliases:
+            pos = aliases[item.column]
+        else:
+            merged_pos = _merged_position(
+                item.qualifier, item.column, resolver, output_position_map,
+            )
+            if aggregate_query:
+                if merged_pos not in group_positions:
+                    raise ValueError(
+                        f"ORDER BY column {item.column!r} is not grouped",
+                    )
+                pos = group_positions.index(merged_pos)
+            else:
+                pos = merged_pos
+        out.append((pos, item.descending))
     return tuple(out)
 
 
@@ -432,6 +469,79 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     else:
         where_resolved = None
 
+    # Aggregate calls carry merged-schema positions into the logical plan.
+    aggregates: list = []
+    aggregate_alias_positions: dict = {}
+    for item in ast.select_items:
+        if item.kind != "aggregate":
+            continue
+        agg = item.aggregate
+        if agg.arg == "*":
+            resolved_arg = "*"
+        else:
+            if len(agg.arg) == 3:
+                _tag, qualifier, name = agg.arg
+            else:
+                _tag, name = agg.arg
+                qualifier = None
+            resolved_arg = (
+                "position",
+                _merged_position(
+                    qualifier, name, resolver, output_position_map,
+                ),
+            )
+        alias = item.alias or default_alias(agg)
+        aggregates.append(AggregateCall(agg.func, resolved_arg, alias, agg.line, agg.col))
+
+    group_resolved = _fold_group_by(
+        ast.group_by, resolver, output_position_map,
+    )
+    # Aggregate output is group keys followed by aggregate values.
+    for index, agg in enumerate(aggregates, start=len(group_resolved)):
+        aggregate_alias_positions[agg.alias] = index
+
+    order_resolved = _fold_order_by(
+        ast.order_by, resolver, output_position_map, aggregate_alias_positions,
+        group_resolved, bool(group_resolved or aggregates),
+    )
+
+    having_resolved = None
+    if ast.having is not None:
+        left, op, literal = ast.having
+        if isinstance(left, AggregateCall):
+            if left.arg == "*":
+                resolved_having_arg = "*"
+            else:
+                if len(left.arg) == 3:
+                    _tag, qualifier, name = left.arg
+                else:
+                    _tag, name = left.arg
+                    qualifier = None
+                resolved_having_arg = (
+                    "position",
+                    _merged_position(
+                        qualifier, name, resolver, output_position_map,
+                    ),
+                )
+            match = next(
+                (i for i, agg in enumerate(aggregates)
+                 if agg.func == left.func and agg.arg == resolved_having_arg),
+                None,
+            )
+            if match is None:
+                raise ValueError("HAVING aggregate must appear in SELECT list")
+            having_pos = len(group_resolved) + match
+        elif left in aggregate_alias_positions:
+            having_pos = aggregate_alias_positions[left]
+        else:
+            q, n = _split_qualified(left)
+            merged_pos = _merged_position(q, n, resolver, output_position_map)
+            try:
+                having_pos = group_resolved.index(merged_pos)
+            except ValueError as exc:
+                raise ValueError(f"HAVING column {left!r} is not grouped") from exc
+        having_resolved = (having_pos, op, literal)
+
     return ResolvedPlan(
         sources=sources,
         output_schema=output_schema,
@@ -442,9 +552,9 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
         on_resolved=on_resolved,
         where_resolved=where_resolved,
         select_resolved=tuple(),
-        order_resolved=_fold_order_by(ast.order_by, resolver),
-        group_resolved=_fold_group_by(ast.group_by, resolver),
-        having_resolved=None,
-        aggregate_resolved=tuple(),
+        order_resolved=order_resolved,
+        group_resolved=group_resolved,
+        having_resolved=having_resolved,
+        aggregate_resolved=tuple(aggregates),
         outer_kind=outer_kind,
     )
