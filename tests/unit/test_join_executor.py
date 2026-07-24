@@ -241,6 +241,33 @@ def test_right_join_preserves_right_unmatched(catalog):
     assert rows[-1][0] is None and rows[-1][1] == 12
 
 
+def test_right_join_select_star_preserves_left_first_column_order(catalog):
+    """Regression: RIGHT JOIN via swap-recurse produced right-first column order
+    for SELECT * (masked by explicit SELECT u.id, o.id). Direct _nested_loop_right
+    preserves strict-left-deep-insertion ordering.
+    """
+    fe = _FakeExecutor(
+        catalog=catalog,
+        table_rows={
+            "users": [[1, "a"]],
+            "orders": [[10, 1, 100], [11, 99, 0]],
+        },
+    )
+    exe = JoinExecutor(fe)
+    plan = _build_plan(
+        "SELECT * FROM users u RIGHT JOIN orders o ON u.id = o.user_id",
+        catalog,
+    )
+    rows, schema = exe.execute_plan(plan)
+    # Columns must be left-first: u.id, u.name, o.id, o.user_id, o.total
+    assert schema[:2] == ["u.id", "u.name"]
+    assert schema[2:] == ["o.id", "o.user_id", "o.total"]
+    # 两行：u=1->o=10 (matched), NULL->o=11 (right unmatched)
+    assert len(rows) == 2
+    assert rows[0] == [1, "a", 10, 1, 100]
+    assert rows[1] == [None, None, 11, 99, 0]  # left NULL-padded, right intact
+
+
 def test_full_join_emits_both_unmatched(catalog):
     fe = _FakeExecutor(
         catalog=catalog,

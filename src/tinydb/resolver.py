@@ -193,12 +193,11 @@ def _make_resolver(sources: tuple) -> Callable:
 
 
 def _fold_equals_expr(expr: EqualsExpr, resolver: Callable) -> tuple:
-    """fold ``EqualsExpr`` -> ``("=", pos, value)``（3-tuple, Task 7 C6 修正）。
+    """fold ``EqualsExpr`` -> ``("=", pos, value, src_id)``（4-tuple, Task 7 deviation）。
 
-    Task 4 旧版本为 ``(column, "=", pos, value)`` 4-tuple，但 JOIN 路径的
-    WHERE 谓词与 ON 谓词消费方按 3-tuple ``(op, pos, value_or_pos)`` 处理
-    —— 4-tuple 与 3-tuple 混淆会导致 ``_eval_predicate`` 的 ``AND/OR/NOT``
-    分支误命中。统一为 3-tuple。
+    ``src_id`` is consumed by ``_remap_where_positions`` to remap source-local
+    ``pos`` to qualified-output position; after remap the form reduces to
+    ``("=", qualified_pos, value)`` for executor consumption.
     """
     pos, src = resolver((getattr(expr, "qualifier", None), expr.column))
     return ("=", pos, expr.value, src.source_id)
@@ -241,7 +240,7 @@ def _remap_where_positions(
                 "NOT",
                 _remap_where_positions(pred[1], resolver, output_position_map, sources),
             )
-        # 列对字面量：3-tuple 旧形式或 4-tuple 新形式
+        # 列对字面量（4-tuple from _fold_equals_expr）
         if pred[0] == "=" and len(pred) == 4:
             _op, pos, lit, src_id = pred
             # 用 source_id 找到 source，再找 col name
@@ -252,9 +251,6 @@ def _remap_where_positions(
             qualified = f"{src_id}.{col_name}"
             new_pos = output_position_map.get(qualified, pos)
             return ("=", new_pos, lit)
-        if pred[0] == "=" and len(pred) == 3:
-            # 已经是 3-tuple（Task 7 之前遗留路径）
-            return pred
     return pred
 
 

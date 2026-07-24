@@ -9,7 +9,7 @@ r_src_id)``，其中 ``lpos`` / ``rpos`` 是 source-local 位置（在该 source
 到 subtree-local 位置 —— 实现见 :meth:`_remap_position`。
 
 Task 7 增量：
-- LEFT/RIGHT/FULL nested-loop；RIGHT via 输入交换；
+- LEFT/RIGHT/FULL nested-loop；RIGHT 直接实现（保留 left-first 列序）；
 - USING/NATURAL Coalesce（left 非 NULL 优先）；
 - 复合 ON 谓词由 ``_eval_fold_expr`` 递归处理；
 - chained JOIN keys remap（resolver 在 I-1 修复中保证 ``keys.left_col``
@@ -18,7 +18,6 @@ Task 7 增量：
 from typing import Any
 
 from tinydb.catalog import TableInfo
-from tinydb.parser import JoinKey
 from tinydb.plan import (
     LogicalPlan, Scan, Join, Filter, Aggregate, Sort, Project, Limit,
 )
@@ -27,20 +26,6 @@ from tinydb.plan import (
 # 行类型：list[Any]；schema 类型：list[str]
 Row = list
 Schema = list
-
-
-def _swap_key(k: "JoinKey") -> "JoinKey":
-    """RIGHT JOIN 输入交换辅助：构造 ``(right_col, left_col)`` 形式的 JoinKey。
-
-    label / source_left / source_right 同步交换，便于 LEFT 递归消费。
-    """
-    return JoinKey(
-        left_col=k.right_col,
-        right_col=k.left_col,
-        label=k.label,
-        source_left=k.source_right,
-        source_right=k.source_left,
-    )
 
 
 class JoinExecutor:
@@ -112,24 +97,13 @@ class JoinExecutor:
             )
 
         if node.kind == "RIGHT":
-            # RIGHT via 输入交换：swap left/right，递归 LEFT，再按原 schema 顺序恢复。
-            # keys 同步交换 (left_col ↔ right_col, source_left ↔ source_right)；
-            # on_expr 也需要交换 (lpos ↔ rpos, l_src_id ↔ r_src_id) 以保证
-            # _remap_position 在 swap 后能找到正确的 subtree source。
-            swapped_on = tuple(
-                (pred[0], pred[2], pred[1], pred[4], pred[3])
-                for pred in (node.on_expr or ())
+            # RIGHT JOIN 直接实现：保留 left-first 列序（与 LEFT JOIN 对称）。
+            # 对每个 right_row 扫描 left_rows 匹配；若无匹配追加 NULL-padded
+            # 行（与 _nested_loop_left 顺序对称：外层=left/右部未匹配 vs
+            # 外层=right/左部未匹配）。
+            return self._nested_loop_right(
+                left_rows, left_schema, right_rows, right_schema, node,
             )
-            swapped_node = Join(
-                kind="LEFT",
-                left=node.right, right=node.left,
-                keys=tuple(_swap_key(k) for k in node.keys),
-                on_expr=swapped_on, natural=node.natural,
-            )
-            out_rows, out_schema = self._nested_loop_left(
-                right_rows, right_schema, left_rows, left_schema, swapped_node,
-            )
-            return out_rows, out_schema
 
         if node.kind == "FULL":
             return self._nested_loop_full(
@@ -313,6 +287,39 @@ class JoinExecutor:
             if not matched:
                 out_rows.append(
                     self._null_pad_right(lr, right_schema, node),
+                )
+        return out_rows, out_schema
+
+    def _nested_loop_right(
+        self,
+        left_rows: list,
+        left_schema: Schema,
+        right_rows: list,
+        right_schema: Schema,
+        node: Join,
+    ) -> tuple[list, list]:
+        """RIGHT JOIN nested-loop。
+
+        顺序：strict-right-deep-insertion —— 对每个 right_row，按左表扫描顺序遍
+        历匹配；若无匹配，立即追加一行（左部 NULL + 右部原值）。
+        列布局保持与 LEFT 一致：``_merged_schema(left_schema, right_schema)``。
+        """
+        out_rows: list = []
+        out_schema = self._merged_schema(left_schema, right_schema, node)
+        left_pos_map = self._build_source_position_map(node.left, left_schema)
+        right_pos_map = self._build_source_position_map(node.right, right_schema)
+        for rr in right_rows:
+            matched = False
+            for lr in left_rows:
+                if self._matches(lr, rr, left_schema, right_schema, node,
+                                  left_pos_map, right_pos_map):
+                    out_rows.append(
+                        self._coalesce_row(lr, rr, node, left_schema, right_schema),
+                    )
+                    matched = True
+            if not matched:
+                out_rows.append(
+                    self._null_pad_left(rr, left_schema, right_schema, node),
                 )
         return out_rows, out_schema
 
