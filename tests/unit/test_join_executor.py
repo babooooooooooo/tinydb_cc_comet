@@ -372,3 +372,77 @@ def test_using_coalesce_picks_right_when_left_null(catalog):
     assert out[0] == 1
     assert out[1] == "a"
     assert out[2] == 100
+
+
+def test_unsupported_plan_node_raises(catalog):
+    """执行非 Scan/Join/Filter/Project/Sort/Limit/Aggregate 节点 → ValueError。
+
+    注：``LogicalPlan`` 是 Union 类型别名，正常用法下不会传入非预期节点；
+    本测试用 ``cast`` 强制绕过类型检查以覆盖防御性 raise。
+    """
+    from typing import cast
+    from tinydb._join_executor import JoinExecutor as _JE
+    from tinydb.plan import LogicalPlan as _LP
+
+    je = _JE(None)
+    sentinel = cast(_LP, object())  # 任何非 LogicalPlan 实例
+    with pytest.raises(ValueError, match="unsupported plan node"):
+        je._eval(sentinel)
+
+
+def test_unsupported_join_kind_raises(catalog):
+    """Join.kind 既非 CROSS/INNER/LEFT/RIGHT/FULL → ValueError。"""
+    from tinydb._join_executor import JoinExecutor as _JE
+    from tinydb.plan import Join as _Join
+    from tinydb.plan import Scan as _Scan
+
+    # 用 catalog 中的真表 + FakeExecutor 让 _eval_scan 走通，触发 kind 检查
+    fe = _FakeExecutor(catalog=catalog, table_rows={"users": [], "orders": []})
+    je = _JE(fe)
+    bad = _Join(
+        kind="BOGUS",
+        left=_Scan(table="users", alias="u", schema=("id", "name"), source_id="u"),
+        right=_Scan(table="orders", alias="o", schema=("id",), source_id="o"),
+        keys=(), on_expr=(), natural=False,
+    )
+    with pytest.raises(ValueError, match="unsupported join kind"):
+        je._eval(bad)
+
+
+def test_qualify_schema_prefixes_source_ids(catalog):
+    """`_qualify_schema` 给每个 source 的列加 source_id 前缀。"""
+    from tinydb._join_executor import JoinExecutor as _JE
+    from tinydb.plan import Join as _Join
+    from tinydb.plan import Scan as _Scan
+
+    je = _JE(None)
+    join = _Join(
+        kind="INNER",
+        left=_Scan(table="users", alias=None, schema=("id", "name"), source_id="u"),
+        right=_Scan(table="orders", alias=None, schema=("id", "user_id"), source_id="o"),
+        keys=(), on_expr=(), natural=False,
+    )
+    out = je._qualify_schema(("id", "name", "id", "user_id"), join)
+    assert out == ["u.id", "u.name", "o.id", "o.user_id"]
+
+
+def test_null_pad_right_with_using_keys_skips_merged_columns(catalog):
+    """LEFT JOIN 右侧未匹配时 USING 合并键列被跳过（不写 None）。"""
+    from tinydb._join_executor import JoinExecutor as _JE
+    from tinydb.plan import Join as _Join
+    from tinydb.parser import JoinKey as _JK
+
+    je = _JE(None)
+    join = _Join(
+        kind="LEFT", left=None, right=None,
+        keys=(_JK(label="id", source_left="u", source_right="o",
+                   left_col=0, right_col=0),),
+        on_expr=(), natural=False,
+    )
+    out = je._null_pad_right(
+        [1, "a"],  # left_row
+        ["id", "user_id"],  # right_schema
+        join,
+    )
+    # left 保留；right 合并键 'id' (col 0) 跳过 → 只追加 None 给 'user_id'
+    assert out == [1, "a", None]
