@@ -49,9 +49,11 @@
 
 ## 7. Python API 与计划消费接口
 
-- [ ] 7.1 先编写 Database/Row JOIN API 测试：显式投影、各 JOIN 类型、`SELECT *`、USING/NATURAL 合并键、重复列名、限定标签映射访问、迭代和 repr。
-- [ ] 7.2 让 JOIN Row 使用无歧义的限定列标签和单一合并键，并保持单表 Row 行为兼容。
-- [ ] 7.3 暴露只读 LogicalPlan 构造入口，确保构造和格式化不写文件、不写 WAL、不提交事务。
+- [x] 7.1 先编写 Database/Row JOIN API 测试：显式投影、各 JOIN 类型、`SELECT *`、USING/NATURAL 合并键、重复列名、限定标签映射访问、迭代和 repr。
+- [x] 7.2 让 JOIN Row 使用无歧义的限定列标签和单一合并键，并保持单表 Row 行为兼容。
+- [x] 7.3 暴露只读 LogicalPlan 构造入口，确保构造和格式化不写文件、不写 WAL、不提交事务。
+
+**Task 9 closeout**: commit `2c617f5` (impl). 6 unit + 4 integration tests pass; full suite 783 pass + 1 skip (baseline 773+1 → +10 from new tests). Reviewer spec PASS + code-quality APPROVED_WITH_CONCERNS (1 MINOR: DV-T9-1 — `explain_plan("")` raises raw `IndexError` instead of documented error; deferred to Task 10 error propagation). Module budgets: `database.py` 155/160 (within), `__init__.py` 35/35 (at). Coverage 92.01%. `Row.__getitem__` (T6) verified unchanged against all 6 JOIN Row API tests.
 
 ## 8. 全面验证与文档
 
