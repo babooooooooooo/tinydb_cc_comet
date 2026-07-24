@@ -31,9 +31,11 @@
 
 ## 5. LEFT/RIGHT/FULL JOIN 与 NULL 语义
 
-- [ ] 5.1 先编写 LEFT/RIGHT/FULL 测试：匹配、单侧无匹配、双方无匹配、右表多匹配、NULL、USING/NATURAL 和多级外连接。
-- [ ] 5.2 实现无匹配侧的 NULL 补齐、RIGHT 输入交换与结果恢复、FULL 双侧未匹配行保留，并保持声明的 Join kind。
-- [ ] 5.3 验证外连接后 WHERE、HAVING 和聚合对 NULL 的行为与规范一致，锁定稳定输出顺序。
+- [x] 5.1 先编写 LEFT/RIGHT/FULL 测试：匹配、单侧无匹配、双方无匹配、右表多匹配、NULL、USING/NATURAL 和多级外连接。
+- [x] 5.2 实现无匹配侧的 NULL 补齐、RIGHT 直接实现（取代 swap-recurse 方案）、FULL 双侧未匹配行保留，并保持声明的 Join kind。
+- [x] 5.3 验证外连接后 WHERE、HAVING 和聚合对 NULL 的行为与规范一致，锁定稳定输出顺序（property 测试 + strict-left-deep-insertion）。
+
+**Task 7 closeout**: commit `86bac80` (impl) + `eb27baa` (RIGHT JOIN column-order bugfix + docstring honesty). 5 unit + 6 integration + 2 property tests pass; full suite 765 pass + 1 skip (Task 8 follow-up). Reviewer caught a CRITICAL RIGHT JOIN column-order regression (swap-recurse produced right-first columns on `SELECT *`); fix agent replaced with direct `_nested_loop_right` and added regression test. Module budgets: `_join_executor.py` 600/500 (+20%), `resolver.py` 453/230 (+97%) — formal deviations recorded for verify report (chained JOIN I-1 fix and WHERE position remap underestimated in plan). `outer_kind` ResolvedPlan field remains unwired (deferred to follow-up).
 
 ## 6. JOIN 后查询阶段
 
