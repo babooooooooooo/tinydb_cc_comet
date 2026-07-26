@@ -21,11 +21,17 @@
 
 ## 3. 结果格式化 `_repl_format.py`
 
-- [ ] 3.1 创建 `src/tinydb/_repl_format.py`：定义 `format_rows(rows: list[Row], fmt: str) -> str` 分发函数
-- [ ] 3.2 实现 `table` 格式（迁移现有 `_format_table` 逻辑）
-- [ ] 3.3 实现 `csv` 格式（`csv.writer` + `StringIO`，RFC 4180）
-- [ ] 3.4 实现 `json` 格式（`json.dumps` 数组；Row 字段名映射）
-- [ ] 3.5 添加单元测试 `tests/unit/test_repl_format.py` 覆盖三种格式的快照对比
+- [x] 3.1 创建 `src/tinydb/_repl_format.py`：定义 `format_rows(rows: list[Row], fmt: str) -> str` 分发函数 — commit `2fd2d34`
+- [x] 3.2 实现 `table` 格式（迁移现有 `_format_table` 逻辑） — commit `2fd2d34` (`_repl_format.py:34-58` byte-compatible with `repl._format_table`)
+- [x] 3.3 实现 `csv` 格式（`csv.writer` + `StringIO`，RFC 4180） — commit `2fd2d34` (`_repl_format.py:61-69`)
+- [x] 3.4 实现 `json` 格式（`json.dumps` 数组；Row 字段名映射） — commit `2fd2d34` (`_repl_format.py:72-82`，含 `default=str` fallback)
+- [x] 3.5 添加单元测试 `tests/unit/test_repl_format.py` 覆盖三种格式的快照对比 — commit `2fd2d34` (8 tests, 全部 PASS)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **plan §3.1 vs §3.3 contradiction** — `test_format_unknown_raises_value_error` 原本用 `format_rows([], "markdown")` 期望 ValueError，但 plan §3.3 impl 先短路空 rows 返回 `(no rows)`，fmt 永不被检查。两段都"逐字"符合 plan 但语义互斥。Coordinator 裁定：修改 test 为 `format_rows(sample_rows, "markdown")`（non-empty rows），与 design "empty → (no rows), unknown fmt → ValueError" 独立行为一致；impl 不变。Plan amend 留待 verify 阶段。
+> 2. **LOW · docstring typo** — `_repl_format.py:21` 有缺空格的小笔误 "(no rows)'.fmt ∈ ..."（plan §3.3 逐字），独立 chore fix。
+> 3. **Plan-staleness LOW**: `src/tinydb/repl.py` 仍含旧 `_format_table`（lines 103-128）。Task 3 仅创建新模块；repl.py 的旧实现由 Task 5 整合阶段处理（待派发）。
+> 4. **8 tests + 822/1 baseline verified** by implementer `ab049ccc1715b24e5` (commit `2fd2d34`) and externally reviewed by `a902b95a5105de16c` (APPROVED_WITH_NOTES — NEXT=CHECK_OFF_AND_NEXT; LOW findings only).
 
 ## 4. meta 命令注册表 `_repl_meta.py`
 
