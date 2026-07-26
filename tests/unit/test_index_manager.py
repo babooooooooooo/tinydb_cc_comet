@@ -22,3 +22,18 @@ def test_index_manager_rebuild_for_table_with_pk():
     ref2 = im.lookup_key("t", "id", key_codec.encode_py(999))
     assert ref2 is None
     p.close()
+
+
+def test_index_manager_all_indexes_yields_triples():
+    from tinydb.database import Database
+    from tinydb.index_manager import IndexManager
+    from tinydb.pager import Pager
+    with Database(":memory:") as db:
+        db.execute("CREATE TABLE u(id INT PRIMARY KEY)")
+        idx = db.index_manager
+        triples = list(idx.all_indexes())
+        assert len(triples) == 1
+        table, column, btree = triples[0]
+        assert table == "u"
+        assert column == "id"
+        assert btree is not None
