@@ -8,11 +8,16 @@
 
 ## 2. 输入/输出层 `_repl_io.py`
 
-- [ ] 2.1 创建 `src/tinydb/_repl_io.py`：定义 `ReplIO` 类，封装 `prompt_toolkit.PromptSession` + `PygmentsLexer` + `FileHistory`
-- [ ] 2.2 在模块顶层 `try/except ImportError`：当 `prompt_toolkit` 不可导入时，提供 `_FallbackIO`（基于 `input()` 的退化实现）
-- [ ] 2.3 实现多行检测：扫描缓冲区中是否有未闭合的引号、括号、`;`；未终止则使用 `CONTINUATION_PROMPT`
-- [ ] 2.4 实现历史加载与保存：`~/.tinydb_history`，与现有 readline 路径兼容
-- [ ] 2.5 实现 `NO_COLOR` 环境变量与 `TERM=dumb` 检测；不支持时禁用颜色 token
+- [x] 2.1 创建 `src/tinydb/_repl_io.py`：定义 `ReplIO` 类，封装 `prompt_toolkit.PromptSession` + `PygmentsLexer` + `FileHistory` — commit `859b2b8` (`_repl_io.py:108-183` `PromptToolkitReplIO` + `ReplIOProtocol`)
+- [x] 2.2 在模块顶层 `try/except ImportError`：当 `prompt_toolkit` 不可导入时，提供 `_FallbackIO`（基于 `input()` 的退化实现） — commit `859b2b8` (`_repl_io.py:23-34` 软导入 + `_repl_io.py:187-219` `FallbackReplIO`)
+- [x] 2.3 实现多行检测：扫描缓冲区中是否有未闭合的引号、括号、`;`；未终止则使用 `CONTINUATION_PROMPT` — commit `859b2b8` (`_repl_io.py:60-105` `_is_unterminated()` + `FallbackReplIO.read_statement` 累积逻辑)
+- [x] 2.4 实现历史加载与保存：`~/.tinydb_history`，与现有 readline 路径兼容 — commit `859b2b8` (`_repl_io.py:136-138` `FileHistory` + `FallbackReplIO._history` 内存历史 + `_repl_io.py:200-203` `save_history` 协议方法)
+- [x] 2.5 实现 `NO_COLOR` 环境变量与 `TERM=dumb` 检测；不支持时禁用颜色 token — commit `859b2b8` (`_repl_io.py:46-52` `_color_enabled()`)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **Fallback `;` policy differs from design doc** — 当前 fallback 要求显式 `;` 终止符（已 inline-文档）；design doc 仅描述 `_is_unterminated` 终止判定。两者语义保持兼容（fallback 是 layer-2 限制），但需要 design doc amend 跟进。
+> 2. **History file permissions on existing files** — `touch(mode=0o600)` 仅在新建时生效；既有 `~/.tinydb_history` 不被收紧权限。安全 follow-up，不阻塞 Task 3。
+> 3. **22 tests + 822/1 baseline verified** by implementer `a09f7abeac6419968` (commit `859b2b8`) and externally reviewed by `acf8dcbc32a81401c` (APPROVE + deferrable MEDIUM/LOW); coordinator-side spot-check `822 passed, 1 skipped in 56.25s` post-venv-repin.
 
 ## 3. 结果格式化 `_repl_format.py`
 

@@ -18,18 +18,20 @@
 | Task | Status | Implement SHA | Review Round | Risk Signals | Reviewer Verdict |
 |------|--------|----------------|--------------|--------------|------------------|
 | 1. 依赖与构建配置 | DONE | a6f2b3a + 29267969 | 2 of 2 | dep change | ✅ APPROVED |
-| 2. 输入/输出层 _repl_io.py | pending | — | — | — | — |
-| 3. 结果格式化 _repl_format.py | pending | — | — | — | — |
+| 2. 输入/输出层 _repl_io.py | ✅ checked off | 859b2b8 | external review (acf8dcbc32a81401c) | dep + fallback path | ✅ APPROVE + deferrable MEDIUM/LOW |
+| 3. 结果格式化 _repl_format.py | pending dispatch | — | — | — | — |
 | 4. meta 命令注册表 _repl_meta.py | pending | — | — | — | — |
 | 5. 整合与 REPL 主循环 | pending | — | — | — | — |
 | 6. 集成测试 | pending | — | — | — | — |
 | 7. 文档 | pending | — | — | — | — |
 | 8. 最终验证 | pending | — | — | — | — |
 
-## Current Task: 2 (about to dispatch implementer)
+## Current Task: 3 (about to dispatch)
 
-- Task 1 is COMPLETE — Task 2 (src/tinydb/_repl_io.py full impl ~280 lines + ~13 tests) is dispatching now
-- 待: 检查-off commit + Task 2 implementer dispatch
+- Task 2 (REPL IO layer) implementer (`a09f7abeac6419968`) committed at `859b2b8`: 220-line `_repl_io.py` with full PromptToolkit/Fallback adapters + ReplIOProtocol + _is_unterminated/_color_enabled helpers + 22 unit tests in `tests/unit/test_repl_io.py`. Status DONE_WITH_CONCERNS. Code review by external reviewer `acf8dcbc32a81401c` empirically verified 22/22 tests pass and returned APPROVE with only deferrable MEDIUM/LOW items (Fallback `;` policy differs from design doc; pre-existing history file perms not tightened).
+- Coordinator-side spot-check ran `pip install -e . --no-deps` to re-pin venv to CLI worktree after CC T5 amend agent drifted it, confirmed 822 + 1 baseline preserved.
+- Recorded deviations in tasks.md §2 footer.
+- Next: Task 3 (REPL format dispatch — about to dispatch).
 
 ## Review Rounds Budget (thorough)
 
