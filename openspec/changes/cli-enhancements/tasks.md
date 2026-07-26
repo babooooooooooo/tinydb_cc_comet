@@ -2,9 +2,9 @@
 
 ## 1. 依赖与构建配置
 
-- [ ] 1.1 在 `pyproject.toml` 的 `[project] dependencies` 中加入 `pygments>=2.18` 和 `prompt_toolkit>=3.0.0`
-- [ ] 1.2 运行 `pip install -e .` 验证依赖可解析
-- [ ] 1.3 在 `pyproject.toml` 的 `[project.optional-dependencies]` 添加 `repl = ["pygments>=2.18", "prompt_toolkit>=3.0.0"]` 以允许可选安装（推荐做法）
+- [x] 1.1 在 `pyproject.toml` 的 `[project] dependencies` 中加入 `pygments>=2.18` 和 `prompt_toolkit>=3.0.0`
+- [x] 1.2 运行 `pip install -e .` 验证依赖可解析
+- [x] 1.3 在 `pyproject.toml` 的 `[project.optional-dependencies]` 添加 `repl = ["pygments>=2.18", "prompt_toolkit>=3.0.0"]` 以允许可选安装（推荐做法）
 
 ## 2. 输入/输出层 `_repl_io.py`
 
