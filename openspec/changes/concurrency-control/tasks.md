@@ -47,10 +47,10 @@
 
 ## 7. 测试基础设施与覆盖率
 
-- [ ] 7.1 更新 `tests/conftest.py`（或新建），让现有非并发测试默认使用 `Database(path, locking=False)`，避免 796 个基线测试产生 flock 开销
-- [ ] 7.2 本地运行完整测试套件（`pytest`），确认通过且覆盖率 ≥ 92%，0 个新增失败
-- [ ] 7.3 验证并发测试模块合计覆盖 `database.py`、`pager.py`、`errors.py` 新增锁相关分支 ≥ 80%
-- [ ] 7.4 完整测试套件连续运行 5 次，检测因锁顺序引入的 flaky 测试
+- [x] 7.1 更新 `tests/conftest.py`（或新建），让现有非并发测试默认使用 `Database(path, locking=False)`，避免 796 个基线测试产生 flock 开销 — commit `31dd6c0` (`tests/conftest.py:1-56`, 4 fixtures: `file_db` / `file_db_unlocked` / `memory_db_locked` / `memory_db`). Plan §4.1 verbatim — docstring 引用 "796 baseline" 为 plan-staleness（join-query change 增加了 ~40 测试，实际 baseline 837）. 选 NOT-TO-FIX：在 implementer 之前 plan 文本就是权威 spec，独立 chore fix 留待 verify/follow-up 阶段
+- [ ] 7.2 本地运行完整测试套件（`pytest`），确认通过且覆盖率 ≥ 92%，0 个新增失败 — Task 9 范围
+- [ ] 7.3 验证并发测试模块合计覆盖 `database.py`、`pager.py`、`errors.py` 新增锁相关分支 ≥ 80% — Task 9 范围
+- [ ] 7.4 完整测试套件连续运行 5 次，检测因锁顺序引入的 flaky 测试 — Task 9 范围
 
 ## 8. 文档
 

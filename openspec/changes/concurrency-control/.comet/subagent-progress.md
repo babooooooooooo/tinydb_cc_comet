@@ -20,7 +20,7 @@
 | 1. FileLock + DatabaseLocked | committed | 7f62d5c | 0 | locks | pending review |
 | 2. Pager fcntl.flock 集成 | committed | fbacf39 | 0 | locks | pending review |
 | 3. Database RLock + _is_closed | ✅ checked off | ec3633f9 | 1 of 2 | locks | ✅ APPROVED_WITH_NOTES (PASS_WITH_FIXES) |
-| 4. tests/conftest.py fixtures | pending dispatch | — | — | — | — |
+| 4. tests/conftest.py fixtures | ✅ checked off | 31dd6c0 | 1 of 2 | — | ✅ APPROVED_WITH_NOTES (CHECK_OFF_AND_NEXT) |
 | 5. 多线程单元测试 | pending | — | — | — | — |
 | 6. 跨进程 driver + scenarios | pending | — | — | — | — |
 | 7. 跨进程集成测试 | pending | — | — | — | — |
@@ -29,11 +29,10 @@
 | 10. 文档与公开契约 | pending | — | — | — | — |
 | 11. OpenSpec strict + 最终完整性 | pending | — | — | — | — |
 
-## Current Task: 4 (about to dispatch)
+## Current Task: 5 (about to dispatch)
 
-- Task 3 reviewed APPROVED_WITH_NOTES (PASS_WITH_FIXES). 15 lock tests pass; full suite 837 passed / 1 skipped — no regression. Three Important deviations noted (database.py +25 lines over §2 budget, test_database_lock.py 250 lines multi-budget, venv drift operational) — none blocking, all recorded for verify-stage deviation register. One OPTIONAL follow-up: move `_is_closed = True` placement (deferred; recorded in tasks.md).
-- Task 3 sub-items §2.1-§2.5 marked complete with commit reference `ec3633f`. tasks.md checkoff commit pending.
-- Task 4 (conftest.py fixtures per plan §7.1) about to dispatch.
+- Task 4 reviewed APPROVED_WITH_NOTES — CHECK_OFF_AND_NEXT. 4 fixtures present (file_db / file_db_unlocked / memory_db_locked / memory_db); pytest baseline 837/1 unchanged; coverage 92.45%. Reviewer flagged only Minor #1: docstring "796 baseline" text is plan-staleness (current baseline is 837 after join-query change). Marked as NOT-TO-FIX (verbatim plan was the spec; recorded for verify stage). tasks.md §7.1 checkoff commit pending.
+- Task 5 (multithreading unit tests per plan §6) about to dispatch — 5 test files (test_threading_inserts.py, test_threading_updates.py, test_threading_memory.py, test_locking_off.py, test_reentrant_lock.py), each with verbatim code from plan.
 
 ## Review Rounds Budget (thorough)
 
@@ -48,3 +47,6 @@
 - 2026-07-26: Parallel dispatched CLI-enhancements Task 1 reviewer (afefb7d2396786dca) since CLI is the active `current-change.json` selection.
 - 2026-07-26: CC Task 3 finalizer committed at ec3633f9. 41 lock-related tests pass + 837 baseline pass. Reviewer round 1 of 2 dispatched.
 - 2026-07-26: CC Task 3 reviewer returned APPROVED_WITH_NOTES — PASS_WITH_FIXES. Skipping optional `_is_closed = True` hardening (deferred to follow-up). Marked §2.1-§2.5 complete in tasks.md. About to commit checkoff and dispatch Task 4.
+- 2026-07-26: CC Task 4 implementer (a7083f4de63b50ba3) committed conftest.py at 31dd6c0. Self-flagged venv drift → re-ran `pip install -e . --no-deps` and verified 837/1 baseline.
+- 2026-07-26: CC Task 4 reviewer (a0c2e2dd20327bd70) returned APPROVED_WITH_NOTES — only Minor #1 docstring staleness; CHECK_OFF_AND_NEXT. Skipping docstring fix (verbatim plan was authoritative spec).
+- 2026-07-26: tasks.md §7.1 checkoff + commit pending; Task 5 (multithreading unit tests per plan §6) implementer dispatching next.
