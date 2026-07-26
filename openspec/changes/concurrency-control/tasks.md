@@ -6,11 +6,13 @@
 
 ## 2. Database 层线程锁
 
-- [ ] 2.1 在 `Database.__init__` 上添加 `locking: bool = True` 关键字参数；`locking=True` 时构造 `self._lock: threading.RLock | None = threading.RLock()`，`locking=False` 时设为 `None`
-- [ ] 2.2 用 `with self._lock:`（非 None 时）包装 `Database.execute()` 函数体；保持可重入语义
-- [ ] 2.3 用 `with self._lock:`（非 None 时）包装 `Database.explain_plan()` 函数体
-- [ ] 2.4 更新 `Database.close()` 以释放锁状态（语义层面 — `RLock` 无强制释放；通过关闭 Pager 释放底层 fd，从而 OS 释放 flock）
-- [ ] 2.5 在 `src/tinydb/__init__.py` 中导出 `DatabaseLocked`
+- [x] 2.1 在 `Database.__init__` 上添加 `locking: bool = True` 关键字参数；`locking=True` 时构造 `self._lock: threading.RLock | None = threading.RLock()`，`locking=False` 时设为 `None` — commit `ec3633f` (database.py:58, 73)
+- [x] 2.2 用 `with self._lock:`（非 None 时）包装 `Database.execute()` 函数体；保持可重入语义 — commit `ec3633f` (database.py:127 使用 `_acquire_lock()` 上下文管理器，未设 `_lock` 时退化为 `nullcontext()`)
+- [x] 2.3 用 `with self._lock:`（非 None 时）包装 `Database.explain_plan()` 函数体 — commit `ec3633f` (database.py:163)
+- [x] 2.4 更新 `Database.close()` 以释放锁状态（语义层面 — `RLock` 无强制释放；通过关闭 Pager 释放底层 fd，从而 OS 释放 flock） — commit `ec3633f` (database.py:188-195；`close()` 持锁 + idempotent `if self._is_closed: return` + `try/finally` flush+close)
+- [x] 2.5 在 `src/tinydb/__init__.py` 中导出 `DatabaseLocked` — commit `ec3633f` (tinydb/__init__.py:9, 36 导出于 `__all__`)
+
+> **Deferred (optional)**: review reviewer 提出，将 `self._is_closed = True` 从 `close()` 的 `finally:` 块中 `pager.close()` 之后的位置，移到 `if self._is_closed: return` 早返回之后、try 之前 — 这样即便 `pager.flush()` 或 `pager.close()` raise，Database 也会被标记为 closed。Reviewer 标记为 OPTIONAL（"degenerate Pager.close()-raises case"），代码当前行为正确，可作为 follow-up hardening 不阻塞 Task 4 dispatch。
 
 ## 3. Pager 层跨进程文件锁
 
