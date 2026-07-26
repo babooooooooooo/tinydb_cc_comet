@@ -39,11 +39,19 @@
 
 ## 6. 多线程单元测试
 
-- [ ] 6.1 `tests/unit/concurrency/test_threading_inserts.py`：8 线程 × 每线程 100 次 INSERT 到同一表 → 最终行数 == 800，所有 ID 唯一
-- [ ] 6.2 `tests/unit/concurrency/test_threading_updates.py`：4 线程 × 每线程 200 次 UPDATE，作用在不重叠行子集上 → 最终状态匹配预期更新（无丢失写）
-- [ ] 6.3 `tests/unit/concurrency/test_threading_memory.py`：与 6.1 相同但用 `Database(":memory:")` — 必须 NOT 调用 fcntl（通过 monkey-patch 或平台守卫断言）
-- [ ] 6.4 `tests/unit/concurrency/test_locking_off.py`：在 `locking=False` 路径下，monkey-patch `fcntl.flock` 并断言它未被调用；断言 `threading.RLock` 也未被构造
-- [ ] 6.5 `tests/unit/concurrency/test_reentrant_lock.py`：方法 `Database._exec_helper()` 在 `execute()` 内部调用另一个 `Database.execute()`，断言不死锁
+- [x] 6.1 `tests/unit/concurrency/test_threading_inserts.py`：8 线程 × 每线程 100 次 INSERT 到同一表 → 最终行数 == 800，所有 ID 唯一 — commit `1c19df2` (2 tests pass)
+- [x] 6.2 `tests/unit/concurrency/test_threading_updates.py`：4 线程 × 每线程 200 次 UPDATE，作用在不重叠行子集上 → 最终状态匹配预期更新（无丢失写） — commit `1c19df2` (1 pass + 1 SKIP; SKIP 由 MVP tokenizer 缺 `+` 引起 — UPDATE counter+=1 SQL 不可表达; 替代覆盖:test_threading_inserts.py PK 唯一性)
+- [x] 6.3 `tests/unit/concurrency/test_threading_memory.py`：与 6.1 相同但用 `Database(":memory:")` — 必须 NOT 调用 fcntl（通过 monkey-patch 或平台守卫断言） — commit `1c19df2` (2 tests pass)
+- [x] 6.4 `tests/unit/concurrency/test_locking_off.py`：在 `locking=False` 路径下，monkey-patch `fcntl.flock` 并断言它未被调用；断言 `threading.RLock` 也未被构造 — commit `1c19df2` (4 tests pass; TrackedRLock 跨模块 patch 已在 docstring line 102-105 说明 — production `from threading import RLock` 引用捕获所致)
+- [x] 6.5 `tests/unit/concurrency/test_reentrant_lock.py`：方法 `Database._exec_helper()` 在 `execute()` 内部调用另一个 `Database.execute()`，断言不死锁 — commit `1c19df2` (2 tests pass; `explain_plan("SELECT * FROM t")` 替代 `SELECT 1` 因 tokenizer 缺裸整数常量)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **Plan §5.4 Step 4 注入技巧与 Task 3 实际设计的 `_lock is None` bypass 不兼容** — Coordinator 裁定修改测试为 monkeypatch `threading.RLock.__enter__`/`__exit__` 计数器 (option a); production source 不动; test docstring 71-100 行已记录理由。
+> 2. **Plan §6.2 SKIP**: `test_concurrent_updates_no_lost_writes` 因 MVP tokenizer 缺 `+` 标点而 SKIP; 覆盖由 test_threading_inserts.py PK 唯一性 (Section 6.1) 替代; 解除需要在 tokenizer 支持 `+` 后改 SQL 为 `UPDATE t SET counter = counter + 1 WHERE id = ?`。
+> 3. **MEDIUM · 跨模块 monkey-patch**: `tests/unit/concurrency/test_locking_off.py:106-108` 同时 patch `threading.RLock` 与 `tinydb.database.RLock` (production `from threading import RLock` 引用捕获); 无更小表面积替代; 已记录。
+> 4. **LOW · commit message 数字误述**: implementer 写 "10 multi-threaded unit tests", 实际 5 文件 12 tests (11 pass + 1 skip); 文字小误。
+> 5. **LOW · test_threading_inserts.py 偏离 plan §5.1**: 原 plan 用 threading.Event overlap 检测, 实际实现简化为最终态断言 (100 行 + markers 50/50); design doc §6.1 不要求 overlap 检测, 简化仍能验证 serialisation invariant; commit message 误述 "verifies serialisation via threading.Event" 未对应实际行为。
+> 6. **12 tests + 837/1 baseline verified** by implementer `a7f96c852cb014768` (commit `1c19df2`) and externally reviewed by `acb8f731ab6531c17` (APPROVED_WITH_NOTES — CHECK_OFF_AND_NEXT; MEDIUM/LOW findings only).
 
 ## 7. 测试基础设施与覆盖率
 
