@@ -1,7 +1,9 @@
 """Public API: Database + Row. MVP: non-ACID, no transactions. <= 90 lines (plan §6.1)."""
 from collections.abc import Iterator
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, Tuple, Union
 
 from tinydb.catalog import Catalog
@@ -53,13 +55,30 @@ class Row:
 class Database:
     """Public entry point. Use as context manager or call ``close()``."""
 
-    def __init__(self, path: Union[str, Path] = ":memory:") -> None:
+    def __init__(self, path: Union[str, Path] = ":memory:", *, locking: bool = True) -> None:
         """Open tinydb at ``path`` (file or ``":memory:"``).
 
         MVP: non-ACID, no crash safety. No ``begin``/``commit``/``rollback``;
         transaction support lives in tinydb-acid.
+
+        ``locking`` (default True) installs a per-instance ``threading.RLock``
+        that serializes ``execute()`` and ``explain_plan()`` for thread
+        safety. Pass ``locking=False`` to skip the RLock (useful for
+        single-threaded callers that want to avoid lock overhead, or when
+        fcntl.flock is unavailable). The lock is reentrant, so internal
+        helpers that call ``execute()`` are safe.
         """
-        self.pager = Pager(path)
+        # Build the in-process lock first so ``execute()`` / ``explain_plan()``
+        # can acquire it later. ``locking=False`` → None (caller opted out).
+        self._lock: "RLock | None" = RLock() if locking else None
+
+        # Pager construction may raise DatabaseLocked (another process
+        # holds the flock). We deliberately do NOT wrap the Pager
+        # constructor in ``self._lock`` — RLock is reentrant and we want
+        # DatabaseLocked to propagate cleanly before any thread state is
+        # polluted by partial Database setup.
+        self.pager = Pager(str(path), locking=locking)
+        self._is_closed: bool = False
         self.catalog = Catalog.from_bytes(self.pager.read_page(1))
         # IndexManager: B+tree indexes per (table, col). For pre-existing
         # tables (post-reopen) rebuild via full scan so lookups reflect
@@ -79,32 +98,53 @@ class Database:
             )
         # New tables mid-session install wrappers via _exec_create_table.
 
+    def _acquire_lock(self):
+        """Return the lock context manager (or nullcontext when disabled).
+
+        Centralizes the ``self._lock is None`` check so callers don't have
+        to repeat the nullcontext dance. ``nullcontext()`` is a no-op
+        context manager with zero overhead.
+        """
+        return self._lock if self._lock is not None else nullcontext()
+
     def execute(self, sql: str) -> list[Row]:
         """Run one statement or ``;``-separated script; return final result.
 
         SELECT returns ``list[Row]``; DDL/INSERT/DELETE returns ``[]``.
         Raises ``ParseError``/``TokenError`` or ``ExecutionError``; no remapping.
+
+        Acquires the per-instance ``threading.RLock`` (when ``locking=True``)
+        to serialize concurrent calls on the same Database. The lock is
+        reentrant — helpers that call ``execute()`` from inside
+        ``execute()`` are safe.
+
+        Raises ``RuntimeError("Database is closed")`` if the Database has
+        been closed; the guard runs *before* lock acquisition so a
+        closed Database never re-enters the locked region.
         """
-        tokens = tokenize(sql)
-        stmts = parse(tokens)
+        if self._is_closed:
+            raise RuntimeError("Database is closed")
+        with self._acquire_lock():
+            tokens = tokenize(sql)
+            stmts = parse(tokens)
 
-        results: list[Row] = []
-        for s in stmts.statements:
-            out = self.executor.execute(s)
-            if isinstance(out, list):
-                results = out
+            results: list[Row] = []
+            for s in stmts.statements:
+                out = self.executor.execute(s)
+                if isinstance(out, list):
+                    results = out
 
-        last = stmts.statements[-1] if stmts.statements else None
-        if isinstance(last, Select) and results:
-            # T6: JOIN path already returns list[Row]; skip re-wrap.
-            if last.joins:
-                if results and isinstance(results[0], Row):
-                    return results
-            ti = self.catalog.get_table(last.table)
-            if ti is not None:
-                cols = tuple(n for n, _ in ti.schema) if last.columns == ("*",) else tuple(last.columns)
-                results = [Row(values=tuple(r), columns=cols) for r in results]
-        return results
+            last = stmts.statements[-1] if stmts.statements else None
+            if isinstance(last, Select) and results:
+                # T6: JOIN path already returns list[Row]; skip re-wrap.
+                if last.joins:
+                    if results and isinstance(results[0], Row):
+                        return results
+                ti = self.catalog.get_table(last.table)
+                if ti is not None:
+                    cols = tuple(n for n, _ in ti.schema) if last.columns == ("*",) else tuple(last.columns)
+                    results = [Row(values=tuple(r), columns=cols) for r in results]
+            return results
 
     def explain_plan(self, sql: str) -> "LogicalPlan":
         """Build a LogicalPlan from a SELECT without executing it.
@@ -113,23 +153,46 @@ class Database:
         Never calls the executor, scans tables or touches Pager/WAL.
         Final statement must be ``SELECT``; non-SELECT raises
         ``ExecutionError`` (parse errors propagate as ``ParseError``).
+
+        Acquires the per-instance ``threading.RLock`` (when ``locking=True``).
+        Raises ``RuntimeError("Database is closed")`` if the Database has
+        been closed.
         """
-        from tinydb.errors import ExecutionError as _EE
-        from tinydb.plan import build_plan as _bp
-        stmts = parse(tokenize(sql))
-        last = stmts.statements[-1] if stmts.statements else None
-        if last is None:
-            raise _EE("explain_plan: empty SQL")
-        if not isinstance(last, Select):
-            raise _EE("explain_plan: only SELECT is supported")
-        return _bp(last, self.catalog)
+        if self._is_closed:
+            raise RuntimeError("Database is closed")
+        with self._acquire_lock():
+            from tinydb.errors import ExecutionError as _EE
+            from tinydb.plan import build_plan as _bp
+            stmts = parse(tokenize(sql))
+            last = stmts.statements[-1] if stmts.statements else None
+            if last is None:
+                raise _EE("explain_plan: empty SQL")
+            if not isinstance(last, Select):
+                raise _EE("explain_plan: only SELECT is supported")
+            return _bp(last, self.catalog)
 
     def close(self) -> None:
-        """Flush + close the Pager. Idempotent; ``close()`` runs even if ``flush()`` raises."""
-        try:
-            self.pager.flush()
-        finally:
-            self.pager.close()
+        """Flush + close the Pager. Idempotent; ``close()`` runs even if ``flush()`` raises.
+
+        Acquires the per-instance ``threading.RLock`` (when ``locking=True``)
+        to ensure no other thread is mid-``execute()`` when we tear down
+        the Pager. ``RLock`` has no forced-release semantics; the
+        underlying ``fcntl.flock`` is released by ``Pager.close()`` which
+        closes the file descriptor.
+
+        Sets ``_is_closed`` after ``Pager.close()`` returns (or raises)
+        so subsequent ``execute()`` / ``explain_plan()`` calls raise
+        ``RuntimeError("Database is closed")`` without re-entering the
+        teardown path. Repeated ``close()`` is a no-op.
+        """
+        with self._acquire_lock():
+            if self._is_closed:
+                return  # idempotent: already closed
+            try:
+                self.pager.flush()
+            finally:
+                self.pager.close()
+                self._is_closed = True  # mark closed regardless of flush outcome
 
     def __enter__(self) -> "Database":
         return self
