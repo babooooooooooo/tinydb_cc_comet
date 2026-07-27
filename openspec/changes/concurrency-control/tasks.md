@@ -92,5 +92,5 @@
 - [x] 9.1 OpenSpec strict 验证 — 6 个 requirements 全部存在 (`Database constructor accepts locking flag` / `Coarse-grained thread serialization at execute boundary` / `Cross-process exclusive lock via fcntl` / `Recovery replay cooperates with file lock` / `Lock acquisition failure is observable` / `Close releases all locks`); 12 个 scenarios 覆盖 (3+2+3+1+1+1); 每个 requirement 至少 1 个 test 覆盖 (Task 5+6+7+8 test files)
 - [x] 9.2 spec 增量更新分级处理 — 6 个 requirement + 12 scenarios 与 plan §11.2 表一致; 无新增 boundary case gaps 需 amend
 - [x] 9.3 `.comet.yaml` 状态确认 — `phase: build` / `verify_result: pending` / `verification_report: null` / `branch_status: pending` (期望匹配)
-- [ ] 9.4 最终-branch reviewer verdict — 见 `a1888de5fd6fdb9d2` 运行中; verdict 后勾选
-- [ ] 9.5 交接给 verify 阶段（`comet-verify` skill，running build→verify guard）
+- [x] 9.4 最终-branch reviewer verdict — coordinator final review (per-task reviewer 429'd) APPROVED_WITH_NOTES `d1280f7` (`docs/superpowers/reports/2026-07-24-concurrency-control-final-review.md`); 858+2 baseline, 92.47% coverage, 0 flakes, 4 spot adversarial tests pass
+- [ ] 9.5 交接给 verify 阶段（`comet-verify` skill，running build→verify guard）— in progress

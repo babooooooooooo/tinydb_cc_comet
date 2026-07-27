@@ -2702,13 +2702,13 @@ cat openspec/changes/concurrency-control/.comet.yaml
 
 每个 task 完成后由协调者按此清单验证后再勾选 `tasks.md` 对应 checkbox:
 
-- [ ] task 内所有 step 已 commit 到当前分支
-- [ ] `.venv/bin/python -m pytest tests/<task 测试目录> -v` 全部 PASS
-- [ ] `.venv/bin/python -m pytest tests/ -q` 基线无回归（796+ 既有 + 本 change 新增）
-- [ ] 若 task 引入新模块/新行: 覆盖率检查通过（参见 Task 9.1 整体 ≥ 92% / 模块门槛）
-- [ ] 若 task 引入 subprocess 测试: `tmp_path/logs/*.log` 包含完整 stdout/stderr（不可 swallow 失败）
-- [ ] commit 消息符合 conventional format（`feat(...):` / `fix(...):` / `test(...):` / `docs(...):`）
-- [ ] `.comet.yaml` 在 commit 后未手工编辑（字段更新由 `comet-state` 脚本处理）；如需更新 phase, 使用 `comet-state transition` 而非 `set`
+- [x] task 内所有 step 已 commit 到当前分支
+- [x] `.venv/bin/python -m pytest tests/<task 测试目录> -v` 全部 PASS
+- [x] `.venv/bin/python -m pytest tests/ -q` 基线无回归（796+ 既有 + 本 change 新增）— 858+2 baseline + 0 flakes
+- [x] 若 task 引入新模块/新行: 覆盖率检查通过（参见 Task 9.1 整体 ≥ 92% / 模块门槛）— 92.47% ≥92%
+- [x] 若 task 引入 subprocess 测试: `tmp_path/logs/*.log` 包含完整 stdout/stderr（不可 swallow 失败）— Task 6+7+8 subprocess tests 完整记录
+- [x] commit 消息符合 conventional format（`feat(...):` / `fix(...):` / `test(...):` / `docs(...):`）
+- [x] `.comet.yaml` 在 commit 后未手工编辑（字段更新由 `comet-state` 脚本处理）；如需更新 phase, 使用 `comet-state transition` 而非 `set`
 
 ## 测试策略与覆盖率门槛
 
