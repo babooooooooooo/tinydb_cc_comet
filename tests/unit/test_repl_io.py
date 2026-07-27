@@ -128,9 +128,12 @@ def test_prompt_toolkit_replio_read_returns_text(monkeypatch, tmp_path):
 
     io = io_mod.PromptToolkitReplIO(":memory:", tmp_path / "h", False)
     assert io.read_statement() == "SELECT 1;"
+    # add_history is a no-op on PromptToolkitReplIO (Round 1 review fix):
+    # Buffer.validate_and_handle() already appends to the session's
+    # history on submit, so the loop must not double-write.
     io.add_history("SELECT 1;")
     io.add_history("   ")
-    assert io._session.history.calls == ["SELECT 1;"]
+    assert io._session.history.calls == []
 
 
 @pytest.mark.unit

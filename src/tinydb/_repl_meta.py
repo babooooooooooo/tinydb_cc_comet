@@ -123,11 +123,16 @@ def _cmd_read(args: List[str], db: Database, state: ReplState) -> bool:
         return True
 
     from tinydb._repl_io import _is_unterminated
+    from tinydb.repl import _run_sql
+
     buf = ""
     for char in text:
         buf += char
         if char == ";" and not _is_unterminated(buf):
-            _run_sql_from_meta(db, buf, state)
+            # Route through the same executor as interactive SQL so
+            # SELECTs render rows via format_rows() and the active
+            # timer/format/color settings are honoured.
+            _run_sql(db, buf.strip(), state)
             buf = ""
     if buf.strip():
         print(
@@ -135,16 +140,6 @@ def _cmd_read(args: List[str], db: Database, state: ReplState) -> bool:
             file=sys.stderr,
         )
     return True
-
-
-def _run_sql_from_meta(db: Database, sql: str, state: ReplState) -> None:
-    """meta .read 内部使用的执行器;print 'OK'."""
-    try:
-        db.execute(sql)
-    except Exception as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return
-    print("OK")
 
 
 # ---------------------------------------------------------------------------
@@ -236,12 +231,22 @@ def _cmd_format(args: List[str], db: Database, state: ReplState) -> bool:
     return True
 
 
-def _cmd_color(args: List[str], db: Database, state: ReplState) -> bool:
+def _cmd_color(
+    args: List[str],
+    db: Database,
+    state: ReplState,
+    io: "object | None" = None,
+) -> bool:
     if not args or args[0] not in ("on", "off"):
         print("ERROR: .color on|off", file=sys.stderr)
         return True
     state.color_enabled = args[0] == "on"
     print(f"Color: {'on' if state.color_enabled else 'off'}")
+    # prompt_toolkit bakes the lexer into the session at construction;
+    # if we have an IO handle that exposes set_color, rebuild the
+    # session now.  FallbackReplIO has no set_color, which is a no-op.
+    if io is not None and hasattr(io, "set_color"):
+        io.set_color(state.color_enabled)
     return True
 
 
@@ -269,8 +274,16 @@ META_COMMANDS: dict[str, MetaCommand] = {
 # 分发
 # ---------------------------------------------------------------------------
 
-def handle_meta(line: str, db: Database, state: ReplState) -> bool:
+def handle_meta(
+    line: str,
+    db: Database,
+    state: ReplState,
+    io: "object | None" = None,
+) -> bool:
     """解析并分发;.exit/.quit 抛 _ExitReplSignal.
+
+    ``io`` is forwarded to ``.color`` so the command can rebuild the
+    prompt_toolkit session's lexer.  Other commands ignore the handle.
 
     返回:
         True  — 已处理(包括错误)
@@ -286,4 +299,9 @@ def handle_meta(line: str, db: Database, state: ReplState) -> bool:
         print(f"ERROR: unknown command: .{cmd}", file=sys.stderr)
         return True
     rest = parts[1].strip() if len(parts) == 2 else ""
-    return META_COMMANDS[cmd](rest.split() if rest else [], db, state)
+    args_list = rest.split() if rest else []
+    if cmd == "color":
+        # Forward the IO handle so the colour toggle can rebuild the
+        # prompt_toolkit session's lexer.
+        return _cmd_color(args_list, db, state, io)
+    return META_COMMANDS[cmd](args_list, db, state)

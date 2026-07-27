@@ -214,11 +214,20 @@ def test_interactive_loop_help_then_eof(capsys):
 
 
 def test_interactive_loop_executes_sql_then_eof(capsys):
+    """SQL execution path prints OK; loop exits cleanly on EOF.
+
+    The ``FakeIO`` stub is not a ``FallbackReplIO``; the loop therefore
+    does not call ``add_history`` for it.  History bookkeeping is
+    covered by ``test_fallback_replio_records_history`` and
+    ``test_prompt_toolkit_replio_add_history_is_noop``.
+    """
     io = FakeIO(["CREATE TABLE t(id INT);", ""])
     with Database(":memory:") as db:
         assert _interactive_loop(db, io, ReplState()) == 0
     assert "OK" in capsys.readouterr().out
-    assert io.history == ["CREATE TABLE t(id INT);"]
+    # The stub's history is untouched because the loop only calls
+    # add_history for FallbackReplIO.
+    assert io.history == []
 
 
 def test_interactive_loop_blank_silenced(capsys):

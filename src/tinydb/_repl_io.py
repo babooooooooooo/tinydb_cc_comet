@@ -154,9 +154,30 @@ class PromptToolkitReplIO:
             return ""
 
     def add_history(self, statement: str) -> None:
-        """Append non-empty statements to prompt_toolkit history."""
-        if statement.strip():
-            self._session.history.append_string(statement)
+        """No-op for prompt_toolkit: Buffer.validate_and_handle() already
+        appends the entered text to the session history.  Calling
+        ``self._session.history.append_string`` here would double-write
+        every SQL statement, polluting up-arrow recall.
+        """
+        return None
+
+    def set_color(self, enabled: bool) -> None:
+        """Rebuild the session's lexer (preserving history) on color toggle.
+
+        prompt_toolkit bakes the lexer into the session at construction
+        time, so the only way to honour ``.color on|off`` is to drop the
+        current session and create a new one with the new lexer while
+        keeping the same FileHistory instance.
+        """
+        history = self._session.history
+        self._session = PromptSession(
+            history=history,
+            multiline=True,
+            auto_suggest=AutoSuggestFromHistory(),
+            enable_history_search=True,
+            lexer=PygmentsLexer(SqlLexer) if enabled else None,
+            prompt_continuation=self._continuation,
+        )
 
     def save_history(self) -> None:
         """FileHistory handles persistence itself."""
@@ -173,7 +194,13 @@ class FallbackReplIO:
         self._buf = ""
 
     def read_statement(self) -> str | None:
-        """Read input lines until SQL quotes, comments, and parentheses close."""
+        """Read input lines until SQL quotes, comments, and parentheses close.
+
+        Lines starting with ``.`` are meta commands and are returned to the
+        caller immediately (without requiring the ``;`` terminator or
+        accumulation) so the meta-command registry in ``_repl_meta`` can
+        dispatch them.
+        """
         try:
             prompt = "...> " if self._buf else f"tinydb> [{self._db_path}] "
             line = input(prompt)
@@ -186,6 +213,10 @@ class FallbackReplIO:
 
         if not line.strip() and not self._buf:
             return ""
+        # Meta commands are single-line by contract; return immediately
+        # so ``_interactive_loop`` can hand them to ``handle_meta``.
+        if line.lstrip().startswith("."):
+            return line
         self._buf += line + "\n"
         # The fallback has no editor-level submit key, so require an explicit
         # SQL terminator before handing the accumulated input to the REPL.

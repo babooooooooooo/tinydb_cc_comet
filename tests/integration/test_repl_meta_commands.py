@@ -45,7 +45,13 @@ class _FakeHistory:
 class _FakeSession:
     def __init__(self, **kwargs) -> None:
         self.history = _FakeHistory()
-        self._prompts: list = []
+        # ``_prompts_queue`` is a *deque-like* (plain list used as FIFO) of
+        # values to hand out on ``prompt()``.  Each new _FakeSession
+        # created by the factory shares the same list, so the test does
+        # not double-emit prompts when ``set_color`` rebuilds the
+        # session inside the loop.
+        self._prompts_queue: list = kwargs.pop("_prompts_queue", [])
+        self._prompts: list = self._prompts_queue
 
     def prompt(self, prompt, multiline=False):  # noqa: ARG002
         if not self._prompts:
@@ -63,10 +69,14 @@ def _make_io(monkeypatch, prompts: list, tmp_path) -> PromptToolkitReplIO:
     monkeypatch.setattr(io_mod, "PygmentsLexer", lambda l: None)
     monkeypatch.setattr(io_mod, "SqlLexer", object())
 
+    # The factory is invoked from both ``PromptToolkitReplIO.__init__``
+    # and (post Task 5 review) from ``set_color``.  Sharing the prompts
+    # list across all sessions ensures rebuilds don't replay already-
+    # consumed inputs and hang the loop.
+    queue: list = list(prompts)
+
     def _session_factory(**kwargs):
-        session = _FakeSession(**kwargs)
-        session._prompts = list(prompts)
-        return session
+        return _FakeSession(_prompts_queue=queue, **kwargs)
 
     monkeypatch.setattr(io_mod, "PromptSession", _session_factory)
     history = tmp_path / "h"

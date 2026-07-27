@@ -66,15 +66,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     # disable the optional dependency after importing tinydb.repl.
     from tinydb import _repl_io
 
-    if _repl_io._HAS_PROMPT_TOOLKIT and _HAS_PROMPT_TOOLKIT:
+    # When stdin is not a TTY (script / pipe / redirect), prompt_toolkit's
+    # ``PromptSession.prompt()`` silently drops every line — the session
+    # waits for an editor that never shows up.  Force the stdlib-based
+    # ``FallbackReplIO`` so scripts work without any user-visible warning.
+    non_tty = not sys.stdin.isatty()
+
+    if _repl_io._HAS_PROMPT_TOOLKIT and _HAS_PROMPT_TOOLKIT and not non_tty:
         io: ReplIOProtocol = PromptToolkitReplIO(
             db_path, history_path, state.color_enabled
         )
     else:
-        print(
-            "WARNING: prompt_toolkit not available; falling back to input() mode",
-            file=sys.stderr,
-        )
+        if not (_repl_io._HAS_PROMPT_TOOLKIT and _HAS_PROMPT_TOOLKIT):
+            print(
+                "WARNING: prompt_toolkit not available; falling back to input() mode",
+                file=sys.stderr,
+            )
         io = FallbackReplIO(db_path, history_path)
 
     db = Database(db_path)
@@ -94,6 +101,13 @@ def _interactive_loop(
     db: Database, io: ReplIOProtocol, state: ReplState
 ) -> int:
     """Read statements and dispatch meta commands or SQL until EOF/exit."""
+    # prompt_toolkit's Buffer.validate_and_handle() already appends the
+    # entered text to the session history on submit.  Calling
+    # ``io.add_history`` for the prompt-toolkit adapter would therefore
+    # double-write every SQL statement, polluting up-arrow recall.
+    # FallbackReplIO has no such auto-append, so it still needs the
+    # explicit ``add_history`` call.
+    record_history = isinstance(io, FallbackReplIO)
     while True:
         text = io.read_statement()
         if text is None:
@@ -102,11 +116,12 @@ def _interactive_loop(
             continue
         if text.lstrip().startswith("."):
             try:
-                handle_meta(text, db, state)
+                handle_meta(text, db, state, io)
             except _ExitReplSignal:
                 return 0
             continue
-        io.add_history(text)
+        if record_history:
+            io.add_history(text)
         _run_sql(db, text, state)
 
 
@@ -149,6 +164,12 @@ def _format_exception(exc: Exception) -> str:
     if isinstance(exc, ConstraintViolation):
         return f"ERROR: {detail}"
     return f"ERROR: {type(exc).__name__}: {detail}"
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    import sys as _sys
+
+    _sys.exit(main())
 
 
 __all__ = [

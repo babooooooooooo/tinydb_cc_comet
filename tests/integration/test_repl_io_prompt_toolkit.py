@@ -41,11 +41,21 @@ class _FakeHistory:
 
 
 class _FakeSession:
-    """PromptSession stand-in.  ``_prompts`` drives the canned inputs."""
+    """PromptSession stand-in.  ``_prompts`` drives the canned inputs.
+
+    The real ``prompt_toolkit`` session appends the entered text to its
+    history on submit (``Buffer.validate_and_handle``).  We mirror that
+    side-effect here so the regression test for the no-double-write fix
+    in Task 5 review reflects the actual user-visible behaviour.
+    """
 
     def __init__(self, **kwargs) -> None:
         self.history = _FakeHistory()
-        self._prompts = getattr(self, "_prompts", [])
+        # All sessions share the same prompts list (passed via the
+        # ``_prompts_queue`` kwarg from the factory) so that
+        # ``set_color`` rebuilds don't replay already-consumed inputs
+        # and hang the loop.
+        self._prompts = kwargs.pop("_prompts_queue", [])
 
     def prompt(self, prompt, multiline=False):  # noqa: ARG002
         if not self._prompts:
@@ -55,22 +65,28 @@ class _FakeSession:
             raise EOFError
         if value == "_KEYBOARD_INTERRUPT_":
             raise KeyboardInterrupt
+        # Simulate prompt_toolkit's auto-append to history on submit.
+        if value and value.strip():
+            self.history.append_string(value)
         return value
 
 
 def _patch_prompt_toolkit(monkeypatch, prompts: list):
     """Wire up monkey-patches so PromptToolkitReplIO uses our fakes."""
     monkeypatch.setattr(io_mod, "_HAS_PROMPT_TOOLKIT", True)
-    monkeypatch.setattr(io_mod, "PromptSession", _FakeSession)
     monkeypatch.setattr(io_mod, "FileHistory", lambda p: _FakeHistory())
     monkeypatch.setattr(io_mod, "AutoSuggestFromHistory", lambda: None)
     monkeypatch.setattr(io_mod, "PygmentsLexer", lambda l: None)
     monkeypatch.setattr(io_mod, "SqlLexer", object())
 
+    # The factory is invoked from both ``PromptToolkitReplIO.__init__``
+    # and (post Task 5 review) from ``set_color``.  Sharing the prompts
+    # list across all sessions ensures rebuilds don't replay already-
+    # consumed inputs and hang the loop.
+    queue: list = list(prompts)
+
     def _session_factory(**kwargs):
-        session = _FakeSession(**kwargs)
-        session._prompts = list(prompts)
-        return session
+        return _FakeSession(_prompts_queue=queue, **kwargs)
 
     monkeypatch.setattr(io_mod, "PromptSession", _session_factory)
 
@@ -127,7 +143,13 @@ def test_prompt_toolkit_meta_exit(monkeypatch, tmp_path, capsys):
 
 
 def test_prompt_toolkit_history_appends_executed(monkeypatch, tmp_path, capsys):
-    """add_history called for each executed SQL statement; meta commands skipped."""
+    """prompt_toolkit's session auto-appends history on submit; loop does NOT
+    double-write via ``io.add_history``.  Each SQL statement lands in the
+    history exactly once; ``.tables`` (a meta command) is still appended
+    by the fake session because in real prompt_toolkit every submitted
+    line is recorded regardless of whether the REPL treats it as SQL or
+    a meta command.
+    """
     _patch_prompt_toolkit(
         monkeypatch,
         [
@@ -143,12 +165,13 @@ def test_prompt_toolkit_history_appends_executed(monkeypatch, tmp_path, capsys):
     io = PromptToolkitReplIO(":memory:", history_path, False)
     with Database(":memory:") as db:
         _interactive_loop(db, io, ReplState())
-    # 3 SQL statements were added to history; .tables is a meta command so
-    # the loop does not call add_history for it.
-    assert len(io._session.history.calls) == 3
+    # Exactly one append per non-empty submitted line (4 here, since
+    # .tables is a non-empty line).  No double-write via add_history.
+    assert len(io._session.history.calls) == 4
     assert io._session.history.calls[0] == "CREATE TABLE t(id INT);"
     assert io._session.history.calls[1] == "INSERT INTO t(id) VALUES (1);"
-    assert io._session.history.calls[2] == "SELECT * FROM t;"
+    assert io._session.history.calls[2] == ".tables"
+    assert io._session.history.calls[3] == "SELECT * FROM t;"
 
 
 def test_prompt_toolkit_empty_input_continues_loop(monkeypatch, tmp_path, capsys):
