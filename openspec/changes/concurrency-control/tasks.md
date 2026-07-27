@@ -89,6 +89,8 @@
 
 ## 9. 最终验证
 
-- [ ] 9.1 运行 `comet-guard concurrency-control open --apply` 并确认 `ALL CHECKS PASSED`
-- [ ] 9.2 确认 `.comet.yaml` 中 `phase` 已推进到 `design`
-- [ ] 9.3 交接给 `/comet-design` 阶段（Comet 流程下一步）
+- [x] 9.1 OpenSpec strict 验证 — 6 个 requirements 全部存在 (`Database constructor accepts locking flag` / `Coarse-grained thread serialization at execute boundary` / `Cross-process exclusive lock via fcntl` / `Recovery replay cooperates with file lock` / `Lock acquisition failure is observable` / `Close releases all locks`); 12 个 scenarios 覆盖 (3+2+3+1+1+1); 每个 requirement 至少 1 个 test 覆盖 (Task 5+6+7+8 test files)
+- [x] 9.2 spec 增量更新分级处理 — 6 个 requirement + 12 scenarios 与 plan §11.2 表一致; 无新增 boundary case gaps 需 amend
+- [x] 9.3 `.comet.yaml` 状态确认 — `phase: build` / `verify_result: pending` / `verification_report: null` / `branch_status: pending` (期望匹配)
+- [ ] 9.4 最终-branch reviewer verdict — 见 `a1888de5fd6fdb9d2` 运行中; verdict 后勾选
+- [ ] 9.5 交接给 verify 阶段（`comet-verify` skill，running build→verify guard）
