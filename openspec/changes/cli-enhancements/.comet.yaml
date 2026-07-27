@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: build
+phase: verify
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -14,7 +14,7 @@ base_ref: 797634f2ecc71be164c6ed8ef56a8c244856eeeb
 design_doc: docs/superpowers/specs/2026-07-24-cli-enhancements-design.md
 plan: docs/superpowers/plans/2026-07-24-cli-enhancements.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-07-24-cli-enhancements-verify.md
 branch_status: pending
 created_at: 2026-07-24
 verified_at: null
