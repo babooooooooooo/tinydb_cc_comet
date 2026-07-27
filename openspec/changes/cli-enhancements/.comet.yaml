@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: verify
+phase: archive
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -13,13 +13,13 @@ auto_transition: true
 base_ref: 797634f2ecc71be164c6ed8ef56a8c244856eeeb
 design_doc: docs/superpowers/specs/2026-07-24-cli-enhancements-design.md
 plan: docs/superpowers/plans/2026-07-24-cli-enhancements.md
-verify_result: pending
+verify_result: pass
 verification_report: docs/superpowers/reports/2026-07-24-cli-enhancements-verify.md
-branch_status: pending
+branch_status: handled
 created_at: 2026-07-24
-verified_at: null
-archive_confirmation: null
-archived: false
+verified_at: 2026-07-27
+archive_confirmation: confirmed
+archived: true
 direct_override: null
 handoff_context: openspec/changes/cli-enhancements/.comet/handoff/design-context.json
 handoff_hash: c7116248ed7f55e5b888e59c825dfd693afab9327d36a4ff7680c108297eacab
