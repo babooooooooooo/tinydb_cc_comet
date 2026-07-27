@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "change": null,
-  "branch": "main"
+  "change": "concurrency-control",
+  "branch": "feature/20260724/concurrency-control"
 }

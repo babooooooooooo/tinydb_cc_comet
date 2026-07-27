@@ -257,3 +257,50 @@ USING / NATURAL 合并键采用 `Coalesce` 语义：左边非空取左边，否�
 错误诊断：未知表 → `UnknownSource`；歧义裸列 → `AmbiguousColumn`；USING 列缺失 → `MissingUsingKey`；类型不兼容 → `IncompatibleKeyTypes`。所有解析错误都是 `tinydb.ResolutionError`（`ExecutionError` 的子类）。
 
 已知限制（`docs/MVP_LIMITATIONS.md` § v0.2 JOIN 内存限制）：nested-loop + 物化宽行策略无硬性行数上限；极大结果集（百万级 × 百万级 CROSS JOIN）会消耗大量内存。建议在 application 层显式加 `LIMIT` 或在 `WHERE` 中加过滤条件。
+
+## Concurrency（v0.2 新增）
+
+tinydb 默认提供双层并发保护：
+
+1. **进程内**: `Database` 实例持有 `threading.RLock`（粗粒度、可重入），串行化 `execute()` 与 `explain_plan()`。
+2. **跨进程**: `Pager` 在打开 DB 文件后立即获取 `fcntl.flock(LOCK_EX)`，第二个进程打开同一 DB 文件立即抛 `DatabaseLocked`。
+
+### 用法
+
+```python
+import tinydb
+from tinydb import DatabaseLocked
+
+# 默认：双层锁均启用
+db = tinydb.Database("/path/to/file.db")
+
+# 单线程 / 外部已有并发控制：显式 opt-out（零开销）
+db = tinydb.Database("/path/to/file.db", locking=False)
+
+# :memory: 模式：仅线程锁，无文件锁
+db = tinydb.Database(":memory:")
+
+# 跨进程争用
+# 进程 A: db = tinydb.Database("/x.db")  →  持有 flock
+# 进程 B: db = tinydb.Database("/x.db")  →  抛 DatabaseLocked("/x.db")
+try:
+    db = tinydb.Database("/x.db")
+except DatabaseLocked as e:
+    print(f"DB {e.path} is locked by another process")
+```
+
+### 平台
+
+- **Linux / WSL2**: `fcntl.flock` 完整支持，默认行为即双层锁。
+- **Windows / 缺少 fcntl 的平台**: `locking=True` 在 `Pager.__init__` 立即抛 `ImportError("tinydb concurrency control requires fcntl (Linux/WSL only)")`。需要在该平台运行时应显式传 `locking=False` 走单线程路径。
+- **macOS**: `fcntl` 模块存在但 `flock` 语义不可靠；建议在 macOS 上同样显式 `locking=False`，由应用层提供并发控制。
+
+### 限制
+
+- **读并发被牺牲**：无 MVCC / reader-writer split，所有 `execute()`（包括 `SELECT`）都走 EX 锁，长操作会阻塞其他线程。
+- **持锁时间含 fsync**：每次写提交 `fsync(main)` 在持锁期间执行；嵌入式 OLTP 单语句 fsync 通常 < 10ms 可接受。
+- **`:memory:` 仅线程安全**：内存 dict 跨进程天然隔离（私有内存），不获取文件锁。
+- **`Database.close()` 后不可用**：再调用 `execute()` / `explain_plan()` 抛 `RuntimeError("Database is closed")`；`close()` 自身幂等。
+- **`_REPLAY_IN_PROGRESS` 模块级 guard** 是已知 workaround（见 `docs/superpowers/specs/concurrency-control.md` § 已知偏差）。
+
+完整公开契约见 [`docs/superpowers/specs/concurrency-control.md`](docs/superpowers/specs/concurrency-control.md)。

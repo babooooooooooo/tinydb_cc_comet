@@ -138,3 +138,16 @@ class IncompatibleKeyTypes(ResolutionError):
         super().__init__(f"incompatible USING/NATURAL key types: {left_type!r} vs {right_type!r}")
         self.left_type = left_type
         self.right_type = right_type
+
+
+# --- tinydb-concurrency-control (T1): DatabaseLocked ----------------------
+
+class DatabaseLocked(TinydbError):
+    """DB 文件被另一进程持有时抛出的异常.
+
+    通过 fcntl.flock 做跨进程独占锁.``path`` 属性标识被争用的 DB 文件.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        super().__init__(f"database {path!r} is locked by another process")
