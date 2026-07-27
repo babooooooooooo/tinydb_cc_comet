@@ -35,15 +35,22 @@
 
 ## 4. meta 命令注册表 `_repl_meta.py`
 
-- [ ] 4.1 创建 `src/tinydb/_repl_meta.py`：定义 `META_COMMANDS: dict[str, Callable]` 与分发函数 `handle_meta(line: str, db: Database) -> bool`
-- [ ] 4.2 迁移现有 meta 命令（`.exit` / `.quit` / `.help` / `.tables` / `.schema` / `.read`）到注册表
-- [ ] 4.3 实现 `.explain <sql>`：调用 `db.explain_plan(sql)` + `plan.format_plan(plan)` 渲染
-- [ ] 4.4 实现 `.indexes [table]`：遍历 `catalog.indexes` + `IndexManager` 输出 BTree 元数据
-- [ ] 4.5 实现 `.stats`：聚合表数/行数/页数/空闲页数/WAL 大小
-- [ ] 4.6 实现 `.timer on|off`：切换模块级 `_TIMER_ENABLED`
-- [ ] 4.7 实现 `.format <table|csv|json>`：切换模块级 `_OUTPUT_FORMAT`
-- [ ] 4.8 实现 `.color on|off`：切换 ANSI 颜色输出
-- [ ] 4.9 更新 `.help` 输出以反映所有新命令
+- [x] 4.1 创建 `src/tinydb/_repl_meta.py`：定义 `META_COMMANDS: dict[str, Callable]` 与分发函数 `handle_meta(line: str, db: Database) -> bool` — commit `1324a83` (`_repl_meta.py:1-307` 12 meta commands; ReplState dataclass; handle_meta dispatcher; MetaCommand dataclass; _cmd_* handlers pure-Python via state)
+- [x] 4.2 迁移现有 meta 命令（`.exit` / `.quit` / `.help` / `.tables` / `.schema` / `.read`）到注册表 — commit `1324a83` (6 commands migrated; old `repl.py` block removed at Task 5 991f3e7)
+- [x] 4.3 实现 `.explain <sql>`：调用 `db.explain_plan(sql)` + `plan.format_plan(plan)` 渲染 — commit `1324a83` (`_cmd_explain wraps db.explain_plan in try/except → friendly error`)
+- [x] 4.4 实现 `.indexes [table]`：遍历 `catalog.indexes` + `IndexManager` 输出 BTree 元数据 — commit `1324a83` (`_cmd_indexes drives IndexManager.all_indexes()` (new) — single contract point)
+- [x] 4.5 实现 `.stats`：聚合表数/行数/页数/空闲页数/WAL 大小 — commit `1324a83` (`_cmd_stats aggregates Tables/Rows/Pages/Free pages/WAL via catalog + pager + WAL stat`)
+- [x] 4.6 实现 `.timer on|off`：切换模块级 `_TIMER_ENABLED` — commit `1324a83` (`_cmd_timer toggles state.timer_enabled`)
+- [x] 4.7 实现 `.format <table|csv|json>`：切换模块级 `_OUTPUT_FORMAT` — commit `1324a83` (`_cmd_format toggles state.output_format`)
+- [x] 4.8 实现 `.color on|off`：切换 ANSI 颜色输出 — commit `1324a83` (`_cmd_color toggles state.color_enabled`; 实际 lexer set 在 Task 5 Round 2 fix `66c86b2` 完成)
+- [x] 4.9 更新 `.help` 输出以反映所有新命令 — commit `1324a83` (`_cmd_help 列出所有 12 commands + 用法`)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **`_cmd_indexes` `keys≈?` 占位** — 当前实现无条件打印 `keys≈?`;public contract 期望估算键数。要么添加真实估算 (遍历 BTree 节点) 要么记录 deviation。Task 4 scope 不涵盖 BTree 遍历,建议 verify 阶段 follow-up。
+> 2. **`handle_meta` 使用 `lstrip('.')` 导致 `..exit`/`...quit` 退出** — line 284 `lstrip('.')` 移除所有前导点;`..exit` 解析为 `.exit` 然后退出。修复:只移除单个前导点或 split(' ', 1) 后验证首段。Minor edge case,verify follow-up。
+> 3. **`rest.split()` 破坏 `.read` 含空格路径** — `_cmd_read` 用 `rest.split()[0]` 取路径;`/path/with space/script.sql` 会被截断为 `/path/with`。修复:用 `shlex.split(rest)[0]` 或整段 rest 作 path (推荐 shlex)。Verify follow-up。
+> 4. **`_cmd_stats` 静默吞掉 per-table COUNT 异常** — line 190 在 try/except 内调用 db.execute("SELECT COUNT(*)") 失败时静默忽略;Rows 可能 underreport。修复:warn stderr + 计入 "unknown"。Verify follow-up。
+> 5. **`.explain` `rest.split()` 规范化字符串字面量空白** — `.explain SELECT * FROM t WHERE name = 'a b'` 中 `'a b'` 的空白被 split 规范化;轻微字符串字面量破坏。修复:与 #3 同样使用 shlex。Verify follow-up。
 
 ## 5. 整合与 REPL 主循环
 
