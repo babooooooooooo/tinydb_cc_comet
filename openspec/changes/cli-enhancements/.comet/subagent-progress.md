@@ -24,7 +24,7 @@
 | 5. 整合与 REPL 主循环 | ✅ checked off | 66c86b2 (Round 2 fix) | 2 of 2 APPROVED | repl.py + format/timer/routing + meta + set_color | ✅ Round 2 fix agent `a0417bad874715867` — 4 HIGH + 1 MEDIUM all resolved (FallbackReplIO meta special-case, set_color rebuild, .read uses _run_sql, non-TTY detection, add_history no-op). 20 new tests + 905/1 full suite.
 | 6. 集成测试 | ✅ checked off | 8760107 | 1 of 1 APPROVED_WITH_NOTES | 49 tests / 5 files | ✅ Reviewer `a095fee33e1af498f` — 49/49 pass; full suite 885/1 preserved; spec compliance §6.1-§6.5 all green; 5 adversarial checks pass. Coverage note: tinydb total 91% (worktree had uncommitted Task 5 fix at review time; resolved at 66c86b2). |
 | 7. 文档 | ✅ checked off | 5628f3f | 0 (docs — no review) | public contract | N/A (docs task, no code review needed) |
-| 8. 最终验证 | pending | — | — | — | — |
+| 8. 最终验证 | ✅ checked off | c928a4c | 0 (validation — no review) | flakes | N/A (validation task, no code review needed) |
 
 ## Current Task: 6 (about to dispatch — integration tests)
 
