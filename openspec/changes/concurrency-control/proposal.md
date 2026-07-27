@@ -30,7 +30,7 @@ tinydb 当前是单线程、单进程嵌入式数据库。`Pager` 持有 `_file`
 **Affected code:**
 - `src/tinydb/database.py` — `__init__` 接受 `locking`；`execute`/`explain_plan`/`close` 路径加 RLock；持有 `self._lock: threading.RLock | None`。
 - `src/tinydb/pager.py` — `__init__` 末尾 `fcntl.flock(self._file, LOCK_EX)`（仅非 `:memory:`）；`close()` 释放锁。新增 `_is_locking_enabled` 标志以支持 opt-out 路径。
-- `src/tinydb/recovery.py` — 无直接改动；`Pager.__init__` 内部的 `Recovery.replay()` 调用自动纳入锁协议。`_REPLAY_IN_PROGRESS` 全局 guard 保留作为已知 workaround（deviation 记录）。
+- `src/tinydb/recovery.py` — 无直接改动；`Pager.__init__` 内部的 `Recovery.replay()` 调用自动纳入锁协议。`_REPLAY_IN_PROGRESS` 全局 guard 保留作为已知 workaround（deviation 记录）—— Task 8 §4.4 文档化：触发循环是 `Pager.__init__` → `_init_wal` → `Recovery.replay` → `_apply_committed` → `Pager(main_path, locking=False)` → `_init_wal` → `Recovery.replay` …；当前哨兵机制依赖 Python 进程内全局状态。Future cleanup：显式 `Recovery.replay(pager=...)` 参数让内层 Pager 跳过 `_init_wal`，或将 `_apply_committed` 改为直接 `os.pwrite` + `os.fsync` 绕开 Pager 构造——任一变更均可删除 `_REPLAY_IN_PROGRESS`。本 change 不修复（与 `Database`/`Pager` 加锁协议正交；扩大 scope 引入额外风险）。
 
 **Affected APIs:**
 - `Database(path, locking=True)` — 新参数。

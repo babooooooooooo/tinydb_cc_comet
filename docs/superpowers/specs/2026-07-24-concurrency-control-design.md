@@ -257,6 +257,16 @@ class DatabaseLocked(TinydbError):
 
 `recovery.py` 中既有的 `_REPLAY_IN_PROGRESS` 模块级 guard **保留**为已知 deviation（在 `proposal.md` Impact 与本设计风险章节均有记录）。本 change 不重构它。
 
+### `_REPLAY_IN_PROGRESS` 已知偏差（Recorded deviation — Task 8 §4.4）
+
+`_REPLAY_IN_PROGRESS` 是 `src/tinydb/recovery.py` 顶层的模块级布尔标志，作为 `Recovery.replay` 的可重入哨兵：
+
+- **触发循环**：`Pager.__init__` → `_init_wal` → `Recovery.replay` → `_apply_committed` → `Pager(main_path, locking=False)` → `Pager.__init__` → `_init_wal` → `Recovery.replay` … 永无止境。
+- **当前 workaround**：`recovery.replay` 入口检查全局标志，命中则直接 `return`；在 `try/finally` 中翻转以保证退出时复位。该方案依赖 Python 的全局状态在单进程内可观测；线程安全由 flag 在 `try/finally` 中串行设置保证，但跨线程重入仍会提前返回——目前可接受，因为 `Recovery.replay` 只在 `Pager.__init__` 中同步调用。
+- **根因**：`_apply_committed` 构造 `Pager` 是为了复用其 `write_main_page` / `fsync_main`，但 `Pager.__init__` 默认会重新走 `_open_file` + `_init_wal`，从而再次进入 recovery。
+- **未来清理（follow-up，不在本 change 范围）**：显式传入 `Recovery.replay(pager=...)` 参数，让内层 Pager 跳过 `_init_wal`；或者把 `_apply_committed` 改写为直接调底层 `os.pwrite` + `os.fsync`，绕开 Pager 构造。这样 `_REPLAY_IN_PROGRESS` 即可删除。
+- **不在本 change 修复的原因**：本次 change 聚焦 `Database` / `Pager` 加锁协议，recovery 路径是协作方（§4.1-§4.3 验证其与锁的交互正常）。重构 recovery 会扩大 scope、引入额外风险，与 `verify_mode=thorough` 期望的"小步可审计"原则冲突。
+
 ## 公共 API 契约
 
 ```python
@@ -387,7 +397,7 @@ def memory_db_locked():
 | **R2**: WSL1 / 特殊 FS 缺 `flock` | `_FileLock.try_acquire` 捕 `OSError(EINVAL)` → `DatabaseLocked`；文档标为 "best effort" |
 | **R3**: Recovery 内层 `Pager` 重新 flock 可能失败 | Linux per-fd 语义可接受；特殊 FS 文档为 out-of-scope |
 | **R4**: 现有测试增加 ~1μs RLock 开销 | 可接受；最坏情况基线运行时间增加 ~5% |
-| **R5**: `_REPLAY_IN_PROGRESS` 模块 guard 是 workaround | 保留；记录为 deviation |
+| **R5**: `_REPLAY_IN_PROGRESS` 模块 guard 是 workaround | 保留；记录为 deviation — Task 8 §4.4 详述触发循环、当前哨兵机制、follow-up 清理路径（显式 `Recovery.replay(pager=...)` 或直接 `os.pwrite`/`os.fsync` 绕开 Pager 构造）。本 change 不修复 |
 | **R6**: 读并发被牺牲 | 文档明确；未来 MVCC 扩展点 |
 | **R7**: subprocess 测试在 CI 中 flaky | `@pytest.mark.flaky(retries=2, condition=has_subprocess_hang)` |
 | **R8**: close 后使用 | `_is_closed` 标志 + RuntimeError |
