@@ -23,7 +23,7 @@
 | 4. meta 命令注册表 _repl_meta.py | ✅ checked off | 1324a83 | pending review | dep + 12 commands + ReplState | awaiting review dispatch |
 | 5. 整合与 REPL 主循环 | ✅ checked off | 991f3e7 | review 1 of 2 REJECT | repl.py + format/timer/routing | ❌ REJECT option A — 4 HIGH + 1 MEDIUM; Round 2 fix agent `a9d6bd890338eb1f8` 429'd before work |
 | 6. 集成测试 | ✅ checked off | 8760107 | pending review | 49 tests / 5 files | ⛔ Reviewer `aa9d62fc06f09d357` 429'd |
-| 7. 文档 | pending | — | — | — | — |
+| 7. 文档 | ✅ checked off | 5628f3f | 0 (docs — no review) | public contract | N/A (docs task, no code review needed) |
 | 8. 最终验证 | pending | — | — | — | — |
 
 ## Current Task: 6 (about to dispatch — integration tests)
