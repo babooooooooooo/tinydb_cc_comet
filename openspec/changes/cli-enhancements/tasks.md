@@ -74,9 +74,14 @@
 
 ## 7. 文档
 
-- [ ] 7.1 更新 `README.md`：新增 "REPL" 章节，列出多行/高亮/行编辑与新 meta 命令
-- [ ] 7.2 在 `docs/superpowers/specs/` 下新建 `cli-enhancements.md`，汇总 spec 中的公开契约
-- [ ] 7.3 更新 `CHANGELOG.md`：新增 `cli-enhancements` 条目
+- [x] 7.1 更新 `README.md`：新增 "REPL" 章节，列出多行/高亮/行编辑与新 meta 命令 — commit `5628f3f` (README.md +48/-14; 替换原 5 行 legacy meta 表; 子章节: input/highlighting/editing + 12-command meta table + color/output behavior + NO_COLOR/TERM=dumb)
+- [x] 7.2 在 `docs/superpowers/specs/` 下新建 `cli-enhancements.md`，汇总 spec 中的公开契约 — commit `5628f3f` (新文件 216 行; 覆盖 `ReplIOProtocol` + `PromptToolkitReplIO` (含 `set_color` 备注) + `FallbackReplIO` + `ReplState` 字段表 + 12 meta commands + 多行终止规则 + 输出格式契约 + color env vars + 可选依赖兼容性)
+- [x] 7.3 更新 `CHANGELOG.md`：新增 `cli-enhancements` 条目 — commit `5628f3f` (新文件 32 行; `Unreleased` 块: `tinydb-repl` 多行/高亮/行编辑 + 12 meta commands + 三种输出格式 + `.timer`/`.color` + 软回退)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **CHANGELOG.md 新建** — 原文件不存在,与 plan §7.3 "如存在则更新" 不同; Task 7 implementer 选择新建 + 初始条目 (与 CC §8.3 deviation 同样的判断: task prompt 显式要求 if-absent-create)。Plan amend 留待 verify 阶段。
+> 2. **Pre-existing uncommitted changes in CLI worktree** — implementer 在 `_repl_io.py`/`_repl_meta.py`/`repl.py`/`test_repl_io_prompt_toolkit.py` 观察到未提交改动(Task 5 Round 2 fix 进度),按 docs-only 约束未触碰,记录在 subagent-progress。
+> 3. **`set_color` 契约描述** — spec 描述 `set_color(enabled: bool)`,实现 `_repl_io.py:164` 确认存在。docs 与 code 一致(Round 2 fix 已加此 setter);如 fix agent 最终未加,docs 与 impl 会失同步,verify 阶段需检查。
 
 ## 8. 最终验证
 
