@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "change": "join-query",
-  "branch": "main"
+  "change": "cli-enhancements",
+  "branch": "feature/20260724/cli-enhancements"
 }
