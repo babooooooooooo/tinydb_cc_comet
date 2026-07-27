@@ -26,8 +26,8 @@
 
 - [x] 4.1 验证 `Pager.__init__` 在 `_open_file()` 返回后才调用 `_init_wal()`（即 flock 已持有后再触发 replay） — commit `fbacf39`（`__init__` 中 `_open_file()` → `_file_lock.try_acquire()` → `_init_wal()` 顺序确认）
 - [x] 4.2 修正 design doc 第 252 行错误：实测 Linux flock 是 per-open-file-description（不同 fd 独立计数），同一进程在新 fd 上的 `flock(LOCK_EX | LOCK_NB)` 会 EWOULDBLOCK。修正方案：内层 `Pager` 在 `recovery._apply_committed` 中以 `locking=False` 构造（commit `fbacf39`）；跨进程隔离由外层 Pager 的 flock 单点保证
-- [ ] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）— 待 Task 8
-- [ ] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）— 待 Task 8 收尾
+- [x] 4.3 在 `tests/integration/test_recovery_lock.py` 中新增集成测试：进程 A 写 WAL 后不 commit 直接退出；进程 B 打开 DB → replay 执行 → B 看到干净状态（或已提交子集）— commit `72cbf42` (3 tests pass: `test_uncommitted_transaction_not_visible_after_recovery` / `test_committed_transaction_visible_after_recovery` / `test_partial_wal_then_recovery_clean_state`. Inline subprocess shims with `RESULT:<json>` contract; `os._exit(1)` simulates kill -9)
+- [x] 4.4 在 `design.md` R5 与 `proposal.md` Impact 中将既有的 `_REPLAY_IN_PROGRESS` 模块级 guard 记录为已知 deviation（本次 change 不修复）— commit `72cbf42` (design doc §Recovery `_REPLAY_IN_PROGRESS 已知偏差（Recorded deviation — Task 8 §4.4）` subsection + R5 row 扩展; proposal.md Impact 段落补充完整 deviation rationale; follow-up cleanup paths: `Recovery.replay(pager=...)` 或直接 `os.pwrite`/`os.fsync`)
 
 ## 5. 跨进程集成测试
 
