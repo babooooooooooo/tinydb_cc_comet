@@ -24,9 +24,9 @@
 | 5. 多线程单元测试 | ✅ Round 2 fix committed | 4af8308 | 1 of 2 → fix | locks + MVP skip | ⛔ Round 2 reviewer `aae872eafb56cdacc` 429'd |
 | 6. 跨进程 driver + scenarios | ✅ Round 2 fix committed | b581cd9 | 1 of 2 → fix | subprocess path | ⛔ Round 2 reviewer `af1e2ecf3aae4acde` 429'd |
 | 7. 跨进程集成测试 | ✅ committed (8690a7f) | 8690a7f | 1 of 1 | subprocess + retries | ⛔ Reviewer `a564625c1e3dbba72` 429'd |
-| 8. Recovery 与锁的集成测试 | pending | — | — | — | — |
+| 8. Recovery 与锁的集成测试 | ✅ checked off | 72cbf42 | 1 of 1 | recovery + os._exit | ✅ APPROVED_WITH_NOTES (CHECK_OFF_AND_NEXT) |
 | 9. 覆盖率与稳定性验证 | pending | — | — | — | — |
-| 10. 文档与公开契约 | pending | — | — | — | — |
+| 10. 文档与公开契约 | ✅ checked off | 0881182 | 0 (docs — no review) | public contract | N/A (docs task, no code review needed) |
 | 11. OpenSpec strict + 最终完整性 | pending | — | — | — | — |
 
 ## Current Task: 7 (about to dispatch — cross-process integration tests)
