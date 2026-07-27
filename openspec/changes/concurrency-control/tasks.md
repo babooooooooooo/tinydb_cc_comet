@@ -74,9 +74,15 @@
 
 ## 8. 文档
 
-- [ ] 8.1 在 `README.md` 中新增 "Concurrency" 章节，说明：`Database(path, locking=True)` 默认行为、单线程 opt-out、仅 Linux flock、`:memory:` 行为
-- [ ] 8.2 更新 `docs/superpowers/specs/concurrency-control.md`（在 `docs/superpowers/specs/` 下新建文件），汇总 `specs/concurrency-control/spec.md` 中的公开契约
-- [ ] 8.3 若 `CHANGELOG.md` 存在，新增条目记录新增的 `locking` 参数与跨进程锁保证
+- [x] 8.1 在 `README.md` 中新增 "Concurrency" 章节，说明：`Database(path, locking=True)` 默认行为、单线程 opt-out、仅 Linux flock、`:memory:` 行为 — commit `0881182` (README.md 260→306 +46 行; 两层默认 RLock + flock; 用法示例; 平台矩阵 Linux/WSL2 OK, Windows ImportError, macOS 不可靠; 限制 MVCC/fsync/post-close RuntimeError/_REPLAY_IN_PROGRESS deviation; 链接到 spec)
+- [x] 8.2 更新 `docs/superpowers/specs/concurrency-control.md`（在 `docs/superpowers/specs/` 下新建文件），汇总 `specs/concurrency-control/spec.md` 中的公开契约 — commit `0881182` (新文件 122 行; 公开面向契约 — 范围 + 公开 API (Database/Pager `locking` kwarg + `DatabaseLocked` with `path` 属性) + `_filelock.FileLock` 显式标为 private (不从顶层导出) + 失败模式表 + out-of-scope + 已知偏差 + 迁移指南)
+- [x] 8.3 若 `CHANGELOG.md` 存在，新增条目记录新增的 `locking` 参数与跨进程锁保证 — commit `0881182` (新文件 57 行; `## [Unreleased]` → `### Added — concurrency-control` 块覆盖所有 7 个 plan 项 + notes 章节)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **CHANGELOG.md 新建** — 原文件不存在,Task 10 实现选择新建而非跳过 (与 plan §8.3 "skip-if-absent" 不同; task prompt 显式要求 "If CHANGELOG.md doesn't exist, create it with this initial entry"). Plan amend 留待 verify 阶段。
+> 2. **README Windows/macOS 语义** — Task prompt 提示 "Windows/macOS falls back to single-process semantics",但 `pager.py:60` 实际行为是 `locking=True` 在非 fcntl 平台抛 `ImportError("tinydb concurrency control requires fcntl (Linux/WSL only)")`。README 记录实际 ImportError 行为而非捏造静默 fallback。macOS 单独 bullet 加 flock 语义不可靠 caveat (macOS `fcntl` 模块存在但 flock 不严格 POSIX)。
+> 3. **Spec doc 公开面向契约** — Task prompt 显式要求 "clean public-facing contract document, not internal design notes"。使用行为表/API 矩阵/迁移指南,而非 `openspec/.../spec.md` 的 RFC-2119 风格。`openspec/.../spec.md` 仍是权威 RFC 规范;superpowers spec 是用户面向文档。
+> 4. **README Concurrency section 加在文件末尾** — Task prompt 说 "after the existing 'Usage' section",但 README 已演进为多 section 形态 (ACID/Codec contract/REPL/Types/Development/Module map/JOIN)。Plan §8.1 verbatim 说 "末尾（usage 章节之后）追加"。按 plan 方向。
 
 ## 9. 最终验证
 
