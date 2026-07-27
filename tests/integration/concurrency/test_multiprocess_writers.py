@@ -54,6 +54,12 @@ def _writer_scenario(path: str, offset: int, n: int) -> Dict[str, Any]:
     flock is exclusive and non-blocking: while another subprocess holds
     the lock, ``Pager._open_file`` raises immediately. Without retry,
     the test degenerates into "first writer wins, others bail".
+
+    Assumes the parent process has already created table ``t(id, payload)``
+    before spawning subprocesses — the parser does NOT support
+    ``CREATE TABLE IF NOT EXISTS`` (a known limitation exposed by the
+    existing `_scenarios.py` patterns), so each subprocess skips DDL
+    and just INSERTs into the pre-existing table.
     """
     db = None
     while db is None:
@@ -62,7 +68,6 @@ def _writer_scenario(path: str, offset: int, n: int) -> Dict[str, Any]:
         except DatabaseLocked:
             time.sleep(_LOCK_RETRY_BACKOFF_S)
     try:
-        db.execute("CREATE TABLE IF NOT EXISTS t (id INT PRIMARY KEY, payload TEXT)")
         for i in range(n):
             db.execute(f"INSERT INTO t(id, payload) VALUES ({offset + i}, 'p{offset + i}')")
         return {"inserted": n, "offset": offset}
@@ -108,6 +113,16 @@ def test_four_subprocess_writers_1000_unique_rows(tmp_path):
     path = str(tmp_path / "test.db")
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
+
+    # Pre-create the table on the parent side; the parser does NOT
+    # support ``CREATE TABLE IF NOT EXISTS`` so each subprocess just
+    # INSERTs into the existing schema. The parent opens, creates the
+    # table, and closes — releasing the flock so subprocesses can race.
+    seed_db = Database(path)
+    try:
+        seed_db.execute("CREATE TABLE t (id INT PRIMARY KEY, payload TEXT)")
+    finally:
+        seed_db.close()
 
     # Stagger the spawns by ~10ms so all 4 subprocesses race for the
     # flock instead of strictly serializing through one-at-a-time
