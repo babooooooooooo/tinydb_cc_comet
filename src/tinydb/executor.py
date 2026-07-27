@@ -295,6 +295,35 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
     return out_rows
 
 
+def _normalize_having_for_executor(stmt) -> Any:
+    """Convert HAVING tuple from parser AST to aggregate-row position form.
+
+    Parser emits ``stmt.having = (left, op, literal)`` where ``left`` may be a
+    raw :class:`AggregateCall` (e.g. ``HAVING COUNT(*) > 0``). Aggregation rows
+    are shaped ``[*group_by_cols, *aggregate_aliases]`` so the single-table
+    executor needs ``left`` as the integer column position. Resolver already
+    does this for the JOIN path; mirror it here so both paths accept the same
+    SQL.
+
+    Returns ``None`` if the input has no HAVING clause.
+    """
+    if stmt.having is None:
+        return None
+    left, op, lit = stmt.having
+    if not isinstance(left, AggregateCall):
+        return stmt.having
+    # Match HAVING aggregate to its position in the SELECT list (group cols
+    # come first, then aggregates in declaration order).
+    for idx, si in enumerate(stmt.select_items):
+        if si.kind != "aggregate":
+            continue
+        agg = si.aggregate
+        if agg.func != left.func or agg.arg != left.arg:
+            continue
+        return (len(stmt.group_by) + idx, op, lit)
+    raise ExecutionError("HAVING aggregate must appear in SELECT list")
+
+
 def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> list:
     """Filter aggregate rows by ``HAVING`` expression.
 
@@ -1379,11 +1408,14 @@ class Executor:
             raw_rows.append(list(vals))
         # Phase 2: GROUP BY + aggregate
         agg_rows = apply_aggregation(raw_rows, stmt, schema)
-        # Phase 3: HAVING
-        if stmt.having is not None:
+        # Phase 3: HAVING (normalize AggregateCall -> position so this matches
+        # the JOIN path; previously the single-table path rejected
+        # ``HAVING COUNT(*) > 0`` with an AggregateCall repr in the error.)
+        normalized_having = _normalize_having_for_executor(stmt)
+        if normalized_having is not None:
             agg_rows = apply_having(
-                agg_rows, stmt.having, stmt.aggregate_aliases, stmt.group_by,
-                schema,
+                agg_rows, normalized_having, stmt.aggregate_aliases,
+                stmt.group_by, schema,
             )
         # Phase 4: ORDER BY + LIMIT + OFFSET (phase1 minimal)
         if stmt.order_by:

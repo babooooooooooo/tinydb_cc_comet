@@ -177,18 +177,31 @@ def _cmd_stats(args: List[str], db: Database, state: ReplState) -> bool:
     catalog = db.catalog
     n_tables = len(catalog.tables)
     n_rows = 0
+    n_failed = 0
     for table in catalog.tables:
         try:
             rows = db.execute(f"SELECT COUNT(*) FROM {table}")
             if rows:
                 n_rows += rows[0].values[0]
-        except Exception:
-            pass
+        except Exception as exc:
+            # Do not silently drop failures — surface to stderr so the user
+            # can see that ``Rows`` is incomplete when a table raised (e.g.
+            # DatabaseLocked mid-loop on the same connection, dropped table).
+            n_failed += 1
+            print(
+                f"WARNING: COUNT(*) on {table} failed: {exc}",
+                file=sys.stderr,
+            )
     n_pages = db.pager.page_count()
     n_free = _free_list_length(db.pager)
     wal_size = _wal_size(db)
     print(f"Tables:     {n_tables}")
     print(f"Rows:       {n_rows}")
+    if n_failed:
+        print(
+            f"(warning: {n_failed} table(s) failed to count — see stderr)",
+            file=sys.stderr,
+        )
     print(f"Pages:      {n_pages}")
     print(f"Free pages: {n_free}")
     print(f"WAL:        {wal_size} bytes")
@@ -294,7 +307,12 @@ def handle_meta(
         return False
     parts = stripped.split(maxsplit=1)
     cmd_token = parts[0]
-    cmd = cmd_token.lstrip(".")
+    # 只剥离单个前导点；``..exit`` / ``...quit`` 视作 unknown command，
+    # 而不是静默退出（与设计 doc 一致且保留修复路径）。
+    cmd = cmd_token[1:] if cmd_token.startswith(".") else cmd_token
+    if not cmd or cmd.startswith("."):
+        print(f"ERROR: unknown command: {cmd_token}", file=sys.stderr)
+        return True
     if cmd not in META_COMMANDS:
         print(f"ERROR: unknown command: .{cmd}", file=sys.stderr)
         return True

@@ -342,17 +342,39 @@ def _fold_order_by(
     return tuple(out)
 
 
-def _merged_schema(sources: tuple) -> tuple:
-    """构造合并后 output_schema：每个 source 顺序贡献列，USING/NATURAL
-    共同列仅在首次出现的 source 中输出。"""
-    seen: set = set()
+def _merged_schema(sources: tuple, per_join_keys: tuple = ()) -> tuple:
+    """构造合并后 output_schema：USING/NATURAL 合并键只输出一次（用左侧
+    source 的 label 占位，右侧 source 的同名列 SKIP）；其余列两侧保留。
+
+    每个 source 各自计算 ``drop``（该 source 作为右侧时需要跳过的列索引）
+    和 ``label_map``（该 source 作为左侧时需要替换为 label 的列索引）——
+    与执行层 ``_join_executor._merged_schema`` 的语义保持严格一致，否则
+    WHERE/ORDER/GROUP 的位置 remap 会与执行层行形状错位（IndexError）。
+    """
+    if not per_join_keys:
+        out: list = []
+        for src in sources:
+            out.extend(src.schema)
+        return tuple(out)
+    # 每个 source 的两个状态：作为右侧时被 skip 的列索引；作为左侧时被
+    # relabel 为 label 的列索引。
+    drop_by_source: dict = {}
+    label_by_source: dict = {}
+    for join_keys in per_join_keys:
+        for k in join_keys:
+            drop_by_source.setdefault(k.source_right, set()).add(k.right_col)
+            label_by_source.setdefault(k.source_left, {})[k.left_col] = k.label
     out: list = []
     for src in sources:
-        for col in src.schema:
-            if col in seen:
-                continue
-            out.append(col)
-            seen.add(col)
+        drop = drop_by_source.get(src.source_id, set())
+        label_map = label_by_source.get(src.source_id, {})
+        for idx, col in enumerate(src.schema):
+            if idx in drop:
+                continue  # 右侧 source 的合并键位置：跳过
+            if idx in label_map:
+                out.append(label_map[idx])  # 左侧 source 的合并键位置：relabel
+            else:
+                out.append(col)
     return tuple(out)
 
 
@@ -440,16 +462,26 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
         if join.natural and not keys:
             outer_kind = join.kind
 
-    # 构造 output_schema：source schema 顺序去重（共同列已并入第一个 source）。
-    output_schema = _merged_schema(sources)
+    # 构造 output_schema：USING/NATURAL 合并键只输出一次；其余列两侧保留。
+    output_schema = _merged_schema(sources, per_join_keys)
 
     # Task 7 WHERE remap：折叠返回 source-local 位置，但 Filter 消费方按
     # 合并 schema（source_id.col）位置求值。预计算 qualified-output 位置映射。
-    qualified_output: list = []
+    # 位置必须与 ``output_schema`` 完全对齐 —— USING/NATURAL 右侧 source 的
+    # 合并键列被 coalesce，不占独立位置；其余列两侧都保留。
+    drop_by_source_pos: dict = {}
+    for join_keys in per_join_keys:
+        for k in join_keys:
+            drop_by_source_pos.setdefault(k.source_right, set()).add(k.right_col)
+    output_position_map: dict = {}
+    out_pos = 0
     for src in sources:
-        for col in src.schema:
-            qualified_output.append(f"{src.source_id}.{col}")
-    output_position_map: dict = {n: i for i, n in enumerate(qualified_output)}
+        drop = drop_by_source_pos.get(src.source_id, set())
+        for idx, col in enumerate(src.schema):
+            if idx in drop:
+                continue
+            output_position_map[f"{src.source_id}.{col}"] = out_pos
+            out_pos += 1
 
     # 已 fold 的 WHERE / ON 表达式（位置 + literal）。
     on_resolved = tuple(

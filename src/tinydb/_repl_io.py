@@ -215,7 +215,11 @@ class FallbackReplIO:
             return ""
         # Meta commands are single-line by contract; return immediately
         # so ``_interactive_loop`` can hand them to ``handle_meta``.
+        # The accumulated buffer (a half-typed SQL fragment) must be cleared
+        # here — otherwise the next non-meta line gets concatenated onto the
+        # fragment and submitted as one multi-statement batch.
         if line.lstrip().startswith("."):
+            self._buf = ""
             return line
         self._buf += line + "\n"
         # The fallback has no editor-level submit key, so require an explicit

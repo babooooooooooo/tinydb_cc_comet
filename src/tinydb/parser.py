@@ -1027,22 +1027,7 @@ class _Parser:
         self.advance()
         items: list = []
         while True:
-            ct = self.peek()
-            if ct.type != "IDENT":
-                raise ParseError(ct.line, ct.col, "expected column in ORDER BY")
-            col_tok = self.advance()
-            col = col_tok.value
-            # tinydb-join-query (T2): ``qualifier.column`` accepted.
-            qualifier = None
-            if self._peek_punct("."):
-                self.advance()
-                cn2 = self.peek()
-                if cn2.type != "IDENT":
-                    raise ParseError(
-                        cn2.line, cn2.col, "expected column after '.'",
-                    )
-                qualifier = col
-                col = self.advance().value
+            col_ref = self._parse_qualified_column_ref()
             desc = False
             if self._peek_kw("ASC"):
                 self.advance()
@@ -1050,7 +1035,9 @@ class _Parser:
                 self.advance()
                 desc = True
             items.append(OrderByItem(
-                column=col, descending=desc, qualifier=qualifier,
+                column=col_ref.name,
+                descending=desc,
+                qualifier=col_ref.qualifier,
             ))
             if self._peek_punct(","):
                 self.advance()
@@ -1204,22 +1191,7 @@ class _Parser:
         return self._parse_comparison()
 
     def _parse_comparison(self) -> EqualsExpr:
-        ct = self.peek()
-        if ct.type != "IDENT":
-            raise ParseError(ct.line, ct.col, "expected column in WHERE")
-        cname_tok = self.advance()
-        cname = cname_tok.value
-        # tinydb-join-query (T2): recognise ``qualifier.column`` form.
-        qualifier = None
-        if self._peek_punct("."):
-            self.advance()
-            cn2 = self.peek()
-            if cn2.type != "IDENT":
-                raise ParseError(
-                    cn2.line, cn2.col, "expected column after '.'",
-                )
-            qualifier = cname
-            cname = self.advance().value
+        col_ref = self._parse_qualified_column_ref()
         op_tok = self.advance()
         if op_tok.type != "PUNCT" or op_tok.value not in SUPPORTED_OPS:
             op_repr = op_tok.value if op_tok.type != "EOF" else "EOF"
@@ -1228,7 +1200,9 @@ class _Parser:
                 f"operator {op_repr} not supported; MVP supports only =",
             )
         lit_val = self._parse_literal_value()
-        return EqualsExpr(column=cname, value=lit_val, qualifier=qualifier)
+        return EqualsExpr(
+            column=col_ref.name, value=lit_val, qualifier=col_ref.qualifier,
+        )
 
     def _parse_literal_value(self):
         """Dispatch the next token to a literal decoder.
@@ -1363,19 +1337,12 @@ class _Parser:
 
         if t.type != "IDENT":
             raise ParseError(t.line, t.col, "expected column or aggregate function")
-        name_tok = self.advance()
-        name = name_tok.value
-        # tinydb-join-query (T2): recognise ``qualifier.column`` form.
-        qualifier = None
-        if self._peek_punct("."):
-            self.advance()
-            cn2 = self.peek()
-            if cn2.type != "IDENT":
-                raise ParseError(
-                    cn2.line, cn2.col, "expected column after '.'",
-                )
-            qualifier = name
-            name = self.advance().value
+        # tinydb-join-query (T2): recognise ``qualifier.column`` form via the
+        # canonical helper so ORDER BY / WHERE / SELECT / GROUP BY share the
+        # same IDENT [ . IDENT ] parser.
+        col_ref = self._parse_qualified_column_ref()
+        name = col_ref.name
+        qualifier = col_ref.qualifier
         alias = None
         if self._is_keyword(self.peek(), "AS"):
             self.advance()
@@ -1396,24 +1363,12 @@ class _Parser:
             self.advance()
             arg: object = "*"
         else:
-            col_tok = self.peek()
-            if col_tok.type != "IDENT":
-                raise ParseError(
-                    col_tok.line, col_tok.col,
-                    "expected column or * in aggregate",
-                )
-            first = self.advance().value
-            if self._peek_punct("."):
-                self.advance()
-                name_tok = self.peek()
-                if name_tok.type != "IDENT":
-                    raise ParseError(
-                        name_tok.line, name_tok.col,
-                        "expected column after '.' in aggregate",
-                    )
-                arg = ("column", first, self.advance().value)
+            # qualified / bare column via the shared helper.
+            col_ref = self._parse_qualified_column_ref()
+            if col_ref.qualifier is None:
+                arg = ("column", col_ref.name)
             else:
-                arg = ("column", first)
+                arg = ("column", col_ref.qualifier, col_ref.name)
         self.expect("PUNCT", ")")
         return AggregateCall(func=func, arg=arg, line=func_tok.line, col=func_tok.col)
 
@@ -1427,19 +1382,11 @@ class _Parser:
         """
         cols: list = []
         while True:
-            t = self.peek()
-            if t.type != "IDENT":
-                raise ParseError(t.line, t.col, "expected column name in GROUP BY")
-            first = self.advance().value
-            if self._peek_punct("."):
-                self.advance()
-                cn2 = self.peek()
-                if cn2.type != "IDENT":
-                    raise ParseError(
-                        cn2.line, cn2.col, "expected column after '.'",
-                    )
-                first = f"{first}.{self.advance().value}"
-            cols.append(first)
+            col_ref = self._parse_qualified_column_ref()
+            if col_ref.qualifier is None:
+                cols.append(col_ref.name)
+            else:
+                cols.append(f"{col_ref.qualifier}.{col_ref.name}")
             if self._peek_punct(","):
                 self.advance()
                 continue

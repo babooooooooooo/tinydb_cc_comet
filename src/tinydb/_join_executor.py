@@ -23,6 +23,19 @@ from tinydb.plan import (
 )
 
 
+# 共享的 6 运算符比较表，被 _compare（HAVING）和 _eval_fold_expr（ON 5-tuple）复用。
+# ON 单字符 tokenizer 当前只产出 '='/'<'/'>'，但表里多键允许 _parse_join_predicate
+# 以后支持 '!='/'<='/'>=' 而无须再次触碰 _eval_fold_expr。
+_OPERATIONS = {
+    "=": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+    ">": lambda a, b: a > b,
+    "<": lambda a, b: a < b,
+    ">=": lambda a, b: a >= b,
+    "<=": lambda a, b: a <= b,
+}
+
+
 # 行类型：list[Any]；schema 类型：list[str]
 Row = list
 Schema = list
@@ -481,15 +494,15 @@ class JoinExecutor:
                 pred[1], lr, rr, ls, rs, left_pos_map, right_pos_map,
             )
         # ON 双行谓词（5-tuple）
-        if rr is not None and len(pred) == 5 and pred[0] == "=":
-            _, lpos, rpos, l_src_id, r_src_id = pred
+        if rr is not None and len(pred) == 5 and pred[0] in _OPERATIONS:
+            op, lpos, rpos, l_src_id, r_src_id = pred
             li = self._remap_position(
                 l_src_id, lpos, left_pos_map or {}, ls,
             )
             ri = self._remap_position(
                 r_src_id, rpos, right_pos_map or {}, rs,
             )
-            return lr[li] == rr[ri]
+            return _OPERATIONS[op](lr[li], rr[ri])
         # WHERE 列对字面量（3-tuple, Task 7 C6 修正后）
         if len(pred) == 3 and pred[0] == "=":
             return lr[pred[1]] == pred[2]
@@ -666,11 +679,6 @@ class JoinExecutor:
 
     @staticmethod
     def _compare(value: Any, op: str, literal: Any) -> bool:
-        operations = {
-            "=": lambda a, b: a == b, "!=": lambda a, b: a != b,
-            ">": lambda a, b: a > b, "<": lambda a, b: a < b,
-            ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b,
-        }
-        if op not in operations:
+        if op not in _OPERATIONS:
             raise ValueError(f"unsupported HAVING operator: {op!r}")
-        return operations[op](value, literal)
+        return _OPERATIONS[op](value, literal)
