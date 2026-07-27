@@ -1,0 +1,14 @@
+{
+  "change": "cli-enhancements",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "c7116248ed7f55e5b888e59c825dfd693afab9327d36a4ff7680c108297eacab",
+  "files": [
+    { "path": "openspec/changes/cli-enhancements/proposal.md", "sha256": "60c7aaecf994c3544b6c78d362caa5de0908ef14f8a5b6ba72d07dc7514655a6" },
+    { "path": "openspec/changes/cli-enhancements/design.md", "sha256": "f89076c431c7dcca5794f9872f28e01bb6407bfa5a24e0710fab2139c00f1800" },
+    { "path": "openspec/changes/cli-enhancements/tasks.md", "sha256": "8b5e879046d7dc12630e9a34c3bfc8b06eee267c311a7f58a89a8f62b9196eb8" },
+    { "path": "openspec/changes/cli-enhancements/specs/cli-enhancements/spec.md", "sha256": "f49170a4d0aa26ba5efc01f9a648c3a7354e9a50ce67b34f65bcec00c20fc416" }
+  ]
+}

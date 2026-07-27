@@ -136,29 +136,63 @@ python3 examples/demo.py
 
 ## REPL
 
-After `pip install -e ".[dev]"`, start an in-memory shell:
+The `tinydb-repl` command starts an interactive SQL shell. Without arguments it
+uses an in-memory database; pass `--database PATH` to open or create a
+file-backed database.
 
 ```bash
 tinydb-repl
-```
-
-Open or create a file-backed database with `--database`:
-
-```bash
 tinydb-repl --database data.db
 ```
 
-The REPL supports multi-line SQL: an unterminated single quote or open parenthesis shows `...>` to continue the statement. SELECT renders an aligned table, DDL/DML prints `OK`, and execution errors print a single `ERROR: <Class>: <message>` line without exiting the session.
+### Input, highlighting, and editing
 
-| Meta command | Effect |
+When `prompt_toolkit` and `pygments` are available, the REPL provides a rich
+terminal editor:
+
+- **Multi-line SQL** — press Enter to continue a statement. The continuation
+  prompt (`...>`) remains active while parentheses are open, a single- or
+  double-quoted string is incomplete, or a `--` / `/* ... */` comment is
+  open. A semicolon terminates the SQL statement and submits the accumulated
+  text.
+- **Syntax highlighting** — SQL keywords, strings, numbers, operators, and
+  comments are highlighted as you type with Pygments.
+- **Line editing** — prompt-toolkit's history and Emacs-style bindings are
+  available, including Ctrl-A (start of line), Ctrl-E (end of line), Ctrl-K
+  (delete to end), Ctrl-W (delete the previous word), Ctrl-R (history search),
+  and Up/Down history navigation. History is stored in `~/.tinydb_history`.
+
+If `prompt_toolkit` is not installed, the shell prints a warning and falls
+back to the standard-library `input()` adapter. SQL remains usable (including
+semicolon-terminated statement accumulation), but syntax highlighting,
+advanced line editing, and persistent history are unavailable.
+
+### Meta commands
+
+The registry contains 12 command names; `.exit` and `.quit` are aliases.
+Commands are entered without a trailing semicolon.
+
+| Command | Description |
 |---|---|
-| `.exit` / `.quit` | exit cleanly |
-| `.help` | show meta-command help |
-| `.tables` | list table names (one per line) |
-| `.schema <name>` | print reverse-generated `CREATE TABLE` |
-| `.read <path>` | execute a UTF-8 SQL script |
+| `.exit` / `.quit` | Exit the shell cleanly. |
+| `.help` | List all meta commands and keyboard shortcuts. |
+| `.tables` | List table names. |
+| `.schema <name>` | Print the reverse-generated `CREATE TABLE` statement for a table. |
+| `.read <path>` | Execute semicolon-terminated SQL statements from a UTF-8 file. |
+| `.explain <sql>` | Print the logical query plan without executing the SQL. |
+| `.indexes [table]` | List all indexes, or only indexes belonging to a table. |
+| `.stats` | Show table count, row count, page count, free-page count, and WAL size. |
+| `.timer on\|off` | Enable or disable query timing. Enabled queries end with `Time: X.XXX ms`. |
+| `.format table\|csv\|json` | Select table, RFC 4180 CSV, or JSON-array output. The default is `table`. |
+| `.color on\|off` | Enable or disable interactive color highlighting. |
 
-On Unix-like platforms with `readline`, history persists at `~/.tinydb_history` (missing file or write failures are silent). Platforms without `readline` (e.g. default Windows) fall back to built-in `input()`: SQL, meta-commands, and output all work, but history is not loaded or saved.
+### Color and output behavior
+
+The default `table` format renders aligned ASCII columns. `csv` emits a header
+and data rows, and `json` emits an array of objects keyed by column name. Set
+`NO_COLOR` to any non-empty value, or set `TERM=dumb`, to disable syntax
+highlighting and ANSI color output. `.color on` and `.color off` can toggle the
+session's color preference when the terminal supports color.
 
 See [`docs/操作手册.md`](docs/操作手册.md) for a guided tutorial.
 

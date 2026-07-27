@@ -10,6 +10,11 @@ class IndexManager:
         self._pager = pager
         self._indexes: dict[tuple[str, str], BTree] = {}
 
+    def all_indexes(self):
+        """Yield (table_name, column_name, btree) tuples for all registered indexes."""
+        for (table, column), bt in self._indexes.items():
+            yield table, column, bt
+
     def indexed_columns(self, ti) -> list:
         """Return columns that should have an index (PK + UNIQUE)."""
         cols = []
