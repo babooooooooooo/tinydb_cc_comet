@@ -60,11 +60,17 @@
 
 ## 6. 集成测试
 
-- [ ] 6.1 创建 `tests/integration/test_repl_io_prompt_toolkit.py`：使用 `PromptSession` Patch + stdin 注入 SQL 片段；断言执行成功
-- [ ] 6.2 创建 `tests/integration/test_repl_multiline.py`：跨 5 行 SELECT 查询
-- [ ] 6.3 创建 `tests/integration/test_repl_color_off.py`：`NO_COLOR=1` 环境下不输出 ANSI 颜色码
-- [ ] 6.4 创建 `tests/integration/test_repl_fallback.py`：monkey-patch `prompt_toolkit` 不可导入；REPL 退化为 `input()` 模式
-- [ ] 6.5 创建 `tests/integration/test_repl_meta_commands.py`：所有 meta 命令的端到端行为
+- [x] 6.1 创建 `tests/integration/test_repl_io_prompt_toolkit.py`：使用 `PromptSession` Patch + stdin 注入 SQL 片段；断言执行成功 — commit `8760107` (5 tests)
+- [x] 6.2 创建 `tests/integration/test_repl_multiline.py`：跨 5 行 SELECT 查询 — commit `8760107` (5 tests)
+- [x] 6.3 创建 `tests/integration/test_repl_color_off.py`：`NO_COLOR=1` 环境下不输出 ANSI 颜色码 — commit `8760107` (8 tests)
+- [x] 6.4 创建 `tests/integration/test_repl_fallback.py`：monkey-patch `prompt_toolkit` 不可导入；REPL 退化为 `input()` 模式 — commit `8760107` (6 tests)
+- [x] 6.5 创建 `tests/integration/test_repl_meta_commands.py`：所有 meta 命令的端到端行为 — commit `8760107` (25 tests)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **FallbackReplIO 无法在 `_interactive_loop` 内提供 meta 命令** — fallback 适配器要求显式 `;` 终止符（已记录于 tasks.md §2 deviation #1），meta 命令从不以 `;` 收尾，无法通过 fallback loop 抵达。`test_repl_meta_commands.py` 用 `PromptToolkitReplIO` + patched `PromptSession` 端到端驱动 meta 命令（匹配真实 CLI 行为）；`test_repl_fallback.py` 限定 fallback loop 仅测试 SQL 路径。与既有 `test_repl_process.py` 子进程套件同样的限制。
+> 2. **Fallback 跨行带引号字符串** — `FallbackReplIO._buf` 以 `line + "\n"` 累积，单引号字符串跨两行时保留字面 `\n`。`test_fallback_multiline_quote_spanning_lines` 分别断言两半内容而非连接字符串。test docstring 已 inline 说明。
+> 3. **Plan §6.1 `test_meta_commands_end_to_end` 测试形态调整** — plan 的合并测试将 `.indexes`/`.stats`/`.format`/`.timer`/`.explain` 直接通过 `FallbackReplIO` + `input()` 注入，由于 deviation #1 不可行。Implementer 拆为 25 个 per-command focused tests，全部使用 `PromptToolkitReplIO`（meta 命令唯一可达路径）。覆盖等价或更强。
+> 4. **49 tests pass + 836+1 baseline preserved → 885+1 total** by implementer `ad0606739bc6fb356` (commit `8760107`); review pending.
 
 ## 7. 文档
 
