@@ -51,12 +51,23 @@
 - [x] 5.2 整合计时：`.timer on` 时，在 `_run_sql` 结果后追加 `Time: X.XXX ms` — commit `991f3e7` (`_run_sql` 内 `if state.timer_enabled: ... print(f"Time: {elapsed_ms:.3f} ms")`)
 - [x] 5.3 整合输出格式：`.format` 切换后，下次查询按新格式输出 — commit `991f3e7` (`_run_sql` 调 `format_rows(rows, state.output_format)`,table/csv/json 三路)
 - [x] 5.4 在 `repl.py` 入口处输出首次启动提示（"`.help` for commands, `.timer on` for timing"）— commit `991f3e7` (`main()` 在 _interactive_loop 之前 print 启动提示)
+- [x] 5.5 Round 2 fix — 4 HIGH + 1 MEDIUM reviewer findings — commit `66c86b2`:
+  - HIGH 1 — `FallbackReplIO.read_statement` meta special-case (`.` 开头行立即返回)
+  - HIGH 2 — `PromptToolkitReplIO.set_color(bool)` 重建 session 保留 history; `_cmd_color` 调用 `io.set_color`
+  - HIGH 3 — `.read` 调 `_run_sql(db, stmt, state)` 而非 bare `_run_sql_from_meta` (honors format/timer/color)
+  - HIGH 4 — `main()` 检测 `not sys.stdin.isatty()` BEFORE IO 选择,强制 `FallbackReplIO` (无警告); `__main__` block 加入供 non-tty subprocess 测试
+  - MEDIUM 5 — `PromptToolkitReplIO.add_history()` 改为 no-op (PromptSession.prompt() auto-appends); `_interactive_loop` 仅在 `isinstance(io, FallbackReplIO)` 时调 `add_history`
+  - 20 new tests pass (test_repl_{fallback_meta,color_lexer,read,non_tty,history}.py)
+  - 全套: 905 pass + 1 skip (从 885+1 +20 新增,basis 保留)
 
 > **Recorded deviations** (follow-ups for verify stage):
 > 1. **`_format_table([])` 修复** — implementer 在 `_repl_format.py:36-37` 加 `if not rows: return "(no rows)"`,否则 `rows[0].columns` 会 IndexError。原 `repl._format_table` 行为兼容,Task 3 迁移时遗漏该空行分支(plan §3.2 "字节级一致" 隐含假设 non-empty)。属于 Task 5 关联修复,独立 deviation。
 > 2. **`tests/unit/test_repl.py` 整体重写** — 472 行原版重写为 237 行(commit `991f3e7`),覆盖新 API(`_run_sql(state)`/`_interactive_loop(db, io, state)`/`ReplState`)。原版覆盖 `_format_table` 直接行为(已在 _repl_format 测试中覆盖),新版聚焦 repl.py 整合层。
 > 3. **Path resolution 警告** — 全局 PATH `/home/lz/.local/bin/tinydb-repl` 优先于 worktree-local `.venv/bin/tinydb-repl`。手动冒烟测试(§8.2)需用绝对路径或显式 prepend PATH。已在 README/CLI doc 中标注。
-> 4. **87 REPL tests pass + 836 full suite + 1 skip** by implementer `ab4babd84c39bc347` (commit `991f3e7`); coverage 92.39%.
+> 4. **Round 2 测试 shared queue fix** — `test_repl_io_prompt_toolkit.py` `FakeSession` 现在 `prompt()` 时 auto-append 模仿真实 prompt_toolkit; sessions 共享一个 queue 让 `set_color` 不重放已消费输入。同样 fix 在 `test_repl_meta_commands.py` 应用。
+> 5. **`FakeIO` history assertion relaxed** — `test_repl.py` `FakeIO` history 断言改为 `[]` (loop 仅 `FallbackReplIO` 记录); `test_repl_io.py` 断言翻转反映 add_history no-op。
+> 6. **87 REPL tests pass + 836 full suite + 1 skip** by implementer `ab4babd84c39bc347` (commit `991f3e7`); coverage 92.39%.
+> 7. **Round 2 fix: 20 new tests + 905/1 full suite** by fix agent `a0417bad874715867` (commit `66c86b2`); no new deviation added.
 
 ## 6. 集成测试
 
