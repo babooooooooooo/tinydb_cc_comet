@@ -168,11 +168,11 @@ def test_explain_does_not_execute(capsys):
     with Database(":memory:") as db:
         db.execute("CREATE TABLE users(id INT, age INT)")
         _cmd_explain(["SELECT", "*", "FROM", "users"], db, ReplState())
-    out = capsys.readouterr().out
-    assert "Plan:" in out
-    # 既不应执行 SELECT,也不应插入行
-    rows = db.execute("SELECT COUNT(*) FROM users")
-    assert rows[0].values[0] == 0 or rows == []
+        out = capsys.readouterr().out
+        assert "Plan:" in out
+        # 既不应执行 SELECT,也不应插入行
+        rows = db.execute("SELECT COUNT(*) FROM users")
+        assert rows[0].values[0] == 0 or rows == []
 
 
 def test_explain_invalid_sql_shows_error(capsys):
