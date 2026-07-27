@@ -47,10 +47,16 @@
 
 ## 5. 整合与 REPL 主循环
 
-- [ ] 5.1 重构 `src/tinydb/repl.py`：将 main / `_interactive_loop` 瘦身；调用 `_repl_io` / `_repl_meta` / `_repl_format`
-- [ ] 5.2 整合计时：`.timer on` 时，在 `_run_sql` 结果后追加 `Time: X.XXX ms`
-- [ ] 5.3 整合输出格式：`.format` 切换后，下次查询按新格式输出
-- [ ] 5.4 在 `repl.py` 入口处输出首次启动提示（"`.help` for commands, `.timer on` for timing"）
+- [x] 5.1 重构 `src/tinydb/repl.py`：将 main / `_interactive_loop` 瘦身；调用 `_repl_io` / `_repl_meta` / `_repl_format` — commit `991f3e7` (repl.py 163 行；thin wrapper,导入 `_format_table`/`format_rows`/`ReplState`/`handle_meta`/`PromptToolkitReplIO`/`FallbackReplIO`/`ReplIOProtocol`/`_HAS_PROMPT_TOOLKIT`/`_color_enabled`/`_is_unterminated`)
+- [x] 5.2 整合计时：`.timer on` 时，在 `_run_sql` 结果后追加 `Time: X.XXX ms` — commit `991f3e7` (`_run_sql` 内 `if state.timer_enabled: ... print(f"Time: {elapsed_ms:.3f} ms")`)
+- [x] 5.3 整合输出格式：`.format` 切换后，下次查询按新格式输出 — commit `991f3e7` (`_run_sql` 调 `format_rows(rows, state.output_format)`,table/csv/json 三路)
+- [x] 5.4 在 `repl.py` 入口处输出首次启动提示（"`.help` for commands, `.timer on` for timing"）— commit `991f3e7` (`main()` 在 _interactive_loop 之前 print 启动提示)
+
+> **Recorded deviations** (follow-ups for verify stage):
+> 1. **`_format_table([])` 修复** — implementer 在 `_repl_format.py:36-37` 加 `if not rows: return "(no rows)"`,否则 `rows[0].columns` 会 IndexError。原 `repl._format_table` 行为兼容,Task 3 迁移时遗漏该空行分支(plan §3.2 "字节级一致" 隐含假设 non-empty)。属于 Task 5 关联修复,独立 deviation。
+> 2. **`tests/unit/test_repl.py` 整体重写** — 472 行原版重写为 237 行(commit `991f3e7`),覆盖新 API(`_run_sql(state)`/`_interactive_loop(db, io, state)`/`ReplState`)。原版覆盖 `_format_table` 直接行为(已在 _repl_format 测试中覆盖),新版聚焦 repl.py 整合层。
+> 3. **Path resolution 警告** — 全局 PATH `/home/lz/.local/bin/tinydb-repl` 优先于 worktree-local `.venv/bin/tinydb-repl`。手动冒烟测试(§8.2)需用绝对路径或显式 prepend PATH。已在 README/CLI doc 中标注。
+> 4. **87 REPL tests pass + 836 full suite + 1 skip** by implementer `ab4babd84c39bc347` (commit `991f3e7`); coverage 92.39%.
 
 ## 6. 集成测试
 
