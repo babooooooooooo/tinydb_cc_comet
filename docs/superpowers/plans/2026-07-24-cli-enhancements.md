@@ -2834,14 +2834,14 @@ wc -l src/tinydb/repl.py src/tinydb/_repl_io.py src/tinydb/_repl_meta.py src/tin
 #### Step 8.10：完成清单核对
 
 ```markdown
-- [ ] Task 1: 依赖与构建配置 — commit SHA _____ 
-- [ ] Task 2: _repl_io.py — commit SHA _____
-- [ ] Task 3: _repl_format.py — commit SHA _____
-- [ ] Task 4: _repl_meta.py + IndexManager.all_indexes() — commit SHA _____
-- [ ] Task 5: repl.py 重构 — commit SHA _____
-- [ ] Task 6: 集成测试 — commit SHA _____
-- [ ] Task 7: 文档 — commit SHA _____
-- [ ] Task 8: 最终验证 — 通过
+- [x] Task 1: 依赖与构建配置 — commit SHA `a6f2b3a` (deps + pyproject.toml)
+- [x] Task 2: _repl_io.py — commit SHA `859b2b8` (ReplIOProtocol + FallbackReplIO)
+- [x] Task 3: _repl_format.py — commit SHA `2fd2d34` (table/csv/json)
+- [x] Task 4: _repl_meta.py + IndexManager.all_indexes() — commit SHA `1324a83` (12 commands + ReplState)
+- [x] Task 5: repl.py 重构 — commit SHA `66c86b2` (Round 2 fix; original `991f3e7`)
+- [x] Task 6: 集成测试 — commit SHA `8760107` (49 tests / 5 files)
+- [x] Task 7: 文档 — commit SHA `5628f3f` (README + spec + CHANGELOG)
+- [x] Task 8: 最终验证 — 通过 — commit SHA `c928a4c` (905/1 + 92.49% + 0 flakes + line budget OK)
 ```
 
 #### Step 8.11：最终提交（verify report + 分支状态）
