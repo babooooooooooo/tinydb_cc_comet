@@ -33,6 +33,8 @@ def format_rows(rows: list[Row], fmt: str) -> str:
 
 def _format_table(rows: list[Row]) -> str:
     """迁移自 repl._format_table,字节级一致."""
+    if not rows:
+        return "(no rows)"
     columns = list(rows[0].columns)
     raw_values = [[str(value) for value in row.values] for row in rows]
     widths = [

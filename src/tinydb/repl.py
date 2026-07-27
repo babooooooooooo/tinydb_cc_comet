@@ -1,84 +1,47 @@
-"""Interactive SQL shell for tinydb; stdlib-only and isolated from the MVP core."""
+"""Interactive SQL shell for tinydb.
+
+This module is intentionally a thin entry point.  Input handling, formatting,
+and meta-command implementations live in the dedicated ``_repl_*`` modules;
+this module keeps the public CLI entry points and compatibility aliases.
+"""
+from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
+from typing import Optional
 
-from tinydb.database import Database, Row
-from tinydb.parser import Select, parse
-from tinydb.tokenizer import tokenize
+from tinydb._repl_format import _format_table, format_rows
+from tinydb._repl_io import (
+    FallbackReplIO,
+    PromptToolkitReplIO,
+    ReplIOProtocol,
+    _HAS_PROMPT_TOOLKIT,
+    _color_enabled,
+    _is_unterminated,
+)
+from tinydb._repl_meta import ReplState, _ExitReplSignal, handle_meta
+from tinydb.database import Database
+from tinydb.errors import ConstraintViolation
+
 
 PRIMARY_PROMPT_PREFIX = "tinydb"
 CONTINUATION_PROMPT = "...> "
 HISTORY_PATH = "~/.tinydb_history"
 HISTORY_LENGTH = 1000
-MAX_COLUMN_WIDTH = 30
 USAGE = "Usage: tinydb-repl [--database PATH]"
-HELP_TEXT = """Meta commands:
-  .exit               exit the REPL
-  .quit               exit the REPL
-  .help               show this help
-  .tables             list tables
-  .schema <name>      show CREATE TABLE
-  .read <path>        execute a SQL file
-Shortcuts: Ctrl-D exits; Ctrl-C clears the current buffer."""
+
+# A module-level state remains available to callers that used the old REPL
+# singleton.  ``main`` replaces it with the state for the current session.
+_state = ReplState()
+
+# Compatibility alias retained for code that caught the old private signal.
+_ExitRepl = _ExitReplSignal
 
 
-class _ExitRepl(Exception):
-    """Internal control flow for .exit and .quit."""
-
-
-def _make_prompt(db_path: str) -> str:
-    return f"{PRIMARY_PROMPT_PREFIX}> [{db_path}] "
-
-
-def _read_one_statement(prompt: str) -> str | None:
-    try:
-        return input(prompt)
-    except EOFError:
-        return None
-
-
-def _interactive_loop(db: Database, db_path: str) -> int:
-    readline_ok = _setup_history()
-    buf = ""
-    try:
-        while True:
-            try:
-                prompt = CONTINUATION_PROMPT if buf else _make_prompt(db_path)
-                line = _read_one_statement(prompt)
-            except KeyboardInterrupt:
-                print("\n(Use .exit or Ctrl-D to exit)")
-                buf = ""
-                continue
-            if line is None:
-                return 0
-            if not line.strip() and not buf:
-                continue
-            if not buf and line.lstrip().startswith("."):
-                try:
-                    _handle_meta(line, db)
-                except _ExitRepl:
-                    return 0
-                continue
-            buf += line + "\n"
-            if _is_unterminated(buf):
-                continue
-            if readline_ok:
-                try:
-                    import readline
-
-                    readline.add_history(buf.rstrip("\n"))
-                except (ImportError, AttributeError):
-                    pass
-            _run_sql(db, buf)
-            buf = ""
-    finally:
-        _save_history(readline_ok)
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the tinydb REPL."""
+def main(argv: Optional[list[str]] = None) -> int:
+    """Parse CLI arguments, choose an input adapter, and run the REPL."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args in (["--help"], ["-h"]):
         print(USAGE)
@@ -93,210 +56,108 @@ def main(argv: list[str] | None = None) -> int:
         print(USAGE, file=sys.stderr)
         return 2
 
+    global _state
+    state = ReplState()
+    state.color_enabled = _color_enabled()
+    _state = state
+    history_path = Path(os.path.expanduser(HISTORY_PATH))
+
+    # Read the flag from the source module at runtime so tests and embedders can
+    # disable the optional dependency after importing tinydb.repl.
+    from tinydb import _repl_io
+
+    if _repl_io._HAS_PROMPT_TOOLKIT and _HAS_PROMPT_TOOLKIT:
+        io: ReplIOProtocol = PromptToolkitReplIO(
+            db_path, history_path, state.color_enabled
+        )
+    else:
+        print(
+            "WARNING: prompt_toolkit not available; falling back to input() mode",
+            file=sys.stderr,
+        )
+        io = FallbackReplIO(db_path, history_path)
+
     db = Database(db_path)
     try:
-        return _interactive_loop(db, db_path)
+        print(".help for commands, .timer on for timing")
+        return _interactive_loop(db, io, state)
     finally:
+        try:
+            io.save_history()
+        except Exception:
+            # History is an optional convenience and must not mask a REPL exit.
+            pass
         db.close()
 
 
-def _format_table(rows: list[Row]) -> str:
-    if not rows:
-        return "(no rows)"
-    columns = list(rows[0].columns)
-    raw_values = [[str(value) for value in row.values] for row in rows]
-    widths = [
-        min(
-            max(len(column), *(len(values[index]) for values in raw_values)),
-            MAX_COLUMN_WIDTH,
-        )
-        for index, column in enumerate(columns)
-    ]
-
-    def truncate(value: str) -> str:
-        if len(value) <= MAX_COLUMN_WIDTH:
-            return value
-        return value[: MAX_COLUMN_WIDTH - 1] + "…"
-
-    def render(values: list[str]) -> str:
-        cells = [truncate(value).ljust(width) for value, width in zip(values, widths)]
-        return " | ".join(cells).rstrip()
-
-    header = render(columns)
-    separator = " | ".join("---" for _ in columns)
-    body = [render(values) for values in raw_values]
-    return "\n".join([header, separator, *body])
+def _interactive_loop(
+    db: Database, io: ReplIOProtocol, state: ReplState
+) -> int:
+    """Read statements and dispatch meta commands or SQL until EOF/exit."""
+    while True:
+        text = io.read_statement()
+        if text is None:
+            return 0
+        if not text or not text.strip():
+            continue
+        if text.lstrip().startswith("."):
+            try:
+                handle_meta(text, db, state)
+            except _ExitReplSignal:
+                return 0
+            continue
+        io.add_history(text)
+        _run_sql(db, text, state)
 
 
-def _format_exception(exc: Exception) -> str:
-    """Single-line exception formatter. ConstraintViolation is rendered
-    using its own ``__str__`` (kind/column/columns/value) so the REPL
-    user sees the precise violation context. Other exceptions fall back
-    to the MVP ``<TypeName>: <message>`` form (single line)."""
-    from tinydb.errors import ConstraintViolation  # local import keeps REPL stdlib-only-fallback path
-    if isinstance(exc, ConstraintViolation):
-        return f"ERROR: {exc}"
-    return f"ERROR: {type(exc).__name__}: {exc}"
+def _run_sql(db: Database, sql: str, state: ReplState) -> None:
+    """Execute SQL, render its result, and optionally append elapsed time."""
+    from tinydb.parser import Select, parse
+    from tinydb.tokenizer import tokenize
 
-
-def _run_sql(db: Database, sql: str) -> None:
     try:
         statements = parse(tokenize(sql)).statements
         last_is_select = bool(statements) and isinstance(statements[-1], Select)
     except Exception:
+        # Let Database.execute produce the canonical parser/tokenizer error.
         last_is_select = False
 
+    started = time.perf_counter() if state.timer_enabled else None
     try:
         rows = db.execute(sql)
-    except Exception as exc:
-        message = _format_exception(exc)
-        print(message, file=sys.stderr)
-        return
-
-    if not last_is_select:
-        print("OK")
-    elif not rows:
-        print("(no rows)")
-    else:
-        print(_format_table(rows))
-
-
-def _run_file(db: Database, path_str: str) -> None:
-    try:
-        text = Path(path_str).read_text(encoding="utf-8")
-    except OSError:
-        print(f"ERROR: cannot read file: {path_str}", file=sys.stderr)
-        return
-
-    buf = ""
-    for char in text:
-        buf += char
-        if char == ";" and not _is_unterminated(buf):
-            _run_sql(db, buf)
-            buf = ""
-    if buf.strip():
-        print(
-            f"ERROR: unterminated statement at EOF in {path_str}",
-            file=sys.stderr,
-        )
-
-
-def _setup_history() -> bool:
-    try:
-        import readline
-    except ImportError:
-        return False
-    history_file = os.path.expanduser(HISTORY_PATH)
-    try:
-        readline.read_history_file(history_file)
-    except OSError:
-        pass
-    readline.set_history_length(HISTORY_LENGTH)
-    return True
-
-
-def _save_history(readline_ok: bool) -> None:
-    if not readline_ok:
-        return
-    try:
-        import readline
-
-        readline.write_history_file(os.path.expanduser(HISTORY_PATH))
-    except (ImportError, OSError):
-        pass
-
-
-def _handle_meta(line: str, db: Database) -> bool:
-    stripped = line.lstrip()
-    if not stripped.startswith("."):
-        return False
-    parts = stripped.split(maxsplit=1)
-    command = parts[0]
-    argument = parts[1].strip() if len(parts) == 2 else ""
-    if command in {".exit", ".quit"}:
-        raise _ExitRepl
-    if command == ".help":
-        print(HELP_TEXT)
-        return True
-    if command == ".tables":
-        for name in sorted(db.catalog.tables):
-            print(name)
-        return True
-    if command in {".schema", ".read"} and not argument:
-        print(f"ERROR: missing argument for {command}", file=sys.stderr)
-        return True
-    if command == ".schema":
-        table = db.catalog.get_table(argument)
-        if table is None:
-            print(f"ERROR: no such table: {argument}", file=sys.stderr)
-            return True
-        columns = ", ".join(f"{name} {type_name}" for name, type_name in table.schema)
-        print(f"CREATE TABLE {argument}({columns});")
-        return True
-    if command == ".read":
-        _run_file(db, argument)
-        return True
-    print(f"ERROR: unknown command: {command}", file=sys.stderr)
-    return True
-
-
-def _is_unterminated(buf: str) -> bool:
-    in_sq = False
-    in_dq = False
-    in_lc = False
-    in_bc = False
-    parens = 0
-    i = 0
-    while i < len(buf):
-        char = buf[i]
-        nxt = buf[i + 1] if i + 1 < len(buf) else ""
-        if in_lc:
-            in_lc = char != "\n"
-            i += 1
-            continue
-        if in_bc:
-            if char == "*" and nxt == "/":
-                in_bc = False
-                i += 2
-            else:
-                i += 1
-            continue
-        if in_sq:
-            if char == "'" and nxt == "'":
-                i += 2
-            elif char == "'":
-                in_sq = False
-                i += 1
-            else:
-                i += 1
-            continue
-        if in_dq:
-            if char == '"' and nxt == '"':
-                i += 2
-            elif char == '"':
-                in_dq = False
-                i += 1
-            else:
-                i += 1
-            continue
-        if char == "-" and nxt == "-":
-            in_lc = True
-            i += 2
-        elif char == "/" and nxt == "*":
-            in_bc = True
-            i += 2
-        elif char == "'":
-            in_sq = True
-            i += 1
-        elif char == '"':
-            in_dq = True
-            i += 1
-        elif char == "(":
-            parens += 1
-            i += 1
-        elif char == ")":
-            parens -= 1
-            i += 1
+        if not last_is_select:
+            print("OK")
+        elif not rows:
+            print("(no rows)")
         else:
-            i += 1
-    return in_sq or in_dq or in_lc or in_bc or parens > 0
+            output_format = state.output_format
+            if output_format not in {"table", "csv", "json"}:
+                raise ValueError(f"unknown format: {output_format}")
+            print(format_rows(rows, output_format))
+    except Exception as exc:
+        print(_format_exception(exc), file=sys.stderr)
+        return
+
+    if started is not None:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        print(f"Time: {elapsed_ms:.3f} ms")
+
+
+def _format_exception(exc: Exception) -> str:
+    """Render an exception as one user-facing error line."""
+    detail = str(exc).replace("\r", " ").replace("\n", " ")
+    if isinstance(exc, ConstraintViolation):
+        return f"ERROR: {detail}"
+    return f"ERROR: {type(exc).__name__}: {detail}"
+
+
+__all__ = [
+    "HISTORY_LENGTH",
+    "USAGE",
+    "_format_table",
+    "_interactive_loop",
+    "_is_unterminated",
+    "_run_sql",
+    "_state",
+    "main",
+]
