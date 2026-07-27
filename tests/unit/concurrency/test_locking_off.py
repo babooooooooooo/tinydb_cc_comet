@@ -62,11 +62,19 @@ def test_locking_false_can_open_already_locked_db(tmp_path):
 
 @pytest.mark.integration
 def test_locking_false_short_circuits_lock_acquire(tmp_path, monkeypatch):
-    """locking=False → execute / explain_plan / close 期间 RLock.__enter__ 调用次数为 0."""
+    """locking=False → execute / explain_plan / close 期间 RLock 不被调用.
+
+    Tracks ``__enter__``/``__exit__``/``acquire``/``release`` so both
+    context-manager and direct-acquire code paths in production are
+    covered. Assertions are placed *after* ``db.close()`` so the
+    close-path teardown is exercised even when locking=False.
+    """
     import threading
     import _thread
     enter_counts = []
     exit_counts = []
+    acquire_counts = []
+    release_counts = []
 
     class TrackedRLock:
         """Wraps a real ``_thread.RLock`` so any enter/exit is observable.
@@ -94,9 +102,11 @@ def test_locking_false_short_circuits_lock_acquire(tmp_path, monkeypatch):
             return False
 
         def acquire(self, blocking=True, timeout=-1):
+            acquire_counts.append(self._inner)
             return self._inner.acquire(blocking, timeout)
 
         def release(self):
+            release_counts.append(self._inner)
             return self._inner.release()
 
     # Database imports ``RLock`` via ``from threading import RLock`` so we
@@ -111,7 +121,16 @@ def test_locking_false_short_circuits_lock_acquire(tmp_path, monkeypatch):
     try:
         db.execute("CREATE TABLE t (id INT PRIMARY KEY)")
         db.explain_plan("SELECT * FROM t")
-        assert enter_counts == [], f"RLock.__enter__ called when locking=False: {enter_counts}"
-        assert exit_counts == [], f"RLock.__exit__ called when locking=False: {exit_counts}"
     finally:
         db.close()
+
+    # Close path also instrumented: locking=False must keep TrackedRLock
+    # entirely unused across execute / explain_plan / close.
+    assert enter_counts == [], f"RLock.__enter__ called when locking=False: {enter_counts}"
+    assert exit_counts == [], f"RLock.__exit__ called when locking=False: {exit_counts}"
+    assert acquire_counts == [], (
+        f"RLock.acquire called when locking=False: {acquire_counts}"
+    )
+    assert release_counts == [], (
+        f"RLock.release called when locking=False: {release_counts}"
+    )

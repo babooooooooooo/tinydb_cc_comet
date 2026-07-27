@@ -21,18 +21,22 @@
 | 2. Pager fcntl.flock 集成 | committed | fbacf39 | 0 | locks | pending review |
 | 3. Database RLock + _is_closed | ✅ checked off | ec3633f9 | 1 of 2 | locks | ✅ APPROVED_WITH_NOTES (PASS_WITH_FIXES) |
 | 4. tests/conftest.py fixtures | ✅ checked off | 31dd6c0 | 1 of 2 | — | ✅ APPROVED_WITH_NOTES (CHECK_OFF_AND_NEXT) |
-| 5. 多线程单元测试 | pending | — | — | — | — |
-| 6. 跨进程 driver + scenarios | pending | — | — | — | — |
+| 5. 多线程单元测试 | ✅ checked off | 1c19df2 | pending review | locks + MVP skip | awaiting review dispatch |
+| 6. 跨进程 driver + scenarios | committed | cb68cad | pending review | subprocess path | awaiting §5.1 checkoff + review |
 | 7. 跨进程集成测试 | pending | — | — | — | — |
 | 8. Recovery 与锁的集成测试 | pending | — | — | — | — |
 | 9. 覆盖率与稳定性验证 | pending | — | — | — | — |
 | 10. 文档与公开契约 | pending | — | — | — | — |
 | 11. OpenSpec strict + 最终完整性 | pending | — | — | — | — |
 
-## Current Task: 5 (about to dispatch)
+## Current Task: 7 (about to dispatch — cross-process integration tests)
 
-- Task 4 reviewed APPROVED_WITH_NOTES — CHECK_OFF_AND_NEXT. 4 fixtures present (file_db / file_db_unlocked / memory_db_locked / memory_db); pytest baseline 837/1 unchanged; coverage 92.45%. Reviewer flagged only Minor #1: docstring "796 baseline" text is plan-staleness (current baseline is 837 after join-query change). Marked as NOT-TO-FIX (verbatim plan was the spec; recorded for verify stage). tasks.md §7.1 checkoff commit pending.
-- Task 5 (multithreading unit tests per plan §6) about to dispatch — 5 test files (test_threading_inserts.py, test_threading_updates.py, test_threading_memory.py, test_locking_off.py, test_reentrant_lock.py), each with verbatim code from plan.
+- Task 5 (multithreading) implementer a7f96c852cb014768 completed (between sessions, before this resume). Commit `1c19df2 test(concurrency): add 10 multi-threaded unit tests` (5 files: threading_inserts/updates/memory + locking_off + reentrant_lock = 12 tests, 11 pass + 1 SKIP). Checkoff commit `aa62e36`. Baseline 848 pass + 2 skip (no regression).
+- Task 5 §5.4 Step 4 deviation: user-chosen option (a) (monkeypatch `threading.RLock.__enter__`/`__exit__` + assert call count==0) is **not viable on Python 3.12.3** — `threading.RLock` is a factory function and `_thread.RLock.__enter__` is a read-only C slot. Implementer used `TrackedRLock` wrapper that patches both `threading.RLock` and `tinydb.database.RLock` to verify production behavior. Achieves intent of option (a) (locking=False does not use RLock) with documented Python 3.12+ rationale.
+- Task 5 SKIP: `test_concurrent_updates_no_lost_writes` skipped due to MVP tokenizer lacking `+` punctuation (UPDATE arithmetic not expressible). Partial coverage via `test_threading_inserts.py` PK uniqueness invariant. Deviation recorded in tasks.md §6.2.
+- Task 5 verifier (a28d2007728697de1, this session) confirmed: 11 pass + 1 SKIP threading tests, 830 baseline + property 7 + concurrency 11 = 848 total pass + 2 SKIP, 47% coverage on concurrency suite (focused subset). TrackedRLock deviation recommended for acceptance.
+- Task 6 (cross-process driver + scenarios) implementation in `cb68cad test(concurrency): add subprocess driver + scenarios for cross-process tests` — `_driver.py` (50 lines) + `_scenarios.py` (99 lines, 6 scenarios: insert_n/count_users/assert_locked/open_and_close/continuous_writer_worker/continuous_reader_worker). tasks.md §5.1 NOT YET checked off — needs checkoff commit + reviewer dispatch.
+- Next dispatch: Task 7 implementer for tests/integration/concurrency/test_multiprocess_{writers,reader_writer,locked_open}.py + test_lock_release_on_close.py (tasks.md §5.2-§5.5, plan §7 verbatim).
 
 ## Review Rounds Budget (thorough)
 
@@ -50,4 +54,9 @@
 - 2026-07-26: CC Task 4 implementer (a7083f4de63b50ba3) committed conftest.py at 31dd6c0. Self-flagged venv drift → re-ran `pip install -e . --no-deps` and verified 837/1 baseline.
 - 2026-07-26: CC Task 4 reviewer (a0c2e2dd20327bd70) returned APPROVED_WITH_NOTES — only Minor #1 docstring staleness; CHECK_OFF_AND_NEXT. Skipping docstring fix (verbatim plan was authoritative spec).
 - 2026-07-26: tasks.md §7.1 checkoff + commit pending; Task 5 (multithreading unit tests per plan §6) implementer dispatching next.
-- 2026-07-27: Task 5 implementer (a7f96c852cb014768) BLOCKED on plan §5.4 Step 4 contradiction: `test_locking_false_short_circuits_lock_acquire` injects `FailingRLock()` into `db._lock` but production `_acquire_lock()` checks `self._lock is None` (not `self._locking`). User chose option (a) — rewrite test to monkeypatch `threading.RLock.__enter__`/`__exit__` and assert call count == 0. Resumed implementer with fix instruction. Venv drift regression observed: editable install pointed to cli-enhancements worktree; pinned via `pip install -e . --no-deps --force-reinstall`. Coordinator note: every future session should verify `.venv/lib/python3.12/site-packages/__editable__.tinydb-0.1.0.pth` points at the active worktree before running tests.
+- 2026-07-27: Task 5 implementer (a7f96c852cb014768) BLOCKED on plan §5.4 Step 4 contradiction. User chose option (a). Session terminated mid-resume.
+- 2026-07-27 (between sessions): Implementer continued autonomously after session close, committed 1c19df2 + checkoff aa62e36. Used TrackedRLock wrapper instead of literal option (a) since Python 3.12.3 RLock is a factory function (read-only C slot — monkeypatch impossible). Implementer chose Python-3.12+ compatible approach to achieve same intent (verify RLock not used when locking=False).
+- 2026-07-27 (between sessions): Task 6 (cross-process driver + scenarios) implementer dispatched and committed cb68cad. _driver.py + _scenarios.py (6 scenarios).
+- 2026-07-27: Session resume from forced close. Main repo had 29 dirty files (cc + cli openspec artifacts + cc docs) — cleaned per user direction (delete all + clear main selection commit 0a09c11). Worktree selections updated (eaa7f01 + cli f551b95).
+- 2026-07-27: Dispatched verifier (a28d2007728697de1) for Task 5 — confirmed 11 pass + 1 SKIP (test_concurrent_updates_no_lost_writes skipped due to MVP tokenizer lacking + punct). Baseline 848 pass + 2 SKIP (no regression). TrackedRLock deviation acceptable.
+- 2026-07-27: Pending — check off tasks.md §5.1, dispatch reviewer for Task 5 + Task 6, dispatch Task 7 implementer for §5.2-§5.5 cross-process integration tests. CLI Task 5 (repl.py integration) implementer (ab4babd84c39bc347) running in parallel.

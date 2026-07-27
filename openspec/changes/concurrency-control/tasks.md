@@ -31,11 +31,11 @@
 
 ## 5. 跨进程集成测试
 
-- [ ] 5.1 创建 `tests/integration/concurrency/__init__.py` 与 `tests/integration/concurrency/_driver.py`，提供 subprocess 驱动辅助：打开 DB、执行 `execute()` 可调用对象、将结果以 JSON 写入 stdout 后退出
-- [ ] 5.2 `test_multiprocess_writers.py`：派生 4 个子进程；每个插入 250 条不同行；父进程打开 DB 断言总行数 == 1000 且无重复 ID
-- [ ] 5.3 `test_multiprocess_reader_writer.py`：派生 1 个 writer（循环 INSERT）和 1 个 reader（循环 SELECT），运行 2 秒；断言无异常抛出且 reader 的 row-counts 单调非减
-- [ ] 5.4 `test_multiprocess_locked_open.py`：进程 A 持有 DB 打开；进程 B 打开并断言 100 ms 内抛出 `DatabaseLocked`
-- [ ] 5.5 `test_lock_release_on_close.py`：进程 A 打开后关闭；进程 B 在 A 关闭后立即打开并断言成功
+- [x] 5.1 创建 `tests/integration/concurrency/__init__.py` 与 `tests/integration/concurrency/_driver.py`，提供 subprocess 驱动辅助：打开 DB、执行 `execute()` 可调用对象、将结果以 JSON 写入 stdout 后退出 — commit `cb68cad` (`_driver.py:1-50` + `_scenarios.py:1-99` 6 个 scenario 函数: insert_n / count_users / assert_locked / open_and_close / continuous_writer_worker / continuous_reader_worker; `_driver.py` 用 `RESULT:<json>` 前缀输出供父进程解析)
+- [ ] 5.2 `test_multiprocess_writers.py`：派生 4 个子进程；每个插入 250 条不同行；父进程打开 DB 断言总行数 == 1000 且无重复 ID — 待 Task 7 implementer
+- [ ] 5.3 `test_multiprocess_reader_writer.py`：派生 1 个 writer（循环 INSERT）和 1 个 reader（循环 SELECT），运行 2 秒；断言无异常抛出且 reader 的 row-counts 单调非减 — 待 Task 7 implementer
+- [ ] 5.4 `test_multiprocess_locked_open.py`：进程 A 持有 DB 打开；进程 B 打开并断言 100 ms 内抛出 `DatabaseLocked` — 待 Task 7 implementer
+- [ ] 5.5 `test_lock_release_on_close.py`：进程 A 打开后关闭；进程 B 在 A 关闭后立即打开并断言成功 — 待 Task 7 implementer
 
 ## 6. 多线程单元测试
 

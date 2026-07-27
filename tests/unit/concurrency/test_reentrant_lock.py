@@ -1,4 +1,19 @@
-"""可重入 RLock 不死锁 (Task 6.5)."""
+"""可重入 RLock 不死锁 (Task 6.5).
+
+Each test holds the per-instance RLock via an OUTER ``with
+db._acquire_lock():`` scope and calls ``db.execute()`` /
+``db.explain_plan()`` from inside. Those calls internally do
+``with self._acquire_lock():`` (a reentrant acquire from the SAME
+thread). With RLock: reentrant acquire completes immediately.
+Without (non-reentrant Lock): the inner acquire would block forever;
+we use a worker thread + ``join(timeout=...)`` so deadlock fails the
+test rather than hanging it.
+
+Negative-test verification: monkey-patch ``db_mod.RLock`` to a
+non-reentrant ``threading.Lock`` and re-run; the worker thread
+will not complete within the timeout, surfacing the deadlock.
+"""
+import threading
 import pytest
 
 from tinydb.database import Database
@@ -6,74 +21,93 @@ from tinydb.database import Database
 
 @pytest.mark.integration
 def test_execute_inside_execute_does_not_deadlock(tmp_path):
-    """方法 A 在 execute 内调 execute → RLock 可重入,不死锁."""
+    """``db.execute`` inside an outer-locked scope completes (RLock reentrant).
+
+    Outer: ``with db._acquire_lock():`` holds the RLock from the same
+    thread that then runs ``db.execute(...)``. The body of
+    ``Database.execute`` does its own ``with self._acquire_lock():`` —
+    that's a reentrant acquire. With RLock the second acquire returns
+    immediately; with a non-reentrant ``threading.Lock`` the second
+    acquire would block forever.
+    """
     db = Database(str(tmp_path / "a.db"))
     try:
-        db.execute("CREATE TABLE t (id INT PRIMARY KEY, v INT)")
+        outcome = {}
 
-        # 在 execute 内部通过 _exec_helper 调另一个 execute
-        # 实际里 _exec_helper 不存在 — 我们用 monkeypatch 注入
-        from tinydb import database as db_mod
+        def worker():
+            try:
+                # Outer lock scope (RLock count → 1). Both db.execute
+                # calls below internally re-enter the RLock (count → 2).
+                with db._acquire_lock():
+                    db.execute("CREATE TABLE t (id INT PRIMARY KEY, v INT)")
+                    db.execute("INSERT INTO t(id, v) VALUES (1, 100)")
+                    db.execute("INSERT INTO t(id, v) VALUES (2, 200)")
+                outcome["ok"] = True
+            except Exception as exc:  # noqa: BLE001
+                outcome["err"] = exc
 
-        original_execute = db_mod.Database.execute
+        t = threading.Thread(target=worker)
+        t.start()
+        # Generous timeout: with a healthy RLock this returns in <100ms.
+        # With non-reentrant Lock the inner acquire deadlocks and we time
+        # out here, surfacing the failure cleanly instead of hanging pytest.
+        t.join(timeout=10.0)
 
-        calls = []
+        if t.is_alive():
+            raise AssertionError(
+                "RLock not reentrant: nested db.execute deadlocked (10s timeout)"
+            )
 
-        def helper_execute(self, sql):
-            calls.append(sql)
-            # 在 helper 中调锁定入口(测试 RLock 可重入)
-            return original_execute(self, "INSERT INTO t(id, v) VALUES (1, 100)")
+        assert outcome.get("ok"), (
+            f"reentrant execute failed: {outcome.get('err')!r}"
+        )
 
-        # 绑定 helper 到 db 实例,作为 __init__ 后的方法
-        db._exec_helper = lambda: helper_execute(db, "INSERT INTO t(id, v) VALUES (2, 200)")
-
-        # 调用 execute 时先 INSERT 一行,期间调 _exec_helper 触发嵌套 execute
-        db._exec_helper()  # _exec_helper 内部走的是__get__ 之后的 execute
-
-        # 直接验证:通过 execute 嵌套
-        calls.clear()
-        def inner():
-            original_execute(db, "INSERT INTO t(id, v) VALUES (10, 10)")
-
-        def outer():
-            original_execute(db, "INSERT INTO t(id, v) VALUES (20, 20)")
-            inner()
-
-        outer()
         rows = db.execute("SELECT * FROM t")
-        # 至少 3 行被插入(20, 10, 1, 2)
-        assert len(rows) >= 1
+        assert len(rows) == 2
+        ids = sorted(int(r.values[0]) for r in rows)
+        assert ids == [1, 2]
     finally:
         db.close()
 
 
 @pytest.mark.integration
 def test_explain_plan_inside_execute_is_reentrant(tmp_path):
-    """execute 内调用 explain_plan 不会死锁 (RLock reentrant)."""
+    """``explain_plan`` inside an outer-locked scope completes (RLock reentrant).
+
+    Same pattern as the execute test: outer ``with db._acquire_lock():``
+    holds the RLock, then ``db.explain_plan(...)`` is called from inside.
+    ``explain_plan`` internally does ``with self._acquire_lock():`` which
+    must acquire the RLock reentrantly.
+    """
     db = Database(str(tmp_path / "a.db"))
     try:
         db.execute("CREATE TABLE t (id INT PRIMARY KEY, v INT)")
         db.execute("INSERT INTO t(id, v) VALUES (1, 100)")
 
-        # Monkey-patch execute to call explain_plan when given a sentinel;
-        # this exercises RLock reentrance (acquire inside acquire).
-        original_execute = type(db).execute
-        explain_calls = []
+        outcome = {}
 
-        def execute_inner(self, sql):
-            if sql.startswith("SENTINEL"):
-                plan = self.explain_plan("SELECT * FROM t")
-                explain_calls.append(plan)
-                return []
-            return original_execute(self, sql)
+        def worker():
+            try:
+                with db._acquire_lock():
+                    plan = db.explain_plan("SELECT * FROM t")
+                    outcome["plan"] = plan
+                outcome["ok"] = True
+            except Exception as exc:  # noqa: BLE001
+                outcome["err"] = exc
 
-        type(db).execute = execute_inner
-        try:
-            db.execute("SENTINEL test")
-        finally:
-            type(db).execute = original_execute
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=10.0)
 
-        # If we got here without deadlock, RLock reentrance works.
-        assert len(explain_calls) == 1, f"explain_plan called {len(explain_calls)} times (expected 1)"
+        if t.is_alive():
+            raise AssertionError(
+                "RLock not reentrant: nested db.explain_plan deadlocked (10s timeout)"
+            )
+
+        assert outcome.get("ok"), (
+            f"reentrant explain_plan failed: {outcome.get('err')!r}"
+        )
+        # And the plan returned a real LogicalPlan (Project(...) — truthy)
+        assert outcome["plan"] is not None
     finally:
         db.close()
