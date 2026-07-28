@@ -56,6 +56,20 @@ _CHUNK_SIZE = MAX_INLINE_PAYLOAD - SLOT_SIZE  # 4072
 from tinydb._index_pager import IndexPager as _IndexPager
 
 
+# Shared comparison-operator dispatch used by ``_compare`` and by
+# ``_join_executor._eval_fold_expr``. Centralised so executor and join executor
+# cannot drift on which ops are recognised. NULL handling lives in the caller
+# (executor is NULL-safe; join executor is not, by design).
+_COMPARE_OPS = {
+    "=": lambda a, b: a == b,
+    "!=": lambda a, b: a != b,
+    ">": lambda a, b: a > b,
+    "<": lambda a, b: a < b,
+    ">=": lambda a, b: a >= b,
+    "<=": lambda a, b: a <= b,
+}
+
+
 def eval_expr(expr: Any, row: list, schema: list) -> bool:
     """Recursive WHERE-expression evaluator; AND/OR short-circuit; strict type check.
 
@@ -210,23 +224,13 @@ def _compare(val, op: str, lit) -> bool:
     """NULL-safe comparison used by HAVING/ORDER.
 
     SQL three-valued logic: ``NULL <op> anything`` is UNKNOWN -> False.
-    Supports ``= > < >= <= !=``. Unknown ops raise :class:`ExecutionError`.
+    Supports ``= != > < >= <=``. Unknown ops raise :class:`ExecutionError`.
     """
     if val is None:
         return False
-    if op == "=":
-        return val == lit
-    if op == ">":
-        return val > lit
-    if op == "<":
-        return val < lit
-    if op == ">=":
-        return val >= lit
-    if op == "<=":
-        return val <= lit
-    if op == "!=":
-        return val != lit
-    raise ExecutionError(f"operator {op!r} not supported")
+    if op not in _COMPARE_OPS:
+        raise ExecutionError(f"operator {op!r} not supported")
+    return _COMPARE_OPS[op](val, lit)
 
 
 def apply_aggregation(raw_rows: list, stmt, schema) -> list:
@@ -295,32 +299,37 @@ def apply_aggregation(raw_rows: list, stmt, schema) -> list:
     return out_rows
 
 
-def _normalize_having_for_executor(stmt) -> Any:
-    """Convert HAVING tuple from parser AST to aggregate-row position form.
+def _normalize_having_for_executor(stmt: Any) -> Optional[tuple]:
+    """Resolve ``HAVING <AggregateCall> <op> <lit>`` to its column alias.
 
     Parser emits ``stmt.having = (left, op, literal)`` where ``left`` may be a
-    raw :class:`AggregateCall` (e.g. ``HAVING COUNT(*) > 0``). Aggregation rows
-    are shaped ``[*group_by_cols, *aggregate_aliases]`` so the single-table
-    executor needs ``left`` as the integer column position. Resolver already
-    does this for the JOIN path; mirror it here so both paths accept the same
-    SQL.
+    raw :class:`AggregateCall` (e.g. ``HAVING COUNT(*) > 0``). Aggregation
+    rows are shaped ``[*group_by_cols, *aggregate_aliases]`` and ``apply_having``
+    already indexes them by column name, so the contract here is to return
+    ``(alias, op, lit)`` — never an integer position.
 
-    Returns ``None`` if the input has no HAVING clause.
+    Returns:
+      - ``None`` when there is no HAVING clause
+      - ``(col_name, op, lit)`` for any form ``apply_having`` accepts
     """
     if stmt.having is None:
         return None
     left, op, lit = stmt.having
     if not isinstance(left, AggregateCall):
+        # Already in ``(col_name, op, lit)`` shape — pass through.
         return stmt.having
-    # Match HAVING aggregate to its position in the SELECT list (group cols
-    # come first, then aggregates in declaration order).
-    for idx, si in enumerate(stmt.select_items):
+    # Match the inline aggregate against an aggregate in the SELECT list and
+    # substitute the alias (explicit ``AS`` wins; otherwise the same default
+    # rule the executor uses elsewhere). Aggregation-row position is implicit
+    # in the alias — ``apply_having`` resolves it via ``name_to_idx``.
+    for si in stmt.select_items:
         if si.kind != "aggregate":
             continue
         agg = si.aggregate
         if agg.func != left.func or agg.arg != left.arg:
             continue
-        return (len(stmt.group_by) + idx, op, lit)
+        alias = si.alias or _aggregate_default_alias(agg)
+        return (alias, op, lit)
     raise ExecutionError("HAVING aggregate must appear in SELECT list")
 
 
@@ -329,9 +338,6 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
 
     ``having_expr`` is one of:
       - ``None`` - passthrough, returns ``rows`` unchanged.
-      - ``AggregateCall`` - inline aggregate form is not supported here;
-        callers must put the aggregate in the SELECT list and reference
-        its alias from HAVING. We raise so misuse surfaces immediately.
       - ``(col, op, lit)`` tuple - filter rows by comparing the resolved
         column value against ``lit``.
 
@@ -342,12 +348,6 @@ def apply_having(rows, having_expr, agg_aliases, group_cols, schema=None) -> lis
     """
     if having_expr is None:
         return rows
-    if isinstance(having_expr, AggregateCall):
-        raise ExecutionError(
-            "HAVING with inline aggregate not supported; "
-            "use the SELECT-list alias instead",
-        )
-
     col, op, lit = having_expr
     if not rows:
         return rows
@@ -1408,9 +1408,8 @@ class Executor:
             raw_rows.append(list(vals))
         # Phase 2: GROUP BY + aggregate
         agg_rows = apply_aggregation(raw_rows, stmt, schema)
-        # Phase 3: HAVING (normalize AggregateCall -> position so this matches
-        # the JOIN path; previously the single-table path rejected
-        # ``HAVING COUNT(*) > 0`` with an AggregateCall repr in the error.)
+        # Phase 3: HAVING (resolve inline ``HAVING <agg> <op> <lit>`` to the
+        # aggregate's alias so ``apply_having`` can index the row by name).
         normalized_having = _normalize_having_for_executor(stmt)
         if normalized_having is not None:
             agg_rows = apply_having(

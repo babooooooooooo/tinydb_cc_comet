@@ -342,6 +342,18 @@ def _fold_order_by(
     return tuple(out)
 
 
+def _drop_right_by_source(per_join_keys: tuple) -> dict:
+    """Return ``{source_id: {right_col_idx, ...}, ...}`` for every USING/NATURAL
+    right-side key. Centralises the invariant shared with
+    ``_join_executor._merged_schema`` so the resolver and executor cannot drift.
+    """
+    drop_by_source: dict = {}
+    for join_keys in per_join_keys:
+        for k in join_keys:
+            drop_by_source.setdefault(k.source_right, set()).add(k.right_col)
+    return drop_by_source
+
+
 def _merged_schema(sources: tuple, per_join_keys: tuple = ()) -> tuple:
     """构造合并后 output_schema：USING/NATURAL 合并键只输出一次（用左侧
     source 的 label 占位，右侧 source 的同名列 SKIP）；其余列两侧保留。
@@ -351,18 +363,10 @@ def _merged_schema(sources: tuple, per_join_keys: tuple = ()) -> tuple:
     与执行层 ``_join_executor._merged_schema`` 的语义保持严格一致，否则
     WHERE/ORDER/GROUP 的位置 remap 会与执行层行形状错位（IndexError）。
     """
-    if not per_join_keys:
-        out: list = []
-        for src in sources:
-            out.extend(src.schema)
-        return tuple(out)
-    # 每个 source 的两个状态：作为右侧时被 skip 的列索引；作为左侧时被
-    # relabel 为 label 的列索引。
-    drop_by_source: dict = {}
+    drop_by_source: dict = _drop_right_by_source(per_join_keys)
     label_by_source: dict = {}
     for join_keys in per_join_keys:
         for k in join_keys:
-            drop_by_source.setdefault(k.source_right, set()).add(k.right_col)
             label_by_source.setdefault(k.source_left, {})[k.left_col] = k.label
     out: list = []
     for src in sources:
@@ -469,10 +473,7 @@ def resolve(ast: Select, catalog: Catalog) -> ResolvedPlan:
     # 合并 schema（source_id.col）位置求值。预计算 qualified-output 位置映射。
     # 位置必须与 ``output_schema`` 完全对齐 —— USING/NATURAL 右侧 source 的
     # 合并键列被 coalesce，不占独立位置；其余列两侧都保留。
-    drop_by_source_pos: dict = {}
-    for join_keys in per_join_keys:
-        for k in join_keys:
-            drop_by_source_pos.setdefault(k.source_right, set()).add(k.right_col)
+    drop_by_source_pos: dict = _drop_right_by_source(per_join_keys)
     output_position_map: dict = {}
     out_pos = 0
     for src in sources:

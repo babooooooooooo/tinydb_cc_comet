@@ -309,7 +309,9 @@ def handle_meta(
     cmd_token = parts[0]
     # 只剥离单个前导点；``..exit`` / ``...quit`` 视作 unknown command，
     # 而不是静默退出（与设计 doc 一致且保留修复路径）。
-    cmd = cmd_token[1:] if cmd_token.startswith(".") else cmd_token
+    # `stripped.startswith(".")` was already enforced above, so `cmd_token`
+    # is guaranteed to begin with a dot here.
+    cmd = cmd_token[1:]
     if not cmd or cmd.startswith("."):
         print(f"ERROR: unknown command: {cmd_token}", file=sys.stderr)
         return True

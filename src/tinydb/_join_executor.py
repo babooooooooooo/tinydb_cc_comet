@@ -18,6 +18,7 @@ Task 7 增量：
 from typing import Any
 
 from tinydb.catalog import TableInfo
+from tinydb.executor import _COMPARE_OPS as _OPERATIONS
 from tinydb.plan import (
     LogicalPlan, Scan, Join, Filter, Aggregate, Sort, Project, Limit,
 )
@@ -26,14 +27,8 @@ from tinydb.plan import (
 # 共享的 6 运算符比较表，被 _compare（HAVING）和 _eval_fold_expr（ON 5-tuple）复用。
 # ON 单字符 tokenizer 当前只产出 '='/'<'/'>'，但表里多键允许 _parse_join_predicate
 # 以后支持 '!='/'<='/'>=' 而无须再次触碰 _eval_fold_expr。
-_OPERATIONS = {
-    "=": lambda a, b: a == b,
-    "!=": lambda a, b: a != b,
-    ">": lambda a, b: a > b,
-    "<": lambda a, b: a < b,
-    ">=": lambda a, b: a >= b,
-    "<=": lambda a, b: a <= b,
-}
+# ``_OPERATIONS`` is imported from ``tinydb.executor`` so the join executor
+# and the single-table executor share one source of truth for op dispatch.
 
 
 # 行类型：list[Any]；schema 类型：list[str]
