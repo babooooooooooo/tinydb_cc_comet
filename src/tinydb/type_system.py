@@ -176,8 +176,22 @@ class _IntCodec:
                 4: (">i", -(2**31), 2**31),
                 8: (">q", -(2**63), 2**63)}[self.width]
 
+    def _check_bounds(self, value: int) -> None:
+        """Shared bounds check used by both ``encode_py`` and ``decode_bytes``
+        so round-trip is symmetric (T6 / 2026-07-28 review-fixes).
+
+        ``self._spec`` uses ``(fmt, lo, hi)`` where ``hi`` is the EXCLUSIVE
+        upper bound (``hi = 2**31`` for INT means the inclusive upper bound
+        of the 32-bit signed range is ``hi - 1 = 2**31 - 1``). Encode and
+        decode must agree on the same check.
+        """
+        _, lo, hi = self._spec
+        if not (lo <= value < hi):
+            raise CodecError(f"{self.name} out of range: {value}")
+
     def encode_py(self, value):
         self.validate(value)
+        self._check_bounds(value)
         fmt, _, _ = self._spec
         return struct.pack(fmt, value)
 
@@ -185,7 +199,9 @@ class _IntCodec:
         if offset + self.width > len(buf):
             raise ValueError(f"{self.name} decode truncated at offset {offset}")
         fmt, _, _ = self._spec
-        return struct.unpack_from(fmt, buf, offset)[0], offset + self.width
+        value = struct.unpack_from(fmt, buf, offset)[0]
+        self._check_bounds(value)
+        return value, offset + self.width
 
     def parse_literal(self, text, params):
         v = int(text)
@@ -195,9 +211,7 @@ class _IntCodec:
     def validate(self, value):
         if not isinstance(value, int) or isinstance(value, bool):
             raise CodecError(f"expected int for {self.name}, got {type(value).__name__}")
-        _, lo, hi = self._spec
-        if not (lo <= value < hi):
-            raise CodecError(f"{self.name} out of range: {value}")
+        self._check_bounds(value)
 
 
 class _TextCodec:
@@ -296,6 +310,11 @@ class _VarcharCodec:
         if n > self.max_len:
             raise CodecError(f"{self.name}({self.max_len}) length {n} exceeds max")
     def encode_py(self, value):
+        # NOTE: DV7 — encode does NOT consult _check on the bytes length here;
+        # instead it goes through validate() which calls _check on UTF-8 byte
+        # length of the Python str. DV7 is a documented do-not-fix (see
+        # type-codec-and-catalog-cleanup closeout 2026-07-21, DV7). This
+        # preserves existing encode behavior; T6 fixes only the decode side.
         self.validate(value)
         data = value.encode("utf-8")
         return struct.pack(">H", len(data)) + data
@@ -305,6 +324,13 @@ class _VarcharCodec:
         (n,) = struct.unpack_from(">H", buf, offset)
         if offset + 2 + n > len(buf):
             raise ValueError(f"VARCHAR({self.max_len}) payload truncated (need {n} bytes)")
+        # T6 (2026-07-28 review-fixes): enforce max length on the decoded
+        # text bytes to make round-trip symmetric with the encode side. A
+        # VARCHAR(10) cell that physically holds an 11-byte payload would
+        # otherwise be silently returned by decode, breaking the contract
+        # after schema migrations. See T-TC-03 in the 2026-07-28 codec
+        # review report.
+        self._check(n)
         return buf[offset + 2 : offset + 2 + n].decode("utf-8"), offset + 2 + n
     def parse_literal(self, text, params):
         v = text[1:-1].replace("''", "'"); self._check(len(v.encode("utf-8")))
@@ -319,6 +345,9 @@ class _CharCodec(_VarcharCodec):
     """CHAR(N): fixed-length UTF-8 string with right-space padding (SQL92 PAD SPACE)."""
     name = "CHAR"
     def encode_py(self, value):
+        # NOTE: DV7 — same as _VarcharCodec.encode_py, the encode side is
+        # left untouched on purpose (T6 only fixes the decode side via
+        # inherited _VarcharCodec.decode_bytes).
         self.validate(value)
         d = value.encode("utf-8")
         return struct.pack(">H", self.max_len) + (value + " " * (self.max_len - len(d))).encode("utf-8")
