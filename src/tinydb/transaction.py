@@ -37,22 +37,46 @@ class Transaction:
     def write_page(self, page_id: int, data: bytes) -> None:
         if self._state != TxnState.ACTIVE:
             raise InvalidTxnState(self.id, self._state)
-        self.pending_writes[page_id] = data
+        # WAL-first: the WAL record must be appended BEFORE pending_writes
+        # is mutated. A crash between the two operations must not leave a
+        # phantom main-page write planned without a recoverable WAL entry.
         self._pager.wal_append_page(self.id, page_id, data)
+        self.pending_writes[page_id] = data
 
     def commit(self) -> None:
         if self._state != TxnState.ACTIVE:
             raise InvalidTxnState(self.id, self._state)
-        for pid, data in self.pending_writes.items():
-            self._pager.write_main_page(pid, data)
-        self._pager.wal_append_commit(self.id)
-        self._pager.fsync_main()
-        self._pager.wal_truncate_before(self.id)
-        self._state = TxnState.COMMITTED
+        try:
+            # Write-ahead protocol: COMMIT record + fsync barrier FIRST so
+            # a crash that loses the main file still has a recoverable
+            # COMMIT in the WAL. Recovery's ``_apply_committed`` will then
+            # re-apply the pending page writes idempotently.
+            self._pager.wal_append_commit(self.id)
+            self._pager.fsync_wal()
+            # Now apply the pending writes to the main file.
+            for pid, data in self.pending_writes.items():
+                self._pager.write_main_page(pid, data)
+            self._pager.fsync_main()
+            # Truncate with id+1 so the COMMIT record itself survives —
+            # a future crash replay will encounter it as a no-op (recovery
+            # only applies pages from transactions with status="committed";
+            # the reapply of already-applied pages is harmless).
+            self._pager.wal_truncate_before(self.id + 1)
+            self._state = TxnState.COMMITTED
+        except Exception:
+            # Mid-commit failure: never leave the transaction ACTIVE. The
+            # caller will see the original exception, and any partial
+            # main-file writes will be either overwritten by the next
+            # transaction or repaired on recovery replay.
+            self._state = TxnState.ROLLED_BACK
+            raise
 
     def rollback(self) -> None:
         if self._state != TxnState.ACTIVE:
             raise InvalidTxnState(self.id, self._state)
         self._pager.wal_append_rollback(self.id)
-        self._pager.wal_truncate_before(self.id)
+        # id+1 mirrors commit() — keep the ROLLBACK record itself so
+        # recovery can observe the explicit rollback status (skipping
+        # any pending page writes for this txn_id).
+        self._pager.wal_truncate_before(self.id + 1)
         self._state = TxnState.ROLLED_BACK

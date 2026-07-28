@@ -179,6 +179,21 @@ class Wal:
             self._file.close()
             self._file = None
 
+    def fsync(self) -> None:
+        """Force the WAL file to disk. Idempotent.
+
+        This is the durability barrier required by the write-ahead
+        protocol: after a COMMIT record is appended, ``fsync`` must
+        succeed before any main-file page write is allowed, so a crash
+        that loses the main file still leaves the COMMIT record visible
+        in the WAL for recovery to replay.
+
+        No-op for in-memory mode (no file backing the buffer).
+        """
+        if self._file is not None:
+            self._file.flush()
+            os.fsync(self._file.fileno())
+
     def __enter__(self) -> "Wal":
         return self
 
