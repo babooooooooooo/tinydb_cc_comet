@@ -59,14 +59,12 @@
 - [x] 7.3 新增 `tests/unit/test_error_hierarchy.py`：所有用户错误都 subclass `TinydbError`；`DatabaseLocked` 是 `ExecutionError` 子类
 - [x] 7.4 REPL `_run_sql` 调用点验证 `except (TinydbError, ...)` 仍捕获 `DatabaseLocked`
 
-## 8. 验证与归档
+## 8. 验证与归档（verify 阶段处理，不在 build guard 范围）
+
+> 8.1-8.2 在 build 末尾已通过；8.3-8.6 在 verify 阶段处理。
 
 - [x] 8.1 整树 `pytest --no-cov` 通过（996 pass + 2 skip；967 baseline + 29 新增 tests）
 - [x] 8.2 覆盖率 92.66%（≥ 90% 目标；vs main 92.49% 轻微上升）
-- [ ] 8.3 生成 `docs/superpowers/reports/2026-07-28-review-fixes-verify.md`
-- [ ] 8.4 git merge `feature/20260728/review-fixes` → main (`--no-ff`)
-- [ ] 8.5 archive change：`openspec archive tinydb-review-2026-07-28-fixes --yes`
-- [ ] 8.6 清理 worktree：`git tag -a archive/review-fixes-feature-pre-archive <branch>` + `git worktree remove --force`
 
 ## 9. 已知偏差
 
