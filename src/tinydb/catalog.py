@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
-from tinydb.errors import InvalidDatabaseFile
+from tinydb.errors import CatalogCorrupt, InvalidDatabaseFile
 from tinydb.pager import PAGE_SIZE
 
 if TYPE_CHECKING:
@@ -207,12 +207,22 @@ def _table_entry_dict(ti: TableInfo) -> dict:
 def _serialize_segments(catalog: "Catalog") -> list[bytes]:
     """Serialize ``catalog`` into one or more JSON segments.
 
-    Each segment is the JSON encoding of a partial ``{"tables": {...}}``
-    payload that fits inside ``CHAIN_THRESHOLD`` bytes. The greedy split
-    packs whole table entries into the current segment until the next
-    entry would push it past the threshold; that entry starts the next
-    segment. Empty catalogs produce a single empty ``{}`` segment so
-    :func:`_unpack_chain` always has at least one page to walk.
+    The contract on every returned segment: ``len(seg) <= CHAIN_BODY_SIZE``.
+    Three cases:
+
+    1. Empty catalog → single ``b"{}"`` sentinel segment.
+    2. Whole-catalog payload fits in :data:`CHAIN_THRESHOLD` → single segment.
+    3. Otherwise, greedy pack whole tables into segments, capped at
+       ``CHAIN_THRESHOLD`` per segment. If a SINGLE table's serialized
+       payload exceeds ``CHAIN_BODY_SIZE`` (so it can never fit in one
+       segment regardless of neighbors), that table is split by columns
+       via :func:`_split_single_table`; its metadata (``root_page_id`` /
+       ``next_page_id``) lives on the FIRST sub-segment so the unpacker
+       can recover the full schema on first sight and append columns
+       from continuation segments.
+
+    Greedy + column-split together guarantee the body-budget invariant
+    that :func:`_pack_chain` relies on (no silent truncation required).
     """
     if not catalog.tables:
         return [b"{}"]
@@ -224,21 +234,145 @@ def _serialize_segments(catalog: "Catalog") -> list[bytes]:
     if len(full) <= CHAIN_THRESHOLD:
         return [full]
 
-    # Greedy split by table entries.
     segments: list[bytes] = []
     cur_tables: dict = {}
-    for name, ti in catalog.tables.items():
-        cur_tables[name] = _table_entry_dict(ti)
+
+    def _flush_cur() -> None:
+        """Append the current ``cur_tables`` (if non-empty) as a segment.
+
+        Raises :class:`CatalogCorrupt` if the size budget is violated —
+        indicates a bug in this algorithm, since greedy packing should
+        always keep us under ``CHAIN_BODY_SIZE``.
+        """
+        if not cur_tables:
+            return
         seg = json.dumps({"tables": cur_tables}, separators=(",", ":")).encode("utf-8")
-        if len(seg) > CHAIN_THRESHOLD and len(cur_tables) > 1:
-            # Pop the entry that overflowed; it starts the next segment.
-            cur_tables.pop(name)
-            seg = json.dumps({"tables": cur_tables}, separators=(",", ":")).encode("utf-8")
-            segments.append(seg)
-            cur_tables = {name: _table_entry_dict(ti)}
-    if cur_tables:
-        seg = json.dumps({"tables": cur_tables}, separators=(",", ":")).encode("utf-8")
+        if len(seg) > CHAIN_BODY_SIZE:
+            raise CatalogCorrupt(
+                f"greedy-pack produced {len(seg)}-byte segment "
+                f"(> CHAIN_BODY_SIZE {CHAIN_BODY_SIZE})"
+            )
         segments.append(seg)
+        cur_tables.clear()
+
+    for name, ti in catalog.tables.items():
+        entry = _table_entry_dict(ti)
+        # Check whether this table alone fits in one segment. If not, we
+        # must split-by-columns: flush current greedy buffer, then emit
+        # the sub-segments.
+        single_seg_payload = json.dumps(
+            {"tables": {name: entry}}, separators=(",", ":")
+        ).encode("utf-8")
+        if len(single_seg_payload) > CHAIN_BODY_SIZE:
+            _flush_cur()
+            for sub in _split_single_table(name, entry):
+                if len(sub) > CHAIN_BODY_SIZE:
+                    raise CatalogCorrupt(
+                        f"_split_single_table emitted {len(sub)}-byte "
+                        f"sub-segment (> CHAIN_BODY_SIZE {CHAIN_BODY_SIZE})"
+                    )
+                segments.append(sub)
+            continue
+
+        # Normal greedy-add path: include this table in the running buffer;
+        # if the buffer would exceed CHAIN_THRESHOLD, flush and restart with
+        # just this table in the buffer.
+        candidate = dict(cur_tables)
+        candidate[name] = entry
+        candidate_seg = json.dumps(
+            {"tables": candidate}, separators=(",", ":")
+        ).encode("utf-8")
+        if len(candidate_seg) <= CHAIN_THRESHOLD:
+            cur_tables[name] = entry
+        else:
+            # Flush current buffer (without this entry) and start a new one
+            # holding this entry alone.
+            _flush_cur()
+            cur_tables[name] = entry
+
+    # Final flush of any trailing buffer.
+    _flush_cur()
+    return segments
+
+
+def _split_single_table(name: str, entry: dict) -> list[bytes]:
+    """Split ONE oversized table entry into multiple column-chunk segments.
+
+    Each returned segment is a self-contained JSON document of the form
+    ``{"tables": {<name>: {"schema": [...], "root_page_id": ..., "next_page_id": ...}}}``
+    where the schema list holds a disjoint subset of the original columns
+    in original order. The FIRST segment carries the table's
+    ``root_page_id`` and ``next_page_id``; continuation segments carry
+    only their column slice so :func:`_unpack_chain` can recover the
+    metadata on first sight and append columns on each subsequent sight.
+
+    Raises :class:`CatalogCorrupt` if a SINGLE column exceeds
+    ``CHAIN_BODY_SIZE`` (no further splitting is possible). That case is
+    a known project limitation, documented alongside MVP_LIMITATIONS.
+    """
+    columns = entry.get("schema", [])
+    if not columns:
+        raise CatalogCorrupt(
+            f"cannot split single-table entry {name!r}: no columns"
+        )
+
+    # Pre-flight: can a single column ever fit in a segment?
+    sample = json.dumps(
+        {"tables": {name: {"schema": [columns[0]],
+                            "root_page_id": entry["root_page_id"],
+                            "next_page_id": entry["next_page_id"]}}},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(sample) > CHAIN_BODY_SIZE:
+        raise CatalogCorrupt(
+            f"single column {columns[0]['name']!r} of table {name!r} "
+            f"serializes to {len(sample)} bytes (> CHAIN_BODY_SIZE "
+            f"{CHAIN_BODY_SIZE}); cannot split by columns"
+        )
+
+    segments: list[bytes] = []
+    chunk: list = []
+
+    def _emit() -> None:
+        """Append ``chunk`` as a segment."""
+        if not chunk:
+            return
+        # Metadata lives on the FIRST segment only so the unpacker can
+        # initialize the TableInfo record; continuation segments carry
+        # just the column slice (recovered via the merge logic).
+        if not segments:
+            seg_entry = {
+                "schema": list(chunk),
+                "root_page_id": entry["root_page_id"],
+                "next_page_id": entry["next_page_id"],
+            }
+        else:
+            seg_entry = {"schema": list(chunk)}
+        seg = json.dumps(
+            {"tables": {name: seg_entry}}, separators=(",", ":")
+        ).encode("utf-8")
+        segments.append(seg)
+        chunk.clear()
+
+    for col in columns:
+        trial = list(chunk) + [col]
+        trial_seg = json.dumps(
+            {"tables": {name: (
+                {"schema": trial,
+                 "root_page_id": entry["root_page_id"],
+                 "next_page_id": entry["next_page_id"]}
+                if not segments
+                else {"schema": trial}
+            )}},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(trial_seg) <= CHAIN_BODY_SIZE:
+            chunk.append(col)
+        else:
+            _emit()
+            chunk.append(col)
+
+    _emit()
     return segments
 
 
@@ -249,20 +383,27 @@ def _pack_chain(catalog: "Catalog") -> list[bytes]:
 
         bytes 0..4   : ``next_page_id`` (u32 big-endian). 0 = tail.
         bytes 4..16  : reserved (zeros).
-        bytes 16..   : zero-padded JSON payload (truncated to CHAIN_BODY_SIZE).
+        bytes 16..   : zero-padded JSON payload (exactly the segment bytes).
 
     The ``next_page_id`` field is set to 0 for every page; callers that
     allocate chain pages in sequence (e.g. :func:`Pager.write_catalog_chain`)
     are responsible for patching the head and intermediate pages' next_id
     after the chain is written.
+
+    Raises :class:`CatalogCorrupt` if :func:`_serialize_segments` ever
+    emits a segment larger than :data:`CHAIN_BODY_SIZE` — the previous
+    silent truncation in this function masked a real data-loss bug and
+    is intentionally removed. ``_serialize_segments`` is responsible for
+    honouring the body budget via greedy pack + column-split.
     """
     pages: list[bytes] = []
     for seg in _serialize_segments(catalog):
-        # Truncate oversize segments defensively; greedy split guarantees
-        # each segment <= CHAIN_THRESHOLD < CHAIN_BODY_SIZE, so this is a
-        # no-op in practice but prevents silent corruption if a future
-        # caller widens CHAIN_THRESHOLD.
-        body = seg[:CHAIN_BODY_SIZE]
+        if len(seg) > CHAIN_BODY_SIZE:
+            raise CatalogCorrupt(
+                f"_serialize_segments produced {len(seg)}-byte segment "
+                f"(limit {CHAIN_BODY_SIZE}); chain integrity broken"
+            )
+        body = seg
         payload = b"\x00\x00\x00\x00" + b"\x00" * (CHAIN_SEG_HEADER - 4) + body
         if len(payload) < PAGE_SIZE:
             payload += b"\x00" * (PAGE_SIZE - len(payload))
@@ -273,6 +414,15 @@ def _pack_chain(catalog: "Catalog") -> list[bytes]:
 def _unpack_chain(pager: "Pager") -> "Catalog":
     """Walk the catalog overflow chain starting at ``CHAIN_HEAD_PAGE`` and
     reconstruct a :class:`Catalog`.
+
+    Segment-to-table merge semantics: when the same table name appears
+    across multiple chain segments (column-split for very wide tables —
+    see :func:`_split_single_table`), the ``schema`` lists are
+    concatenated in chain-order so that all columns are preserved. The
+    ``root_page_id`` / ``next_page_id`` of the FIRST segment carrying
+    that table name is used (continuation segments do not repeat these
+    fields, by design). Tables that appear in only one segment round
+    trip unchanged.
     """
     cat = Catalog()
     tables: dict = {}
@@ -292,9 +442,9 @@ def _unpack_chain(pager: "Pager") -> "Catalog":
         if body:
             data = json.loads(body)
             for name, info in data.get("tables", {}).items():
-                tables[name] = info
+                _merge_table_entry(tables, name, info)
         pid = next_id
-    # Materialize TableInfo objects (last-writer-wins on duplicates).
+    # Materialize TableInfo objects.
     for name, info in tables.items():
         cols = tuple(_load_column(c_) for c_ in info["schema"])
         cat.tables[name] = TableInfo(
@@ -304,6 +454,41 @@ def _unpack_chain(pager: "Pager") -> "Catalog":
             next_page_id=_dec_int(info["next_page_id"]),
         )
     return cat
+
+
+def _merge_table_entry(tables: dict, name: str, info: dict) -> None:
+    """Accumulate a table entry read from one chain segment.
+
+    First sighting initializes the entry (with whatever fields are
+    present). Subsequent sightings (continuation segments produced by
+    :func:`_split_single_table`) append their columns to the existing
+    schema list and update metadata fields if present.
+    """
+    if name not in tables:
+        # First sighting: copy fields verbatim. Continuation segments
+        # may omit metadata entirely (only carry schema), so tolerate
+        # missing keys here.
+        tables[name] = {
+            "schema": list(info.get("schema", [])),
+            "root_page_id": info.get("root_page_id"),
+            "next_page_id": info.get("next_page_id"),
+        }
+        return
+    existing = tables[name]
+    # Append this segment's columns to the running schema list. Order
+    # is preserved by iterating segments in chain order (head → tail).
+    new_schema = info.get("schema", [])
+    if new_schema:
+        existing.setdefault("schema", []).extend(new_schema)
+    # Continuation segments may carry refreshed metadata; if so,
+    # prefer the latest (defensive — by construction the FIRST sighting
+    # holds the metadata and continuations do not override it, but the
+    # rule "first writes win for metadata, latest writes win for schema"
+    # is robust to either ordering).
+    if "root_page_id" in info and info["root_page_id"] is not None:
+        existing["root_page_id"] = info["root_page_id"]
+    if "next_page_id" in info and info["next_page_id"] is not None:
+        existing["next_page_id"] = info["next_page_id"]
 
 
 # Patch Catalog with a classmethod that walks the chain. Done here (after
