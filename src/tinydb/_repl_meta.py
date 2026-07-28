@@ -125,16 +125,16 @@ def _cmd_read(args: List[str], db: Database, state: ReplState) -> bool:
     from tinydb._repl_io import _is_unterminated
     from tinydb.repl import _run_sql
 
-    buf = ""
+    buf_parts: list[str] = []
     for char in text:
-        buf += char
-        if char == ";" and not _is_unterminated(buf):
+        buf_parts.append(char)
+        if char == ";" and not _is_unterminated(buf := "".join(buf_parts)):
             # Route through the same executor as interactive SQL so
             # SELECTs render rows via format_rows() and the active
             # timer/format/color settings are honoured.
             _run_sql(db, buf.strip(), state)
-            buf = ""
-    if buf.strip():
+            buf_parts = []
+    if "".join(buf_parts).strip():
         print(
             f"ERROR: unterminated statement at EOF in {path_str}",
             file=sys.stderr,

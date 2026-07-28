@@ -1,0 +1,13 @@
+{
+  "change": "tinydb-review-2026-07-28-fixes",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "13ea264b85dbe61801843f51298b3274d92abc34feaa5856cb1ef3ce29be849f",
+  "files": [
+    { "path": "openspec/changes/tinydb-review-2026-07-28-fixes/proposal.md", "sha256": "ec164c3881909fb9142719392d3bd1132d44d51d94819be696af17e11f60598f" },
+    { "path": "openspec/changes/tinydb-review-2026-07-28-fixes/design.md", "sha256": "bc508be5ce92be537a467761d0f9c6cb814807b522dc55329a820a6e488de58e" },
+    { "path": "openspec/changes/tinydb-review-2026-07-28-fixes/tasks.md", "sha256": "99abaecde43651cc242a156520ce5ba714d0744d9325ca04e5afba16c38628ea" }
+  ]
+}

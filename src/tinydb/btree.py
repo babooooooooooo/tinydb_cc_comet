@@ -183,8 +183,13 @@ class BTree:
         try:
             payload = leaf.serialize()
         except ValueError:
-            # Split leaf at median.
+            # Split leaf at median. Capture original next-pointer first so the
+            # new right leaf can be chained into the original right-neighbor
+            # slot. Without this patch, when a non-rightmost leaf splits the
+            # chain breaks at the new right leaf (next_leaf_id stays 0) and
+            # range() loses every leaf past the split point.
             mid = len(leaf.keys) // 2
+            original_next = leaf.next_leaf_id  # 0 if leaf was rightmost; else right neighbor pid
             left = LeafNode(
                 keys=leaf.keys[:mid],
                 values=leaf.values[:mid],
@@ -194,7 +199,7 @@ class BTree:
             right = LeafNode(
                 keys=leaf.keys[mid:],
                 values=leaf.values[mid:],
-                next_leaf_id=0,
+                next_leaf_id=original_next,  # FIX: chain into original right neighbor
                 tombstones=leaf.tombstones[mid:],
             )
             # Allocate new right page; left stays at leaf_pid.

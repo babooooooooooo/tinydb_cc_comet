@@ -79,6 +79,18 @@ class PageFull(TinydbError):
 class CatalogFull(TinydbError): ...
 
 
+class CatalogCorrupt(TinydbError):
+    """Raised when the catalog's overflow chain or segmentation is malformed.
+
+    Surfaced by :func:`tinydb.catalog._pack_chain` when a caller (or a
+    future regression in :func:`tinydb.catalog._serialize_segments`)
+    produces a segment too large to fit in a single chain-page body
+    (``CHAIN_BODY_SIZE``). The previous behavior silently truncated such
+    segments, hiding data loss; this exception makes that pathology
+    observable.
+    """
+
+
 # --- tinydb-join-query (T3): name resolution errors -----------------------
 
 class ResolutionError(ExecutionError):
@@ -142,10 +154,14 @@ class IncompatibleKeyTypes(ResolutionError):
 
 # --- tinydb-concurrency-control (T1): DatabaseLocked ----------------------
 
-class DatabaseLocked(TinydbError):
+class DatabaseLocked(ExecutionError):
     """DB 文件被另一进程持有时抛出的异常.
 
     通过 fcntl.flock 做跨进程独占锁.``path`` 属性标识被争用的 DB 文件.
+    Non-breaking: subclass ``ExecutionError`` (which subclasses
+    ``TinydbError``), so callers using ``except TinydbError`` still catch
+    this. Aligns DatabaseLocked with other user-recoverable errors
+    (``ConstraintViolation`` / ``ResolutionError`` etc.).
     """
 
     def __init__(self, path: str) -> None:

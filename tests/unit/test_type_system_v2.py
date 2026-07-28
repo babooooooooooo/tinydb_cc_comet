@@ -474,3 +474,70 @@ def test_char_codec_overflow_raises_codec_error():
     codec = codec_for("CHAR", (5,))
     with pytest.raises(CodecError, match="length 6 exceeds max"):
         codec.encode_py("x" * 6)
+
+
+# ---------------------------------------------------------------------------
+# T6 (2026-07-28 review-fixes): codec round-trip symmetry.
+# Design Doc §6.2-6.3.
+# - _IntCodec.encode_py and _IntCodec.decode_bytes both invoke a shared
+#   _check_bounds helper (32-bit signed [-2^31, 2^31-1]).
+# - _VarcharCodec.decode_bytes and _CharCodec.decode_bytes both call _check
+#   on the decoded length (DV7 leaves encode_py side untouched, comment only).
+# ---------------------------------------------------------------------------
+
+
+def test_int_codec_symmetric_bounds_encode():
+    """T6: _IntCodec.encode_py must use the shared _check_bounds helper.
+    Reuses the public contract: 2**31 is outside [-2**31, 2**31-1] for INT.
+    """
+    codec = lookup("INT")
+    with pytest.raises(CodecError):
+        codec.encode_py(2**31)
+
+
+def test_int_codec_symmetric_bounds_decode():
+    """T6: _IntCodec.decode_bytes must invoke _check_bounds for round-trip
+    symmetry with encode_py. We monkey-patch _check_bounds to raise so the
+    test fails RED if decode skips the helper.
+
+    The 4-byte signed decode result is intrinsically within [-2**31, 2**31-1]
+    (Python's struct.unpack_from guarantees this), so we cannot construct a
+    real out-of-range 4-byte payload. Monkey-patching proves the call path.
+    """
+    codec = lookup("INT")
+
+    def boom(value):
+        raise CodecError("simulated _check_bounds failure")
+
+    codec._check_bounds = boom
+    try:
+        with pytest.raises(CodecError, match="simulated _check_bounds failure"):
+            codec.decode_bytes(b"\x00\x00\x00\x01", 0)
+    finally:
+        # Restore by removing the patched attribute so the codec reuses the
+        # class-level method (the singleton has no instance-level original).
+        try:
+            del codec._check_bounds
+        except AttributeError:
+            pass
+
+
+def test_varchar_decode_enforces_max_length():
+    """T6: _VarcharCodec.decode_bytes must call _check(len(text)).
+    A payload of length max_len+1 must raise CodecError (was silently
+    accepted before T6).
+    """
+    codec = codec_for("VARCHAR", (10,))
+    overlong = b"\x00\x0b" + b"x" * 11  # 2-byte length prefix = 11, then 11 bytes
+    with pytest.raises(CodecError, match="length 11 exceeds max"):
+        codec.decode_bytes(overlong, 0)
+
+
+def test_char_decode_enforces_max_length():
+    """T6: _CharCodec.decode_bytes (inherited from _VarcharCodec) must call
+    _check(len(text)). A payload of length max_len+1 must raise CodecError.
+    """
+    codec = codec_for("CHAR", (5,))
+    overlong = b"\x00\x06" + b"x" * 6  # length prefix = 6, then 6 bytes
+    with pytest.raises(CodecError, match="length 6 exceeds max"):
+        codec.decode_bytes(overlong, 0)

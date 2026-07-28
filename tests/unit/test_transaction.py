@@ -42,8 +42,11 @@ def test_txn_commit_writes_pages_then_appends_commit_then_fs_syncs_then_truncate
     txn.commit()
     assert pager.write_main_page.call_count == 2
     pager.wal_append_commit.assert_called_once_with(1)
+    pager.fsync_wal.assert_called_once()
     pager.fsync_main.assert_called_once()
-    pager.wal_truncate_before.assert_called_once_with(1)
+    # id+1 keeps the commit record itself in the WAL so recovery can
+    # observe the COMMIT status on replay.
+    pager.wal_truncate_before.assert_called_once_with(2)
     assert txn.state == TxnState.COMMITTED
 
 
@@ -62,7 +65,8 @@ def test_txn_rollback_appends_rollback_then_truncates_and_never_writes_main():
     txn.rollback()
     pager.write_main_page.assert_not_called()
     pager.wal_append_rollback.assert_called_once_with(1)
-    pager.wal_truncate_before.assert_called_once_with(1)
+    # id+1 keeps the rollback record itself so recovery can observe it.
+    pager.wal_truncate_before.assert_called_once_with(2)
     assert txn.state == TxnState.ROLLED_BACK
 
 

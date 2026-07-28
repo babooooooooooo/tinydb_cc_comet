@@ -79,24 +79,44 @@ class Database:
         # polluted by partial Database setup.
         self.pager = Pager(str(path), locking=locking)
         self._is_closed: bool = False
-        self.catalog = Catalog.from_bytes(self.pager.read_page(1))
-        # IndexManager: B+tree indexes per (table, col). For pre-existing
-        # tables (post-reopen) rebuild via full scan so lookups reflect
-        # on-disk data; for fresh tables INSERTs populate incrementally.
-        self.index_manager = IndexManager(self.pager)
-        self.executor = Executor(self.pager, self.catalog, self.index_manager)
-        self.executor._database_ref = self  # mid-session CREATE TABLE hooks
-        self._index_pagers: Dict[Tuple[str, str], Any] = {}
-        # Existing tables: rebuild indexes, install _IndexPager wrappers,
-        # and re-discover each table's data-page chain (extension pages
-        # past the root aren't persisted in the in-memory list).
-        for ti in self.catalog.tables.values():
-            self.index_manager.rebuild_for_table(ti)
-            self._install_index_pagers(ti.name)
-            self.executor._table_data_pages[ti.name] = (
-                self.executor._rebuild_data_pages_from_chain(ti)
-            )
-        # New tables mid-session install wrappers via _exec_create_table.
+        try:
+            self.catalog = Catalog.from_bytes(self.pager.read_page(1))
+            # IndexManager: B+tree indexes per (table, col). For pre-existing
+            # tables (post-reopen) rebuild via full scan so lookups reflect
+            # on-disk data; for fresh tables INSERTs populate incrementally.
+            self.index_manager = IndexManager(self.pager)
+            self.executor = Executor(self.pager, self.catalog, self.index_manager)
+            self.executor._database_ref = self  # mid-session CREATE TABLE hooks
+            self._index_pagers: Dict[Tuple[str, str], Any] = {}
+            # Existing tables: rebuild indexes, install _IndexPager wrappers,
+            # and re-discover each table's data-page chain (extension pages
+            # past the root aren't persisted in the in-memory list).
+            for ti in self.catalog.tables.values():
+                self.index_manager.rebuild_for_table(ti)
+                self._install_index_pagers(ti.name)
+                self.executor._table_data_pages[ti.name] = (
+                    self.executor._rebuild_data_pages_from_chain(ti)
+                )
+            # New tables mid-session install wrappers via _exec_create_table.
+        except Exception:
+            # Design doc §4.2 / §4.4 R4.2: anything after Pager construction
+            # must release the OS flock deterministically. Without this
+            # try/except, the partial Database object would leak the flock
+            # until refcount/GC ran (non-deterministic).
+            #
+            # Use try/finally semantics for the close() call so a close()
+            # failure does NOT mask the ORIGINAL exception that triggered
+            # the cleanup path. Mark _is_closed=True unconditionally so
+            # any future defensive code that inspects a half-built
+            # Database sees a coherent state.
+            self._is_closed = True
+            try:
+                self.pager.close()
+            except Exception:
+                # Swallow close() failure — the original exception is more
+                # informative and is the one the user actually needs to see.
+                pass
+            raise
 
     def _acquire_lock(self):
         """Return the lock context manager (or nullcontext when disabled).
@@ -119,12 +139,15 @@ class Database:
         ``execute()`` are safe.
 
         Raises ``RuntimeError("Database is closed")`` if the Database has
-        been closed; the guard runs *before* lock acquisition so a
-        closed Database never re-enters the locked region.
+        been closed. The check runs *inside* the lock (design doc §T4
+        a) so a concurrent ``close()`` cannot interleave between the
+        guard and the locked region — pre-fix the check ran outside the
+        lock and a closed Pager could be reached, raising a non-RuntimeError
+        error (e.g. ``ValueError("mmap closed or invalid")``).
         """
-        if self._is_closed:
-            raise RuntimeError("Database is closed")
         with self._acquire_lock():
+            if self._is_closed:
+                raise RuntimeError("Database is closed")
             tokens = tokenize(sql)
             stmts = parse(tokens)
 
@@ -156,11 +179,12 @@ class Database:
 
         Acquires the per-instance ``threading.RLock`` (when ``locking=True``).
         Raises ``RuntimeError("Database is closed")`` if the Database has
-        been closed.
+        been closed. The check runs *inside* the lock (design doc §T4
+        a) for the same race-safety reason as ``execute()``.
         """
-        if self._is_closed:
-            raise RuntimeError("Database is closed")
         with self._acquire_lock():
+            if self._is_closed:
+                raise RuntimeError("Database is closed")
             from tinydb.errors import ExecutionError as _EE
             from tinydb.plan import build_plan as _bp
             stmts = parse(tokenize(sql))
@@ -172,7 +196,7 @@ class Database:
             return _bp(last, self.catalog)
 
     def close(self) -> None:
-        """Flush + close the Pager. Idempotent; ``close()`` runs even if ``flush()`` raises.
+        """Flush + close the Pager. Idempotent; runs even if flush/close raises.
 
         Acquires the per-instance ``threading.RLock`` (when ``locking=True``)
         to ensure no other thread is mid-``execute()`` when we tear down
@@ -180,10 +204,16 @@ class Database:
         underlying ``fcntl.flock`` is released by ``Pager.close()`` which
         closes the file descriptor.
 
-        Sets ``_is_closed`` after ``Pager.close()`` returns (or raises)
-        so subsequent ``execute()`` / ``explain_plan()`` calls raise
+        ``_is_closed`` is set inside the lock (design doc §T4 a, c) so
+        subsequent ``execute()`` / ``explain_plan()`` calls raise
         ``RuntimeError("Database is closed")`` without re-entering the
         teardown path. Repeated ``close()`` is a no-op.
+
+        Even if ``Pager.flush()`` or ``Pager.close()`` raises (transient
+        I/O error), ``_is_closed`` is set so the retry path stays open:
+        the caller can ``db.close()`` again later once the underlying
+        issue clears, and the next ``Database(path)`` instance will
+        proceed normally.
         """
         with self._acquire_lock():
             if self._is_closed:
@@ -191,8 +221,11 @@ class Database:
             try:
                 self.pager.flush()
             finally:
+                # Mark closed BEFORE pager.close() so a Pager.close()
+                # failure does not leave the Database in an "open but
+                # torn down" state where execute() races with close().
+                self._is_closed = True
                 self.pager.close()
-                self._is_closed = True  # mark closed regardless of flush outcome
 
     def __enter__(self) -> "Database":
         return self

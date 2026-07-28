@@ -348,6 +348,21 @@ class Pager:
         # for in-memory WAL we don't need separate fsync.
         self.flush()
 
+    def fsync_wal(self) -> None:
+        """Durability barrier for the WAL file. Idempotent.
+
+        Used by :meth:`Transaction.commit` between ``wal_append_commit``
+        and any main-file page write: the COMMIT record must be on
+        stable storage before the page writes are attempted, so a crash
+        that loses the main file still leaves the COMMIT record visible
+        in the WAL for recovery to replay (idempotently).
+
+        No-op until the WAL handle is opened (lazy); no-op for
+        in-memory mode (the :class:`Wal` layer short-circuits).
+        """
+        if self._wal is not None:
+            self._wal.fsync()
+
     def write_main_page(self, page_id: int, data: bytes) -> None:
         """Write ``data`` to the main file at the slot for ``page_id``.
 
