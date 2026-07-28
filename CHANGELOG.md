@@ -78,6 +78,11 @@ All notable changes to tinydb are documented in this file. Versions follow
 
 - `NO_COLOR` and `TERM=dumb` disable interactive syntax highlighting and ANSI
   color output.
+
+### Changed
+
+- `tinydb.errors.DatabaseLocked` 现在是 `ExecutionError` 的子类（之前 `TinydbError`）。
+  Non-breaking: `except TinydbError` 仍捕获。父类变更与 ConstraintViolation 等用户错误一致。
 - Existing `tinydb-repl --database PATH` usage and the `~/.tinydb_history`
   history path remain supported in rich mode.
 
