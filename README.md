@@ -1,8 +1,16 @@
-# tinydb (v0.1.1)
+# tinydb (v0.20)
 
-> Minimal embedded relational database for teaching and embedding. ACID, 15 SQL types, stdlib REPL.
+> Minimal embedded relational database for teaching and embedding. ACID, multi-table JOIN, process/thread concurrency, 15 SQL types, stdlib REPL.
 
-> **Status:** MVP complete with full ACID (`tinydb-acid`), 15 column types (`tinydb-types`), and a zero-dependency REPL (`tinydb-repl`). The latest patch (**v0.1.1**) closes seven contract gaps in the prior codec-exception-consistency fix: every codec's `encode_py` now delegates to `self.validate(value)`, so `CodecError` is the single canonical exception for *every* type-level validation failure, including `DECIMAL` precision overflow, `CHAR(N)` length overflow, and indexed-path WHERE predicates with out-of-range literals.
+> **Status:** v0.20 累计修复 9 个 HIGH review findings (`tinydb-review-2026-07-28-fixes`，架构级 hardening)，叠加前期交付：
+>
+> - **v0.1.1 codec-exception-consistency** — `CodecError` 单一收敛：每个 codec 的 `encode_py` 第一行 `self.validate(value)`，覆盖 `DECIMAL` 精度溢出、`CHAR(N)` 长度溢出、索引路径 `WHERE` 字面量越界
+> - **v0.2 multi-table JOIN** — `INNER` / `LEFT` / `RIGHT` / `FULL` / `CROSS` + `ON` / `USING` / `NATURAL` + 别名 / 限定列
+> - **v0.2 并发控制** — 进程内 `RLock` 串行化 `execute()`、跨进程 `fcntl.flock` 互斥 DB 文件
+> - **2026-07-24 cli-enhancements** — REPL 12 个元命令（`.exit` / `.quit` / `.help` / `.tables` / `.schema` / `.read` / `.explain` / `.indexes` / `.stats` / `.timer` / `.format` / `.color`）；输出格式 `table` / `csv` / `json`；交互循环 / 历史持久化
+> - **2026-07-27 review-fixes** — 9 项 HIGH 架构 hardening：WAL write-ahead commit ordering、B+tree right-leaf next_leaf_id 补 patch、catalog overflow 真分裂（greedy）、Database race-safe `_is_closed` + init cleanup、REPL `_cmd_read` O(n²) → O(n)、codec round-trip 对称性 + VARCHAR/CHAR decode 边界、`DatabaseLocked(ExecutionError)` 异常层次对齐
+>
+> 累计：**993 passed + 2 skipped + 3 deselected** (默认 `-m 'not slow'`)、coverage **92.66%**。
 >
 > See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for the full scope.
 
@@ -10,9 +18,11 @@
 
 - **DDL/DML**: `CREATE TABLE` / `DROP TABLE` / `INSERT` / `SELECT` / `UPDATE` / `DELETE` against a typed catalog
 - **15 column types** — `INT` / `SMALLINT` / `BIGINT` / `FLOAT` / `DOUBLE` / `REAL` / `TEXT` / `VARCHAR(N)` / `CHAR(N)` / `BOOL` / `DECIMAL(p, s)` / `DATE` / `TIME` / `TIMESTAMP`
-- **ACID**: autocommit + explicit `BEGIN` … `COMMIT` / `ROLLBACK`, WAL-backed crash recovery, single-statement atomicity
-- **REPL**: zero external runtime deps, multi-line SQL, reverse-generated `.schema`, `.tables`, `.read <file>`
-- **Single source of truth for type contracts**: every codec speaks `encode_py` / `decode_bytes` / `validate`. `encode_py` *always* delegates to `self.validate(value)` as its first statement (v0.1.1), so any wrong-type / out-of-range / wrong-precision input surfaces through one canonical `CodecError` — no `AttributeError`, `TypeError`, or `OverflowError` leak.
+- **ACID**: autocommit + explicit `BEGIN` … `COMMIT` / `ROLLBACK`, WAL-backed crash recovery with write-ahead commit ordering (v0.20), single-statement atomicity
+- **Multi-table JOIN**: `INNER` / `LEFT` / `RIGHT` / `FULL` / `CROSS`, `ON` / `USING (col)` / `NATURAL`, aliases with qualified columns, plus `GROUP BY` / `HAVING` / `ORDER BY` / `LIMIT` / `OFFSET`
+- **Concurrency**: in-process `threading.RLock` serializing `execute()` + cross-process `fcntl.flock` for DB files. `DatabaseLocked` raised on contention
+- **REPL**: zero external runtime deps, multi-line SQL, 12 元命令 (`.exit`/`.help`/`.tables`/`.schema`/`.read`/`.explain`/`.indexes`/`.stats`/`.timer`/`.format`/`.color`/`.quit`), output formats `table`/`csv`/`json`
+- **Single source of truth for type contracts**: every codec speaks `encode_py` / `decode_bytes` / `validate`. `encode_py` *always* delegates to `self.validate(value)` as its first statement (v0.1.1), so any wrong-type / out-of-range / wrong-precision input surfaces through one canonical `CodecError` — no `AttributeError`, `TypeError`, or `OverflowError` leak. Round-trip symmetry hardened in v0.20.
 - **Pure Python 3.11+ stdlib** — no pip dependencies for users; `hypothesis` / `pytest-cov` are dev-time only
 
 ## Quick start
@@ -45,7 +55,8 @@ Guarantees:
 
 Not provided:
 
-- **Isolation / concurrency** — single-Executor, single-process. Concurrent transactions from multiple processes or threads are not supported.
+- **True multi-version isolation** — single-Executor model with `threading.RLock` for in-process serialization and `fcntl.flock` for cross-process file-level exclusion. Reader-writer split (MVCC) is not implemented; long writers block all readers and vice versa.
+- **Lock-free read concurrency** — all `execute()` (including SELECT) take the same writer lock. See [§ Concurrency](#concurrencyv02-新增) for the opt-out path.
 
 Usage:
 
@@ -77,7 +88,7 @@ with tinydb.Database("data.db") as db:
 
 Schema upgrade notes:
 
-- v3-schema `.db` files (`tinydb-acid`) are the current on-disk format.
+- v3-schema `.db` files (`tinydb-acid`) are the current on-disk format. v3 files written under v0.20's hardened WAL ordering are forward-compatible with this release.
 - v2-schema files (from `tinydb-engine-v2`) auto-upgrade on open if no `<db>.wal` sidecar is present.
 - v2-schema files WITH a WAL sidecar raise `SchemaMismatch` and require explicit migration.
 
@@ -233,40 +244,71 @@ See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) § tinydb-types for the
 
 ```bash
 pip install -e ".[dev]"
-pytest -q             # 689 tests
+pytest -q             # 993 tests (+ 2 skipped, 3 perf benchmarks deselected via -m 'not slow')
+pytest -m slow        # perf benchmarks (REPL _cmd_read 5 MB / 16 MB load)
 pyflakes src/tinydb/
 pytest --cov=src/tinydb
 ```
 
-Coverage is enforced at 85% minimum (configured in `pyproject.toml`); current measurement is ~93.5%.
+Coverage is enforced at 85% minimum (configured in `pyproject.toml`); current measurement is ~92.66%.
 
-Reports for each release change are at `docs/superpowers/reports/`; the latest is `2026-07-21-v0.1.1-verify.md`.
+Reports for each release change are at `docs/superpowers/reports/`; the latest is `2026-07-28-review-fixes-verify.md`.
 
-## Module map (current sizes)
+## Review-fixes hardening (v0.20)
+
+v0.20 是一次架构级 review-driven hardening change，闭合 9 个 HIGH review findings（`tinydb-review-2026-07-28-fixes`，已 merged via `ab25451`）：
+
+| # | 模块 | 简述 |
+|---|------|------|
+| 1 | `wal.py` | WAL write-ahead commit ordering：commit record 必须在 `fsync(main)` 之前落盘，避免 crash 时丢已提交事务 |
+| 2 | `btree.py` | B+tree split 后立刻 patch `right.next_leaf_id` 指向新的最右 leaf，否则 range scan 跨 split 边界会漏行 |
+| 3 | `catalog.py` | catalog overflow 真分裂 (greedy)，multi-page catalog 不再依赖 `_table_data_pages` workaround |
+| 4 | `database.py` | Database 关闭是 race-safe 的 `_is_closed` 标志位 + `__init__` 失败路径上已部分构造资源的清理 |
+| 5 | `_repl_meta.py` | REPL `.read` 大文件加载：`buf += char` (O(n²)) → list-append + `''.join()` (O(n))；新增 3 个 perf 基准 (`-m slow`) |
+| 6 | `type_system.py` | codec round-trip 对称性 + `VARCHAR/CHAR` decode 边界严格化（不再静默接受超过声明长度的字节） |
+| 7 | `database.py` | `DatabaseLocked` 继承链对齐：`DatabaseLocked(Exception) → DatabaseLocked(ExecutionError)`，让统一 `except ExecutionError` 能捕获跨进程争用 |
+| 8 | `database.py` | `close()` 后 `execute()` / `explain_plan()` 抛 `RuntimeError("Database is closed")`；`close()` 自身幂等 |
+| 9 | `type_system.py` | `codec_for(type_name, params)` 参数校验：参数缺失 / 类型错误直接抛 `CodecError`，不再返回 None 后被 caller 误用 |
+
+每项修复都对应 RED → GREEN 测试 (`tests/unit/...` / `tests/integration/...`)；3 个 deviation 记录在 `tasks.md §9` + verify report：
+- DV-T5-1: perf bounds 放宽 (5MB<1.5s / 16MB<6s) + `slow` marker
+- DV-T5-2: perf test 用 monkey-patched `_run_sql` 隔离 buffer-build path
+- DV-T4-flake: `close_during_execute` 在全负载下 1/996 transient flake
+
+详细 RED → GREEN 证据见 `docs/superpowers/reports/2026-07-28-review-fixes-verify.md`。
+
+## Module map (v0.20 sizes)
 
 | Module | Lines | Responsibility |
 |---|---|---|
-| `type_system.py` | 431 | 15 codecs + registry; one canonical `CodecError` for all type-level validation failures; every codec's `encode_py` delegates to `self.validate(value)` (v0.1.1) |
-| `pager.py` | 491 | 4 KB page I/O, mmap + BufferedRandom paths, free-list |
+| `type_system.py` | 458 | 15 codecs + registry; canonical `CodecError`; every codec's `encode_py` delegates to `self.validate(value)` (v0.1.1) |
+| `pager.py` | 539 | 4 KB page I/O, mmap + BufferedRandom paths, free-list |
 | `slotted_page.py` | 208 | single-page layout, slotted record pointers, overflow chain |
-| `catalog.py` | 305 | table/column metadata; `Catalog.create_table` rejects non-Column inputs |
-| `tokenizer.py` | 162 | SQL lexer including typed-literal prefixes |
-| `parser.py` | 1192 | recursive descent parser + AST nodes |
-| `executor.py` | 1717 | AST → storage; split into 4 helper modules for transportability |
+| `catalog.py` | 496 | table/column metadata; overflow chain 真分裂 (v0.20 review-fixes T3) |
+| `tokenizer.py` | 168 | SQL lexer including typed-literal prefixes |
+| `parser.py` | 1467 | recursive descent parser + AST nodes |
+| `plan.py` | 221 | logical query-plan nodes for `.explain` |
+| `resolver.py` | 592 | name resolution (alias + qualified column + JOIN) |
+| `executor.py` | 1771 | AST/plan → storage; split into 4 helper modules |
 | `_executor_drop.py` | 192 | DROP-table helper |
 | `_executor_snapshot.py` | 48 | snapshot/replay glue |
 | `_executor_sort.py` | 56 | ORDER BY helpers |
 | `_index_pager.py` | 96 | B+tree page allocation wrapper (workaround for page-id collision) |
+| `_join_executor.py` | 678 | JOIN 物化宽行 + USING/NATURAL Coalesce |
 | `_schema.py` | 92 | typed schema introspection |
-| `btree.py` | 339 | B+tree (split, range, delete) |
-| `index_manager.py` | 74 | B+tree lifetime, executor index maintenance hook |
+| `btree.py` | 344 | B+tree (split with right.next_leaf_id patch, range, delete) — v0.20 review-fixes T2 |
+| `index_manager.py` | 79 | B+tree lifetime, executor index maintenance hook |
 | `row_codec.py` | 70 | row-level (page payload) wire format |
-| `wal.py` | 185 | write-ahead log records |
-| `recovery.py` | 88 | WAL → Pager replay on open |
-| `transaction.py` | 58 | active-txn bookkeeping |
-| `database.py` | 133 | public `Database.execute()` surface |
-| `repl.py` | 302 | zero-dep interactive shell |
-| `errors.py` | 79 | `TinydbError`, `ConstraintViolation`, `InvalidDatabaseFile`, … |
+| `wal.py` | 200 | write-ahead log records (write-ahead commit ordering hardening, v0.20 review-fixes T1) |
+| `recovery.py` | 93 | WAL → Pager replay on open |
+| `transaction.py` | 82 | active-txn bookkeeping |
+| `database.py` | 253 | public `Database.execute()` surface; race-safe `_is_closed` + init cleanup (v0.20 review-fixes T4);`DatabaseLocked(ExecutionError)` parent alignment (v0.20 T7) |
+| `_filelock.py` | 68 | cross-process `fcntl.flock` adapter |
+| `repl.py` | 184 | zero-dep interactive shell |
+| `_repl_io.py` | 255 | REPL stateless input/output abstraction (CLI change) |
+| `_repl_format.py` | 84 | table/csv/json output formatting (CLI change) |
+| `_repl_meta.py` | 327 | 12 元命令 dispatcher (`_cmd_*` handlers, list-join optimized in v0.20 T5) |
+| `errors.py` | 169 | `TinydbError`, `ConstraintViolation`, `DatabaseLocked`, `ResolutionError`, ... |
 
 See [`docs/MVP_LIMITATIONS.md`](docs/MVP_LIMITATIONS.md) for what MVP does NOT do.
 
@@ -297,7 +339,7 @@ USING / NATURAL 合并键采用 `Coalesce` 语义：左边非空取左边，否�
 tinydb 默认提供双层并发保护：
 
 1. **进程内**: `Database` 实例持有 `threading.RLock`（粗粒度、可重入），串行化 `execute()` 与 `explain_plan()`。
-2. **跨进程**: `Pager` 在打开 DB 文件后立即获取 `fcntl.flock(LOCK_EX)`，第二个进程打开同一 DB 文件立即抛 `DatabaseLocked`。
+2. **跨进程**: `Pager` 在打开 DB 文件后立即获取 `fcntl.flock(LOCK_EX)`，第二个进程打开同一 DB 文件立即抛 `DatabaseLocked`。`DatabaseLocked` 自 v0.20 起继承 `tinydb.errors.ExecutionError` (review-fixes T7)，因此 `except ExecutionError` 也能捕获跨进程争用。
 
 ### 用法
 
